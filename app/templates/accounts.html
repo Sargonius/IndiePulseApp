@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Аккаунты</h2>
+
+<section>
+<h3>Discord</h3>
+<form hx-post="/api/discord/webhook" hx-target="#discord_status" hx-swap="innerHTML">
+	<input type="text" name="url" value="{{ discord_webhook }}" placeholder="https://discord.com/api/webhooks/..." style="width: 520px;" />
+	<button type="submit">Сохранить</button>
+	<button type="button" hx-post="/api/discord/test" hx-target="#discord_status" hx-swap="innerHTML">Отправить тест</button>
+</form>
+<div id="discord_status"></div>
+
+<details style="margin-top:8px;">
+    <summary>Как получить Discord Webhook URL?</summary>
+    <ol>
+        <li>В Discord откройте нужный канал (текстовый).</li>
+        <li>Настройки канала → Интеграции → Вебхуки → Новый вебхук.</li>
+        <li>Скопируйте URL вебхука и вставьте в поле выше.</li>
+    </ol>
+</details>
+</section>
+
+<section style="margin-top:16px;">
+<h3>X / Twitter</h3>
+<form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
+	<div>
+		<label>Client ID</label><br/>
+		<input type="text" name="x_client_id" value="{{ x_client_id }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Client Secret</label><br/>
+		<input type="text" name="x_client_secret" value="{{ x_client_secret }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Redirect URI</label><br/>
+		<input type="text" name="x_redirect_uri" value="{{ x_redirect_uri }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>API Key (Consumer Key)</label><br/>
+		<input type="text" name="x_api_key" value="{{ x_api_key }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>API Secret (Consumer Secret)</label><br/>
+		<input type="text" name="x_api_secret" value="{{ x_api_secret }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>OAuth1 Access Token</label><br/>
+		<input type="text" name="x_oauth_token" value="{{ x_oauth_token }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>OAuth1 Access Token Secret</label><br/>
+		<input type="text" name="x_oauth_token_secret" value="{{ x_oauth_token_secret }}" style="width: 360px;" />
+	</div>
+	<button type="submit">Сохранить X настройки</button>
+</form>
+<div id="x_status"></div>
+
+<details style="margin-top:8px;">
+	<summary>Где взять X Client ID/Secret?</summary>
+	<ol>
+		<li>Перейдите в <a href="https://developer.twitter.com" target="_blank">Twitter Developer Portal</a> → Project → App → Keys & tokens.</li>
+		<li>Redirect URI: используйте http://127.0.0.1:8000/api/accounts/callback/x для локальной разработки (или публичный redirect при необходимости).</li>
+		<li>Включите OAuth 2.0 (with PKCE). Нужны scope: tweet.read, tweet.write, users.read, offline.access.</li>
+		<li>Media upload (изображения/видео): нужны также Consumer API Key/Secret и OAuth1 Access Token/Secret (Keys & tokens → User authentication settings → OAuth 1.0a).</li>
+	</ol>
+</details>
+<div style="margin-top:6px;">
+	<a href="#" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Получить ссылку для авторизации X</a>
+	<div id="x_auth"></div>
+	<form hx-post="/api/x/test_tweet" hx-target="#x_tweet_status" hx-swap="innerHTML" style="margin-top:6px;">
+		<input type="text" name="text" value="Hello from IndiePulse" style="width:360px;" />
+		<button type="submit">Твитнуть (тест)</button>
+	</form>
+	<div id="x_tweet_status"></div>
+</div>
+</section>
+<section style="margin-top:16px;">
+<h3>YouTube Shorts</h3>
+<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
+	<div>
+		<label>Client ID</label><br/>
+		<input type="text" name="yt_client_id" value="{{ yt_client_id }}" style="width:360px;" />
+	</div>
+	<div>
+		<label>Client Secret</label><br/>
+		<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" style="width:360px;" />
+	</div>
+	<div>
+		<label>Access Token</label><br/>
+		<input type="text" name="yt_access_token" value="{{ yt_access_token }}" style="width:360px;" />
+	</div>
+	<div>
+		<label>Refresh Token</label><br/>
+		<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" style="width:360px;" />
+	</div>
+	<button type="submit">Сохранить YouTube</button>
+</form>
+<div id="yt_status"></div>
+
+<details style="margin-top:8px;">
+  <summary>Как подключить YouTube API?</summary>
+  <ol>
+    <li>Откройте Google Cloud Console → Создайте проект → Включите API YouTube Data API v3.</li>
+    <li>Создайте OAuth client (Desktop App) → получите Client ID/Secret.</li>
+    <li>Получите Access/Refresh токены (через любое локальное приложение/скрипт). Вставьте сюда.</li>
+  </ol>
+</details>
+</section>
+<section style="margin-top:16px;">
+<h3>VK</h3>
+<form hx-post="/api/settings/save" hx-target="#vk_status" hx-swap="innerHTML">
+	<div>
+		<label>Client ID</label><br/>
+		<input type="text" name="vk_client_id" value="{{ vk_client_id }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Client Secret</label><br/>
+		<input type="text" name="vk_client_secret" value="{{ vk_client_secret }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Group ID (для публикации в группу)</label><br/>
+		<input type="text" name="vk_group_id" value="{{ vk_group_id }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Redirect URI</label><br/>
+		<input type="text" name="vk_redirect_uri" value="{{ vk_redirect_uri }}" style="width: 360px;" />
+	</div>
+	<div>
+		<label>Access Token (если используете вручную)</label><br/>
+      <input type="password" name="vk_access_token" value="" placeholder="{{ vk_token_hint }}" style="width: 360px;" />
+	</div>
+	<button type="submit">Сохранить VK настройки</button>
+</form>
+<div id="vk_status"></div>
+<div style="margin-top:6px;">
+	<a href="#" hx-get="/api/accounts/connect/vk" hx-target="#vk_auth" hx-swap="innerHTML">Получить ссылку для авторизации</a>
+	<div id="vk_auth"></div>
+	<div style="margin-top:6px;">
+		<a href="#" hx-get="/api/vk/implicit_url" hx-target="#vk_implicit" hx-swap="innerHTML">Получить ссылку для получения Access Token (Implicit)</a>
+		<div id="vk_implicit"></div>
+	</div>
+	<form hx-post="/api/vk/test_post" hx-target="#vk_post_status" hx-swap="innerHTML" style="margin-top:6px;">
+		<input type="text" name="text" value="Test from IndiePulse" style="width:360px;" />
+		<button type="submit">Пост в группу (тест)</button>
+	</form>
+	<div id="vk_post_status"></div>
+    <form hx-post="/api/vk/check_token" hx-target="#vk_token_status" hx-swap="innerHTML" style="margin-top:6px;">
+        <input type="text" name="token" placeholder="Проверить токен" style="width:360px;" />
+        <button type="submit">Проверить токен</button>
+    </form>
+    <div id="vk_token_status"></div>
+</div>
+
+<details style="margin-top:8px;">
+	<summary>Где взять VK Client ID/Secret и Group ID?</summary>
+	<ol>
+		<li>Перейдите в <a href="https://dev.vk.com" target="_blank">VK for Developers</a> → Мои приложения → Создать.</li>
+		<li>Скопируйте <b>Client ID</b> и <b>Client Secret</b> из настроек приложения.</li>
+		<li>Group ID: откройте страницу вашей группы, в адресе будет <code>club123456</code> — число и есть ID.</li>
+		<li>Redirect URI: можно не использовать и ввести <b>Access Token</b> вручную ниже, если сайт на localhost не проходит проверку.</li>
+	</ol>
+</details>
+</section>
+{% endblock %}
+

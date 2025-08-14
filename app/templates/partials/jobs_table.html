@@ -1,0 +1,28 @@
+<table id="jobs_table" border="1" cellpadding="6" cellspacing="0">
+	<tr>
+		<th>ID</th>
+		<th>Вид</th>
+		<th>Статус</th>
+		<th>Попытка</th>
+		<th>Последняя ошибка</th>
+		<th>Создано</th>
+		<th>Обновлено</th>
+	</tr>
+	{% for j in jobs %}
+	<tr>
+		<td>{{ j.id }}</td>
+		<td>{{ j.kind }}</td>
+		<td>
+			{% if j.status == 'done' %}<span style="color:green">done</span>
+			{% elif j.status == 'error' %}<span style="color:red">error</span>
+			{% elif j.status == 'running' %}<span style="color:orange">running</span>
+			{% else %}{{ j.status }}{% endif %}
+		</td>
+		<td>{{ j.attempt }}</td>
+		<td>{{ j.last_error or '' }}</td>
+		<td>{{ j.created_at }}</td>
+		<td>{{ j.updated_at }}</td>
+	</tr>
+	{% endfor %}
+</table>
+

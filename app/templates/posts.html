@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Публикации</h2>
+<div>
+    <button hx-get="/posts/partial" hx-target="#posts_table" hx-swap="outerHTML">Обновить</button>
+    <button hx-get="/posts/partial" hx-target="#posts_table" hx-swap="outerHTML" hx-trigger="every 3s">Автообновление</button>
+    <button id="refresh_metrics_btn">Обновить метрики</button>
+</div>
+<div id="posts_table" hx-get="/posts/partial" hx-trigger="load" hx-swap="outerHTML"></div>
+
+<script>
+document.getElementById('refresh_metrics_btn').addEventListener('click', async () => {
+  const rows = document.querySelectorAll('#posts_table tr');
+  const ids = [];
+  rows.forEach((tr, idx) => {
+    if (idx === 0) return; // skip header
+    const idCell = tr.querySelector('td');
+    if (idCell) {
+      const id = idCell.textContent.trim();
+      if (id) ids.push(id);
+    }
+  });
+  for (const id of ids) {
+    fetch(`/api/metrics/refresh?post_id=${encodeURIComponent(id)}`);
+  }
+  // refresh table after a short delay
+  setTimeout(() => { htmx.trigger('#posts_table', 'refresh'); }, 1200);
+});
+</script>
+{% endblock %}
+

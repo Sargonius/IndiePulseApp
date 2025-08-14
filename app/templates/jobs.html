@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Журнал задач</h2>
+<div>
+	<button hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML">Обновить</button>
+	<button hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML" hx-trigger="every 3s">Автообновление</button>
+</div>
+<div id="jobs_table" hx-get="/jobs/partial" hx-trigger="load" hx-swap="outerHTML"></div>
+{% include 'partials/jobs_table.html' %}
+{% endblock %}
+

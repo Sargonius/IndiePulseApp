@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Новость</h2>
+<form method="post" action="/news" enctype="multipart/form-data" id="news_form">
+	<div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
+		<div>
+			<label>Видео (обычное, VK/X/Discord)</label><br/>
+			<div id="drop_zone_normal" style="width:320px;height:180px;border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#666;cursor:pointer;">
+				Перетащите файл сюда или кликните (normal)
+			</div>
+			<input type="file" id="media_input_normal" accept="video/*,image/*" style="display:none;" />
+            <div id="preview_normal" style="margin-top:8px;"></div>
+            <input type="hidden" name="media_normal" id="media_normal_hidden" value="{{ draft.media_normal_path if draft else '' }}" />
+
+			<div style="height:12px;"></div>
+			<label>Видео (вертикальное 9:16, Shorts/TikTok)</label><br/>
+			<div id="drop_zone_vertical" style="width:320px;height:180px;border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#666;cursor:pointer;">
+				Перетащите файл сюда или кликните (vertical)
+			</div>
+			<input type="file" id="media_input_vertical" accept="video/*,image/*" style="display:none;" />
+            <div id="preview_vertical" style="margin-top:8px;"></div>
+            <input type="hidden" name="media_vertical" id="media_vertical_hidden" value="{{ draft.media_vertical_path if draft else '' }}" />
+		</div>
+		<div style="min-width:520px;">
+			<label>Текст (RU)</label><br/>
+            <textarea name="text_ru" id="text_ru" rows="6" cols="80" required>{{ draft.text_ru if draft else '' }}</textarea>
+			<div style="margin:6px 0;">
+                <button type="button" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Обновить перевод</button>
+                <span id="tr_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Перевод...</span>
+			</div>
+            <label>Перевод (EN)</label><br/>
+            <textarea id="text_en" name="text_en" rows="6" cols="80">{{ draft.text_en if draft else '' }}</textarea>
+            <div id="x_counter" style="font-size:12px;color:#666;margin-top:4px;">X: 0/280</div>
+			<div style="margin-top:6px;">
+				<label>Хэштеги (через пробел)</label><br/>
+                <input type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#indiedev #gamedev" style="width: 520px;" />
+                <button type="button" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_target" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
+                <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Генерация...</span>
+				<div id="tags_target"></div>
+			</div>
+		</div>
+	</div>
+	<div style="margin-top:10px;">
+		<label>Платформы</label><br/>
+		<label><input type="checkbox" name="platforms" value="vk" /> VK</label>
+		<label><input type="checkbox" name="platforms" value="x" /> X/Twitter</label>
+		<label><input type="checkbox" name="platforms" value="discord" /> Discord</label>
+		<label><input type="checkbox" name="platforms" value="yt" /> YouTube Shorts</label>
+	</div>
+	<div>
+		<label>Дата/время (ISO, опционально)</label><br/>
+		<input type="text" name="scheduled_at" placeholder="2025-08-01T12:00:00" />
+	</div>
+	<div style="margin-top:12px;">
+    <button type="submit">Сохранить и поставить в очередь</button>
+    <button type="button" id="clear_draft_btn" style="margin-left:8px;">Очистить черновик</button>
+	</div>
+</form>
+
+<div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;">
+  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+    <div style="font-weight:600;margin-bottom:8px;">X / Twitter (превью)</div>
+    <div style="display:flex;gap:8px;align-items:flex-start;">
+      <div style="width:36px;height:36px;border-radius:50%;background:#ccc;"></div>
+      <div style="flex:1;">
+        <div style="font-weight:600;">@You</div>
+        <div id="x_preview_text" style="white-space:pre-wrap;"></div>
+        <div id="x_preview_media" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+    <div style="font-weight:600;margin-bottom:8px;">VK (превью)</div>
+    <div style="display:flex;gap:8px;align-items:flex-start;">
+      <div style="width:40px;height:40px;border-radius:4px;background:#4a76a8;"></div>
+      <div style="flex:1;">
+        <div style="font-weight:600;">Ваша группа</div>
+        <div id="vk_preview_text" style="white-space:pre-wrap;"></div>
+        <div id="vk_preview_media" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+  
+</div>
+
+<script>
+// Auto-save draft on change (debounced)
+const form = document.getElementById('news_form');
+let saveTimer;
+function queueSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        const fd = new FormData();
+        fd.append('text_ru', document.getElementById('text_ru').value);
+        fd.append('text_en', document.getElementById('text_en').value);
+        const tags = form.querySelector('[name="tags"]').value;
+        fd.append('tags', tags);
+        const sched = form.querySelector('[name="scheduled_at"]').value;
+        fd.append('scheduled_at', sched);
+        const plats = Array.from(form.querySelectorAll('input[name="platforms"]:checked')).map(x => x.value);
+        plats.forEach(p => fd.append('platforms', p));
+        fetch('/api/draft/news', { method: 'POST', body: fd });
+    }, 400);
+}
+form.addEventListener('input', queueSave);
+form.addEventListener('change', queueSave);
+const dzN = document.getElementById('drop_zone_normal');
+const inN = document.getElementById('media_input_normal');
+const prevN = document.getElementById('preview_normal');
+const hiddenN = document.getElementById('media_normal_hidden');
+
+const dzV = document.getElementById('drop_zone_vertical');
+const inV = document.getElementById('media_input_vertical');
+const prevV = document.getElementById('preview_vertical');
+const hiddenV = document.getElementById('media_vertical_hidden');
+const xPrevText = document.getElementById('x_preview_text');
+const vkPrevText = document.getElementById('vk_preview_text');
+const xPrevMedia = document.getElementById('x_preview_media');
+const vkPrevMedia = document.getElementById('vk_preview_media');
+const xCounter = document.getElementById('x_counter');
+const clearBtn = document.getElementById('clear_draft_btn');
+
+function setPreview(target, file) {
+    target.innerHTML = '';
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    if (file.type && file.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.style.maxWidth = '320px';
+        img.style.maxHeight = '180px';
+        target.appendChild(img);
+    } else if (file.type && file.type.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.src = url;
+        video.controls = true;
+        video.style.maxWidth = '320px';
+        video.style.maxHeight = '180px';
+        target.appendChild(video);
+    } else {
+        target.textContent = 'Выбранный файл не является изображением или видео.';
+    }
+}
+
+function bindDrop(dz, input, target, slot, hiddenField) {
+    dz.addEventListener('click', () => input.click());
+    dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.style.borderColor = '#333'; });
+    dz.addEventListener('dragleave', () => { dz.style.borderColor = '#999'; });
+    dz.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dz.style.borderColor = '#999';
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            input.files = e.dataTransfer.files;
+            setPreview(target, input.files[0]);
+            const fd = new FormData();
+            fd.append('media', input.files[0]);
+            fd.append('slot', slot);
+            fetch('/api/uploads/draft_media', { method: 'POST', body: fd }).then(r => r.json()).then(j => {
+                if (j.media_path) hiddenField.value = j.media_path;
+            });
+        }
+    });
+    input.addEventListener('change', () => {
+        if (input.files[0]) {
+            setPreview(target, input.files[0]);
+            const fd = new FormData();
+            fd.append('media', input.files[0]);
+            fd.append('slot', slot);
+            fetch('/api/uploads/draft_media', { method: 'POST', body: fd }).then(r => r.json()).then(j => {
+                if (j.media_path) hiddenField.value = j.media_path;
+            });
+        }
+    });
+}
+
+bindDrop(dzN, inN, prevN, 'normal', hiddenN);
+bindDrop(dzV, inV, prevV, 'vertical', hiddenV);
+
+function updateTextPreviews() {
+  const ru = document.getElementById('text_ru').value;
+  const en = document.getElementById('text_en').value;
+  xPrevText.textContent = en;
+  vkPrevText.textContent = ru;
+}
+
+function updateXCounter() {
+  const en = document.getElementById('text_en').value;
+  const len = [...en].length;
+  xCounter.textContent = `X: ${len}/280`;
+  xCounter.style.color = len > 280 ? 'red' : '#666';
+}
+
+document.getElementById('text_ru').addEventListener('input', () => { updateTextPreviews(); });
+document.getElementById('text_en').addEventListener('input', () => { updateTextPreviews(); updateXCounter(); });
+updateTextPreviews();
+updateXCounter();
+
+clearBtn.addEventListener('click', async () => {
+  document.getElementById('text_ru').value = '';
+  document.getElementById('text_en').value = '';
+  const tagsInput = document.querySelector('input[name="tags"]');
+  if (tagsInput) tagsInput.value = '';
+  const sched = document.querySelector('input[name="scheduled_at"]');
+  if (sched) sched.value = '';
+  document.querySelectorAll('input[name="platforms"]').forEach(ch => ch.checked = false);
+  preview.innerHTML = '';
+  xPrevMedia.innerHTML = '';
+  vkPrevMedia.innerHTML = '';
+  updateTextPreviews();
+  updateXCounter();
+  await fetch('/api/draft/clear', { method: 'POST' });
+});
+</script>
+{% endblock %}
+

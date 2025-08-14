@@ -1,0 +1,26 @@
+﻿<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>IndiePulse</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+	<header>
+		<h1>IndiePulse</h1>
+		<nav>
+			<a href="/">Главная</a> |
+			<a href="/news">Новость</a> |
+			<a href="/posts">Публикации</a> |
+			<a href="/jobs">Задачи</a> |
+			<a href="/accounts">Аккаунты</a>
+		</nav>
+		<hr/>
+	</header>
+	<main>
+		{% block content %}{% endblock %}
+	</main>
+</body>
+</html>

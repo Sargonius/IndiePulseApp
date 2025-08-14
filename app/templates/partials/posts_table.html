@@ -1,0 +1,37 @@
+<table id="posts_table" border="1" cellpadding="6" cellspacing="0" hx-get="/posts/partial" hx-trigger="refresh" hx-swap="outerHTML">
+	<tr>
+		<th>ID</th>
+		<th>Платформа</th>
+		<th>Статус</th>
+		<th>Бриф</th>
+		<th>Запланировано</th>
+		<th>Опубликовано</th>
+		<th>URL</th>
+		<th>Лайки</th>
+		<th>Ретвиты/Репосты</th>
+		<th>Ответы/Комменты</th>
+		<th>Цитаты/Просмотры</th>
+	</tr>
+	{% for p in posts %}
+	<tr>
+		<td>{{ p.id }}</td>
+		<td>{{ p.platform_text }}</td>
+		<td>
+			{% set s = p.status_text %}
+			{% if s == 'done' %}<span style="color:green">done</span>
+			{% elif s == 'error' %}<span style="color:red">error</span>
+			{% elif s == 'running' %}<span style="color:orange">running</span>
+			{% else %}{{ s }}{% endif %}
+		</td>
+		<td>{{ p.brief_id }}</td>
+		<td>{{ p.scheduled_at or '' }}</td>
+		<td>{{ p.published_at or '' }}</td>
+		<td>{% if p.platform_url %}<a href="{{ p.platform_url }}" target="_blank">link</a>{% else %}—{% endif %}</td>
+		<td>{{ p.m_like if p.m_like is not none else '—' }}</td>
+		<td>{{ p.m_repost if p.m_repost is not none else '—' }}</td>
+		<td>{{ p.m_reply if p.m_reply is not none else '—' }}</td>
+		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
+	</tr>
+	{% endfor %}
+</table>
+
