@@ -38,7 +38,15 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     # Compose message and include media if any
                     from app.models.models import Brief
                     brief = session.get(Brief, post.brief_id)
-                    text = (brief.text_en or brief.text_ru or '') if brief else '[IndiePulse] New post'
+                    # Exclude hashtags for Discord
+                    base_text = (brief.text_en or brief.text_ru or '') if brief else '[IndiePulse] New post'
+                    tags = ''
+                    try:
+                        import json as _json
+                        tags = ' ' + ' '.join([t for t in (brief.tags_json or '').split() if t.startswith('#')]) if brief and brief.tags_json else ''
+                    except Exception:
+                        tags = ''
+                    text = base_text  # no hashtags for discord by request
                     media_path = getattr(brief, 'media_path', None) if brief else None
                     if media_path:
                         p = media_path.replace('\\', '/')
@@ -79,6 +87,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             from app.models.models import Brief
             brief = session.get(Brief, post.brief_id)
             text = (brief.text_en or brief.text_ru or '') if brief else ''
+            # Include hashtags on X
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    text = (text + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
             media_id: Optional[str] = None
             # prefer normal video/image if provided via job payload override or draft hidden field
             media_rel: Optional[str] = None
@@ -180,6 +194,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             from app.models.models import Brief
             brief = session.get(Brief, post.brief_id)
             text = (brief.text_ru or brief.text_en or '') if brief else ''
+            # Include hashtags on VK
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    text = (text + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
             attachment = None
             # prefer normal media for VK (or override from job payload)
             media_rel_vk: Optional[str] = None
@@ -289,12 +309,131 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
+        elif str(post.platform) in ('PlatformEnum.fb_ru', 'fb_ru', 'PlatformEnum.fb_en', 'fb_en'):
+            # Facebook Page posting (separate RU / EN pages)
+            from app.services.facebook_client import FacebookClient
+            from app.services.settings import load_settings
+            from app.models.models import Brief
+            cfg = load_settings()
+            brief = session.get(Brief, post.brief_id)
+            is_ru = str(post.platform).endswith('fb_ru') or str(post.platform) == 'fb_ru'
+            page_id = (cfg.get('fb_ru_page_id') if is_ru else cfg.get('fb_en_page_id')) or ''
+            page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+            if not page_id or not page_token:
+                post.status = PostStatusEnum.error
+                post.error_text = 'fb_missing_page_or_token'
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = 'fb_missing_page_or_token'
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+        elif str(post.platform) in ('PlatformEnum.reddit', 'reddit'):
+            # Reddit EN only
+            from app.services.reddit_client import RedditClient
+            from app.services.settings import load_settings
+            from app.models.models import Brief
+            cfg = load_settings()
+            cid = (cfg.get('reddit_client_id') or '').strip()
+            csec = (cfg.get('reddit_client_secret') or '').strip()
+            uname = (cfg.get('reddit_username') or '').strip()
+            pwd = (cfg.get('reddit_password') or '').strip()
+            sub = (cfg.get('reddit_subreddit_en') or '').strip()
+            if not (cid and csec and uname and pwd and sub):
+                post.status = PostStatusEnum.error
+                post.error_text = 'reddit_not_configured'
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = 'reddit_not_configured'
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+            brief = session.get(Brief, post.brief_id)
+            title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or 'Post from IndiePulse')[:290]
+            body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    body = (body + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
+            try:
+                rc = RedditClient(cid, csec, uname, pwd)
+                permalink = rc.submit_text(sub, title=title, body=body)
+                post.platform_url = f"https://reddit.com{permalink}" if permalink else None
+            except Exception as exc:
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+            message = (brief.text_ru if is_ru else brief.text_en) or brief.text_en or brief.text_ru or ''
+            # include hashtags for FB
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    message = (message + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
+            media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+            path_abs = None
+            if media_rel:
+                p = media_rel.replace('\\','/')
+                if not p.startswith('media/'):
+                    p = f"media/{p}"
+                import os as _os
+                path_abs = _os.path.abspath(p)
+            try:
+                fb = FacebookClient(page_token)
+                if path_abs:
+                    resp = fb.create_photo(page_id, path_abs, caption=message)
+                else:
+                    resp = fb.create_post(page_id, message)
+                post_id = str(resp.get('post_id') or resp.get('id') or '')
+                post.platform_post_id = post_id
+                try:
+                    post.platform_url = fb.get_permalink(post_id)
+                except Exception:
+                    post.platform_url = None
+            except Exception as exc:
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
             path = media_rel.replace('\\', '/')
             if not path.startswith('media/'):
                 path = f"media/{path}"
             import os as _os
             path = _os.path.abspath(path)
-            title = (brief.text_en or brief.text_ru or 'IndiePulse Short')[:90] if brief else 'IndiePulse Short'
+            # Title preference: use explicit yt_title from job/brief if present, else EN then RU
+            title = None
+            try:
+                import json as _json
+                override = None
+                if job and job.payload_json:
+                    try:
+                        override = (_json.loads(job.payload_json) or {}).get('yt_title')
+                    except Exception:
+                        override = None
+                if override:
+                    title = override
+            except Exception:
+                pass
+            if not title:
+                title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
             yt = YouTubeClient(
                 access_token=(cfg.get('yt_access_token') or '').strip(),
                 refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
@@ -317,8 +456,39 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.commit()
                 return 'error'
         else:
-            import time
-            time.sleep(1)
+            # TikTok export: copy vertical media into export dir for manual upload
+            if str(post.platform) in ('PlatformEnum.tiktok', 'tiktok'):
+                from app.services.settings import load_settings
+                from app.models.models import Brief
+                cfg = load_settings()
+                export_dir = (cfg.get('tiktok_export_dir') or 'render').strip() or 'render'
+                brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
+                media_rel = getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
+                if media_rel:
+                    import os as _os, shutil as _sh
+                    p = media_rel.replace('\\','/')
+                    if not p.startswith('media/'):
+                        p = f"media/{p}"
+                    src = _os.path.abspath(p)
+                    _os.makedirs(export_dir, exist_ok=True)
+                    dst = _os.path.join(export_dir, _os.path.basename(src))
+                    try:
+                        _sh.copy2(src, dst)
+                        post.platform_url = None
+                    except Exception as exc:
+                        post.status = PostStatusEnum.error
+                        post.error_text = f"tiktok_export_failed: {exc}"
+                        if job is not None:
+                            job.status = JobStatusEnum.error
+                            job.last_error = post.error_text
+                        session.add(post)
+                        if job is not None:
+                            session.add(job)
+                        session.commit()
+                        return 'error'
+            else:
+                import time
+                time.sleep(1)
         # mark done
         post.status = PostStatusEnum.done
         post.published_at = datetime.utcnow()

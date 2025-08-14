@@ -162,5 +162,59 @@
 	</ol>
 </details>
 </section>
+
+<section style="margin-top:16px;">
+<h3>Facebook</h3>
+<form hx-post="/api/settings/save" hx-target="#fb_status" hx-swap="innerHTML">
+  <div>
+    <label>RU Page ID</label><br/>
+    <input type="text" name="fb_ru_page_id" value="{{ fb_ru_page_id or '' }}" style="width: 360px;" />
+  </div>
+  <div>
+    <label>RU Page Access Token</label><br/>
+    <input type="text" name="fb_ru_page_access_token" value="{{ fb_ru_page_access_token or '' }}" style="width: 360px;" />
+  </div>
+  <div>
+    <label>EN Page ID</label><br/>
+    <input type="text" name="fb_en_page_id" value="{{ fb_en_page_id or '' }}" style="width: 360px;" />
+  </div>
+  <div>
+    <label>EN Page Access Token</label><br/>
+    <input type="text" name="fb_en_page_access_token" value="{{ fb_en_page_access_token or '' }}" style="width: 360px;" />
+  </div>
+  <button type="submit">Сохранить Facebook</button>
+  <div style="font-size:12px;color:#666;margin-top:6px;">Используйте Page Access Token (с правами publish_pages). Для мультимедиа на странице нужна роль/доступ к фото API.</div>
+</form>
+<div id="fb_status"></div>
+</section>
+
+<section style="margin-top:16px;">
+<h3>Reddit</h3>
+<form hx-post="/api/settings/save" hx-target="#rd_status" hx-swap="innerHTML">
+  <div>
+    <label>Client ID</label><br/>
+    <input type="text" name="reddit_client_id" value="{{ reddit_client_id or '' }}" style="width:360px;" />
+  </div>
+  <div>
+    <label>Client Secret</label><br/>
+    <input type="text" name="reddit_client_secret" value="{{ reddit_client_secret or '' }}" style="width:360px;" />
+  </div>
+  <div>
+    <label>Username</label><br/>
+    <input type="text" name="reddit_username" value="{{ reddit_username or '' }}" style="width:360px;" />
+  </div>
+  <div>
+    <label>Password</label><br/>
+    <input type="password" name="reddit_password" value="" placeholder="••••" style="width:360px;" />
+  </div>
+  <div>
+    <label>Subreddit (EN)</label><br/>
+    <input type="text" name="reddit_subreddit_en" value="{{ reddit_subreddit_en or '' }}" style="width:360px;" />
+  </div>
+  <button type="submit">Сохранить Reddit</button>
+  <div style="font-size:12px;color:#666;margin-top:6px;">Требуется Reddit Script App (installed app), включите скрипт-авторизацию. Убедитесь, что сабреддиты разрешают публикации.</div>
+</form>
+<div id="rd_status"></div>
+</section>
 {% endblock %}
 

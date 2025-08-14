@@ -17,6 +17,8 @@ from loguru import logger
 import os, time
 import os
 import base64
+import io, zipfile
+from app.services.video_editor import render_vertical_with_music
 
 router = APIRouter(prefix="/api")
 
@@ -90,8 +92,15 @@ def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form
 
 @router.post("/hashtags/suggest")
 def suggest_hashtags(text: str = Form("")):
-    # Always include project and theme tags
-    tags = ["#Synthetica", "#indiedev", "#gamedev", "#tycoon", "#cyberpunk"]
+    # Default hashtag set for preview/posting (exclude on Discord when publishing)
+    tags = [
+        "#Synthetica",
+        "#UnrealEngine",
+        "#Tycoon",
+        "#Strategy",
+        "#Gamedev",
+        "#Indie",
+    ]
     # Deduplicate while preserving order
     seen = set()
     ordered = []
@@ -219,6 +228,15 @@ def save_settings_endpoint(
     yt_client_secret: str = Form(""),
     yt_access_token: str = Form(""),
     yt_refresh_token: str = Form(""),
+    fb_ru_page_id: str = Form(""),
+    fb_en_page_id: str = Form(""),
+    fb_ru_page_access_token: str = Form(""),
+    fb_en_page_access_token: str = Form(""),
+    reddit_client_id: str = Form(""),
+    reddit_client_secret: str = Form(""),
+    reddit_username: str = Form(""),
+    reddit_password: str = Form(""),
+    reddit_subreddit_en: str = Form(""),
 ):
     # Only update keys that are non-empty to avoid wiping other settings
     updates = {}
@@ -254,6 +272,24 @@ def save_settings_endpoint(
         updates["yt_access_token"] = yt_access_token.strip()
     if yt_refresh_token.strip():
         updates["yt_refresh_token"] = yt_refresh_token.strip()
+    if fb_ru_page_id.strip():
+        updates["fb_ru_page_id"] = fb_ru_page_id.strip()
+    if fb_en_page_id.strip():
+        updates["fb_en_page_id"] = fb_en_page_id.strip()
+    if fb_ru_page_access_token.strip():
+        updates["fb_ru_page_access_token"] = fb_ru_page_access_token.strip()
+    if fb_en_page_access_token.strip():
+        updates["fb_en_page_access_token"] = fb_en_page_access_token.strip()
+    if reddit_client_id.strip():
+        updates["reddit_client_id"] = reddit_client_id.strip()
+    if reddit_client_secret.strip():
+        updates["reddit_client_secret"] = reddit_client_secret.strip()
+    if reddit_username.strip():
+        updates["reddit_username"] = reddit_username.strip()
+    if reddit_password.strip():
+        updates["reddit_password"] = reddit_password.strip()
+    if reddit_subreddit_en.strip():
+        updates["reddit_subreddit_en"] = reddit_subreddit_en.strip()
     save_settings(updates)
     # Ask htmx to reload the page so new values are visible
     return Response(content="", headers={"HX-Redirect": "/accounts"})
@@ -491,3 +527,119 @@ def yt_save(
         return Response(content="", headers={"HX-Redirect": "/accounts"})
     else:
         return RedirectResponse(url="/accounts", status_code=302)
+
+@router.post("/steam/export")
+def steam_export(
+    title_ru: str = Form(""),
+    title_en: str = Form(""),
+    body_ru: str = Form(""),
+    body_en: str = Form(""),
+    header: UploadFile = File(None),
+    inline: UploadFile = File(None),
+):
+    # Build simple BBCode-like content blocks for Steam partner events
+    ru_txt = f"[h1]{title_ru}[/h1]\n{body_ru}"
+    en_txt = f"[h1]{title_en}[/h1]\n{body_en}"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode='w', compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr('steam_ru.txt', ru_txt)
+        z.writestr('steam_en.txt', en_txt)
+        if header is not None:
+            z.writestr(f"header_{header.filename}", header.file.read())
+        if inline is not None:
+            z.writestr(f"inline_{inline.filename}", inline.file.read())
+    data = buf.getvalue()
+    return Response(content=data, media_type='application/zip', headers={
+        'Content-Disposition': 'attachment; filename="steam_export.zip"'
+    })
+
+@router.post("/video/preview_frame")
+def video_preview_frame(
+    video: UploadFile = File(...),
+    crop_x_pct: float = Form(0.5),
+    crop_y_pct: float = Form(0.5),
+):
+    """Generate a preview frame showing the crop area"""
+    os.makedirs('render', exist_ok=True)
+    os.makedirs('media', exist_ok=True)
+    
+    base = str(int(time.time()))
+    safe_video_name = video.filename.replace('\\','/').split('/')[-1]
+    video_path = os.path.join('render', f"{base}_src_{safe_video_name}")
+    
+    with open(video_path, 'wb') as f:
+        f.write(video.file.read())
+    
+    # Generate preview frame with crop overlay
+    preview_path = os.path.join('media', f"{base}_preview.jpg")
+    
+    try:
+        from app.services.video_editor import _ffmpeg_path
+        ffmpeg = _ffmpeg_path()
+        
+        # Extract a frame and add crop overlay
+        cmd = [
+            ffmpeg, "-y", "-i", video_path,
+            "-vf", f"select=eq(n\\,0),scale=-2:480,drawbox=x=(iw-270)*{crop_x_pct}:y=(ih-480)*{crop_y_pct}:w=270:h=480:color=red@0.5:t=fill",
+            "-frames:v", "1",
+            preview_path
+        ]
+        
+        import subprocess
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg preview failed: {proc.stderr[-500:]}")
+        
+        rel = preview_path.replace('\\','/')
+        return {"preview_url": f"/media/{os.path.basename(rel)}"}
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.post("/video/render_vertical")
+def video_render_vertical(
+    video: UploadFile = File(...),
+    music: UploadFile = File(None),
+    crop_x_pct: float = Form(0.5),
+    crop_y_pct: float = Form(0.5),
+    music_offset_s: float = Form(0.0),
+    fade_in_s: float = Form(1.0),
+    fade_out_s: float = Form(1.0),
+    start_time: float = Form(0.0),
+    end_time: float = Form(0.0),
+    zoom: float = Form(1.0),
+):
+    os.makedirs('render', exist_ok=True)
+    os.makedirs('media', exist_ok=True)
+    # Save inputs
+    base = str(int(time.time()))
+    # Clean filename for safe file operations
+    safe_video_name = video.filename.replace('\\','/').split('/')[-1]
+    video_path = os.path.join('render', f"{base}_src_{safe_video_name}")
+    with open(video_path, 'wb') as f:
+        f.write(video.file.read())
+    music_path = None
+    if music is not None:
+        safe_music_name = music.filename.replace('\\','/').split('/')[-1]
+        music_path = os.path.join('render', f"{base}_music_{safe_music_name}")
+        with open(music_path, 'wb') as f:
+            f.write(music.file.read())
+    # Write final output into media so it is web-accessible
+    out_path = os.path.join('media', f"{base}_vertical.mp4")
+    render_vertical_with_music(
+        input_video=video_path,
+        output_video=out_path,
+        crop_x_pct=crop_x_pct,
+        crop_y_pct=crop_y_pct,
+        music_path=music_path,
+        music_offset_s=music_offset_s,
+        fade_in_s=fade_in_s,
+        fade_out_s=fade_out_s,
+        start_time=start_time,
+        end_time=end_time,
+        zoom=zoom,
+    )
+    # Return relative path for preview/download
+    rel = out_path.replace('\\','/')
+    # Hidden field expects a path relative to media folder (filename)
+    return {"output_path": rel, "output_rel": os.path.basename(rel), "output_url": f"/media/{os.path.basename(rel)}"}

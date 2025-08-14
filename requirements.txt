@@ -16,5 +16,6 @@ requests
 google-api-python-client
 google-auth
 google-auth-oauthlib
+praw
 deep-translator
 requests-oauthlib

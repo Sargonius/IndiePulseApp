@@ -34,6 +34,20 @@ DEFAULTS: Dict[str, Any] = {
     "yt_client_secret": "",
     "yt_access_token": "",
     "yt_refresh_token": "",
+    # Facebook (two groups)
+    "fb_ru_page_access_token": "",
+    "fb_en_page_access_token": "",
+    "fb_ru_page_id": "",
+    "fb_en_page_id": "",
+    # Reddit
+    "reddit_client_id": "",
+    "reddit_client_secret": "",
+    "reddit_username": "",
+    "reddit_password": "",
+    "reddit_subreddit_ru": "",
+    "reddit_subreddit_en": "",
+    # TikTok (placeholder for export-based workflow)
+    "tiktok_export_dir": "render",
 }
 
 

@@ -56,6 +56,11 @@ def news_form(request: Request):
     draft = load_draft()
     return templates.TemplateResponse('news.html', {'request': request, 'draft': draft})
 
+@router.get('/steam', response_class=HTMLResponse)
+def steam_export_page(request: Request):
+    draft = load_draft()
+    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft})
+
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
     cfg = load_settings()
@@ -82,6 +87,14 @@ def accounts(request: Request):
             'yt_client_secret': cfg.get('yt_client_secret', ''),
             'yt_access_token': cfg.get('yt_access_token', ''),
             'yt_refresh_token': cfg.get('yt_refresh_token', ''),
+            'fb_ru_page_id': cfg.get('fb_ru_page_id', ''),
+            'fb_en_page_id': cfg.get('fb_en_page_id', ''),
+            'fb_ru_page_access_token': cfg.get('fb_ru_page_access_token', ''),
+            'fb_en_page_access_token': cfg.get('fb_en_page_access_token', ''),
+            'reddit_client_id': cfg.get('reddit_client_id', ''),
+            'reddit_client_secret': cfg.get('reddit_client_secret', ''),
+            'reddit_username': cfg.get('reddit_username', ''),
+            'reddit_subreddit_en': cfg.get('reddit_subreddit_en', ''),
         },
     )
 
@@ -122,6 +135,7 @@ def submit_news(
     media: Optional[UploadFile] = File(None),
     media_normal: Optional[str] = Form(None),
     media_vertical: Optional[str] = Form(None),
+    yt_title: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
     media_path: Optional[str] = None
@@ -146,6 +160,7 @@ def submit_news(
         type='news',
         text_ru=text_ru or '',
         text_en=text_en or '',
+        title=(yt_title or '').strip() or None,
         tags_json=tags or '',
         media_path=media_path,
     )
@@ -193,6 +208,8 @@ def submit_news(
             payload = {"post_id": post.id}
             if media_rel:
                 payload["media_rel"] = media_rel
+            if str(post.platform) in (str(PlatformEnum.yt), 'yt') and (yt_title or '').strip():
+                payload["yt_title"] = (yt_title or '').strip()
             job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
             session.add(job)
             session.commit()

@@ -31,22 +31,27 @@
             <label>Перевод (EN)</label><br/>
             <textarea id="text_en" name="text_en" rows="6" cols="80">{{ draft.text_en if draft else '' }}</textarea>
             <div id="x_counter" style="font-size:12px;color:#666;margin-top:4px;">X: 0/280</div>
+            <div id="word_counter" style="font-size:12px;color:#666;margin-top:2px;">Words: 0</div>
 			<div style="margin-top:6px;">
 				<label>Хэштеги (через пробел)</label><br/>
-                <input type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#indiedev #gamedev" style="width: 520px;" />
-                <button type="button" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_target" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
+                <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie" style="width: 520px;" />
+                <button type="button" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
                 <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Генерация...</span>
-				<div id="tags_target"></div>
+                <div id="tags_target" style="display:none;"></div>
 			</div>
 		</div>
 	</div>
-	<div style="margin-top:10px;">
-		<label>Платформы</label><br/>
-		<label><input type="checkbox" name="platforms" value="vk" /> VK</label>
-		<label><input type="checkbox" name="platforms" value="x" /> X/Twitter</label>
-		<label><input type="checkbox" name="platforms" value="discord" /> Discord</label>
-		<label><input type="checkbox" name="platforms" value="yt" /> YouTube Shorts</label>
-	</div>
+    <div style="margin-top:10px;">
+        <label>Платформы</label> <button type="button" id="toggle_all_btn" style="margin-left:8px;">Выбрать все</button><br/>
+        <label><input class="pf" type="checkbox" name="platforms" value="vk" checked /> VK</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="x" checked /> X/Twitter</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="discord" checked /> Discord</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="yt" checked /> YouTube Shorts</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="reddit" checked /> Reddit (EN)</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked /> TikTok</label>
+    </div>
 	<div>
 		<label>Дата/время (ISO, опционально)</label><br/>
 		<input type="text" name="scheduled_at" placeholder="2025-08-01T12:00:00" />
@@ -79,6 +84,134 @@
         <div id="vk_preview_media" style="margin-top:8px;"></div>
       </div>
     </div>
+  </div>
+  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+    <div style="font-weight:600;margin-bottom:8px;">YouTube Shorts (превью)</div>
+    <div style="display:flex;gap:8px;align-items:flex-start;">
+      <div style="width:40px;height:40px;border-radius:4px;background:#ff0000;"></div>
+      <div style="flex:1;">
+        <input id="yt_title" name="yt_title" type="text" placeholder="Заголовок видео" style="width:100%;margin-bottom:6px;" />
+        <div id="yt_preview_desc" style="white-space:pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:400px;max-width:600px;">
+    <div style="font-weight:600;margin-bottom:8px;">Vertical Render (helper)</div>
+    
+    <!-- Video Upload -->
+    <div>
+      <label>Source video</label><br/>
+      <input type="file" id="rv_video" accept="video/*" />
+    </div>
+    
+    <!-- Live Preview Area -->
+    <div id="rv_live_preview" style="margin-top:12px;display:none;">
+      <div style="font-weight:600;margin-bottom:6px;">
+        Live Crop Preview 
+        <span id="rv_crop_info" style="font-size:12px;color:#666;font-weight:normal;margin-left:8px;"></span>
+      </div>
+      <div style="position:relative;display:inline-block;border:2px solid #ccc;border-radius:4px;">
+        <video id="rv_source_video" style="display:block;max-width:480px;max-height:270px;" controls></video>
+        <div id="rv_crop_overlay" style="position:absolute;left:0;top:0;width:0;height:0;border:2px solid red;background:rgba(255,0,0,0.2);cursor:move;transition:all 0.1s ease;z-index:2;"></div>
+        <div id="rv_crop_handles" style="position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3;">
+          <div class="crop-handle" style="position:absolute;width:12px;height:12px;background:white;border:2px solid red;border-radius:50%;cursor:nw-resize;pointer-events:auto;box-shadow:0 0 2px rgba(0,0,0,0.4);"></div>
+          <div class="crop-handle" style="position:absolute;width:12px;height:12px;background:white;border:2px solid red;border-radius:50%;cursor:ne-resize;pointer-events:auto;box-shadow:0 0 2px rgba(0,0,0,0.4);"></div>
+          <div class="crop-handle" style="position:absolute;width:12px;height:12px;background:white;border:2px solid red;border-radius:50%;cursor:sw-resize;pointer-events:auto;box-shadow:0 0 2px rgba(0,0,0,0.4);"></div>
+          <div class="crop-handle" style="position:absolute;width:12px;height:12px;background:white;border:2px solid red;border-radius:50%;cursor:se-resize;pointer-events:auto;box-shadow:0 0 2px rgba(0,0,0,0.4);"></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#666;margin-top:4px;">
+        🖱️ Drag red box to adjust • 🖱️ Scroll to zoom • ⌨️ Arrow keys for fine control • 🎯 Double-click to center • 📏 Drag corners to resize
+      </div>
+    </div>
+    
+    <!-- Controls -->
+    <div style="margin-top:12px;">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+        <label style="min-width:60px;">X offset</label>
+        <input type="range" id="rv_x" min="0" max="1" step="0.01" value="0.5" style="flex:1;" />
+        <span id="rv_x_val" style="min-width:40px;text-align:right;">0.5</span>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+        <label style="min-width:60px;">Y offset</label>
+        <input type="range" id="rv_y" min="0" max="1" step="0.01" value="0.5" style="flex:1;" />
+        <span id="rv_y_val" style="min-width:40px;text-align:right;">0.5</span>
+      </div>
+      
+      <!-- Video Timeline -->
+      <div style="margin-top:12px;">
+        <div style="font-weight:600;margin-bottom:6px;">Video Timeline</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <button type="button" id="rv_set_start" style="background:#007bff;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">
+            🎯 Set Start
+          </button>
+          <button type="button" id="rv_set_end" style="background:#dc3545;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;">
+            🎯 Set End
+          </button>
+          <span style="font-size:11px;color:#666;">Click buttons to set timeline from current video position</span>
+        </div>
+        <div style="position:relative;height:40px;background:#f0f0f0;border-radius:4px;margin-bottom:8px;">
+          <div id="rv_timeline" style="position:relative;height:100%;cursor:pointer;">
+            <div id="rv_timeline_bg" style="position:absolute;top:0;left:0;right:0;bottom:0;background:#ddd;"></div>
+            <div id="rv_timeline_selection" style="position:absolute;top:0;height:100%;background:rgba(0,123,255,0.3);border:1px solid #007bff;"></div>
+            <div id="rv_timeline_start" style="position:absolute;top:0;width:2px;height:100%;background:#007bff;cursor:ew-resize;"></div>
+            <div id="rv_timeline_end" style="position:absolute;top:0;width:2px;height:100%;background:#007bff;cursor:ew-resize;"></div>
+            <div id="rv_timeline_current" style="position:absolute;top:0;width:2px;height:100%;background:red;"></div>
+          </div>
+          <div style="font-size:11px;color:#666;text-align:center;">
+            <span id="rv_timeline_info">Drag handles to set start/end points</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Advanced Controls -->
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer;color:#666;">Advanced Settings</summary>
+        <div style="margin-top:8px;padding:8px;background:#f5f5f5;border-radius:4px;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <label>Music (optional)</label>
+            <input type="file" id="rv_music" accept="audio/*" />
+          </div>
+          
+          <!-- Music Timeline -->
+          <div id="rv_music_timeline" style="margin-top:8px;display:none;">
+            <div style="font-weight:600;margin-bottom:4px;">Music Timeline</div>
+            <div style="position:relative;height:30px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
+              <div id="rv_music_track" style="position:relative;height:100%;cursor:pointer;">
+                <div id="rv_music_bg" style="position:absolute;top:0;left:0;right:0;bottom:0;background:#ddd;"></div>
+                <div id="rv_music_offset" style="position:absolute;top:0;width:2px;height:100%;background:#ff6b6b;cursor:ew-resize;"></div>
+                <div id="rv_music_fade_in" style="position:absolute;top:0;height:100%;background:rgba(255,107,107,0.3);"></div>
+                <div id="rv_music_fade_out" style="position:absolute;top:0;height:100%;background:rgba(255,107,107,0.3);"></div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:#666;">
+              <span id="rv_music_info">Drag red line to adjust music start time</span>
+            </div>
+          </div>
+          
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <label>Music offset (s)</label>
+            <input type="number" id="rv_off" value="0" step="0.1" style="width:80px;" />
+            <label>Fade in (s)</label>
+            <input type="number" id="rv_fi" value="1" step="0.1" style="width:80px;" />
+            <label>Fade out (s)</label>
+            <input type="number" id="rv_fo" value="1" step="0.1" style="width:80px;" />
+          </div>
+        </div>
+      </details>
+    </div>
+    
+    <!-- Action Buttons -->
+    <div style="margin-top:12px;">
+      <button type="button" id="rv_run" style="background:#4CAF50;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
+        🎬 Render Vertical Video
+      </button>
+      <span id="rv_status" style="margin-left:8px;color:#666;"></span>
+    </div>
+    
+    <!-- Results -->
+    <div id="rv_preview" style="margin-top:12px;"></div>
   </div>
   
 </div>
@@ -115,9 +248,11 @@ const prevV = document.getElementById('preview_vertical');
 const hiddenV = document.getElementById('media_vertical_hidden');
 const xPrevText = document.getElementById('x_preview_text');
 const vkPrevText = document.getElementById('vk_preview_text');
+const ytPrevDesc = document.getElementById('yt_preview_desc');
 const xPrevMedia = document.getElementById('x_preview_media');
 const vkPrevMedia = document.getElementById('vk_preview_media');
 const xCounter = document.getElementById('x_counter');
+const wordCounter = document.getElementById('word_counter');
 const clearBtn = document.getElementById('clear_draft_btn');
 
 function setPreview(target, file) {
@@ -179,8 +314,11 @@ bindDrop(dzV, inV, prevV, 'vertical', hiddenV);
 function updateTextPreviews() {
   const ru = document.getElementById('text_ru').value;
   const en = document.getElementById('text_en').value;
-  xPrevText.textContent = en;
-  vkPrevText.textContent = ru;
+  const tagsVal = (document.getElementById('tags_input')?.value || '').trim();
+  const tagsSuffix = tagsVal ? ('\n' + tagsVal) : '';
+  xPrevText.textContent = en + tagsSuffix;
+  vkPrevText.textContent = ru + (tagsVal ? ('\n' + tagsVal) : '');
+  ytPrevDesc.textContent = (en || ru) + tagsSuffix;
 }
 
 function updateXCounter() {
@@ -188,10 +326,591 @@ function updateXCounter() {
   const len = [...en].length;
   xCounter.textContent = `X: ${len}/280`;
   xCounter.style.color = len > 280 ? 'red' : '#666';
+  const words = (en.trim().match(/\S+/g) || []).length;
+  wordCounter.textContent = `Words: ${words}`;
 }
 
 document.getElementById('text_ru').addEventListener('input', () => { updateTextPreviews(); });
 document.getElementById('text_en').addEventListener('input', () => { updateTextPreviews(); updateXCounter(); });
+document.getElementById('yt_title').addEventListener('input', () => { /* title only, keep for future validation */ });
+
+// Vertical render helper
+const rvVideo = document.getElementById('rv_video');
+const rvMusic = document.getElementById('rv_music');
+const rvX = document.getElementById('rv_x');
+const rvY = document.getElementById('rv_y');
+const rvOff = document.getElementById('rv_off');
+const rvFi = document.getElementById('rv_fi');
+const rvFo = document.getElementById('rv_fo');
+const rvRun = document.getElementById('rv_run');
+const rvStatus = document.getElementById('rv_status');
+const rvPrev = document.getElementById('rv_preview');
+const rvXVal = document.getElementById('rv_x_val');
+const rvYVal = document.getElementById('rv_y_val');
+
+// Live preview elements
+const rvLivePreview = document.getElementById('rv_live_preview');
+const rvSourceVideo = document.getElementById('rv_source_video');
+const rvCropOverlay = document.getElementById('rv_crop_overlay');
+const rvCropInfo = document.getElementById('rv_crop_info');
+const rvCropHandles = document.getElementById('rv_crop_handles');
+
+// Timeline elements
+const rvTimeline = document.getElementById('rv_timeline');
+const rvTimelineSelection = document.getElementById('rv_timeline_selection');
+const rvTimelineStart = document.getElementById('rv_timeline_start');
+const rvTimelineEnd = document.getElementById('rv_timeline_end');
+const rvTimelineCurrent = document.getElementById('rv_timeline_current');
+const rvTimelineInfo = document.getElementById('rv_timeline_info');
+const rvSetStart = document.getElementById('rv_set_start');
+const rvSetEnd = document.getElementById('rv_set_end');
+
+// Music timeline elements
+const rvMusicTimeline = document.getElementById('rv_music_timeline');
+const rvMusicTrack = document.getElementById('rv_music_track');
+const rvMusicOffset = document.getElementById('rv_music_offset');
+const rvMusicFadeIn = document.getElementById('rv_music_fade_in');
+const rvMusicFadeOut = document.getElementById('rv_music_fade_out');
+const rvMusicInfo = document.getElementById('rv_music_info');
+
+let videoLoaded = false;
+let videoWidth = 0;
+let videoHeight = 0;
+let videoDuration = 0;
+let musicDuration = 0;
+// Logical crop zoom (1.0 means crop is full 1080x1920 relative to scaled 1920 height)
+let cropZoom = 1.0; // >1 zooms in (smaller box)
+
+// Timeline state
+let timelineStart = 0;
+let timelineEnd = 1;
+let musicOffset = 0;
+
+// Update value displays and live preview
+function updateCropPreview() {
+  rvXVal.textContent = rvX.value;
+  rvYVal.textContent = rvY.value;
+  
+  console.log('updateCropPreview called:', { videoLoaded, videoWidth, videoHeight });
+  
+  if (videoLoaded) {
+    // Compute overlay size using displayed video size and zoom
+    const displayW = rvSourceVideo.clientWidth;
+    const displayH = rvSourceVideo.clientHeight;
+    const videoLeft = rvSourceVideo.offsetLeft; // within wrapper
+    const videoTop = rvSourceVideo.offsetTop;
+
+    // Maintain 9:16 box; overlay height shrinks as zoom increases
+    const overlayHeight = Math.max(40, Math.min(displayH, displayH / Math.max(1.0, cropZoom)));
+    const overlayWidth = overlayHeight * (9/16);
+
+    // Position from sliders as fractions of remaining space
+    const maxX = Math.max(0, displayW - overlayWidth);
+    const maxY = Math.max(0, displayH - overlayHeight);
+    const cropX = maxX * parseFloat(rvX.value);
+    const cropY = maxY * parseFloat(rvY.value);
+
+    const overlayLeft = videoLeft + cropX;
+    const overlayTop = videoTop + cropY;
+    console.log('Overlay calculations:', { displayW, displayH, overlayWidth, overlayHeight, overlayLeft, overlayTop, cropZoom });
+    
+    rvCropOverlay.style.left = overlayLeft + 'px';
+    rvCropOverlay.style.top = overlayTop + 'px';
+    rvCropOverlay.style.width = overlayWidth + 'px';
+    rvCropOverlay.style.height = overlayHeight + 'px';
+    
+    // Update corner handles with proper positioning
+    const handles = rvCropHandles.querySelectorAll('.crop-handle');
+    console.log('Updating handles:', { overlayLeft, overlayTop, overlayWidth, overlayHeight, handlesCount: handles.length });
+    
+    // Simple positioning - handles at corners of crop box
+    handles[0].style.left = (overlayLeft - 5) + 'px'; // top-left
+    handles[0].style.top = (overlayTop - 5) + 'px';
+    handles[1].style.left = (overlayLeft + overlayWidth - 5) + 'px'; // top-right
+    handles[1].style.top = (overlayTop - 5) + 'px';
+    handles[2].style.left = (overlayLeft - 5) + 'px'; // bottom-left
+    handles[2].style.top = (overlayTop + overlayHeight - 5) + 'px';
+    handles[3].style.left = (overlayLeft + overlayWidth - 5) + 'px'; // bottom-right
+    handles[3].style.top = (overlayTop + overlayHeight - 5) + 'px';
+    
+    // Make handles interactive and add event listeners
+    handles.forEach((handle, index) => {
+      handle.style.pointerEvents = 'auto';
+      handle.style.cursor = 'pointer';
+      console.log(`Handle ${index} positioned at:`, { left: handle.style.left, top: handle.style.top });
+    });
+    
+    // Update info display
+    rvCropInfo.textContent = `Crop: ${Math.round(cropX)}x${Math.round(cropY)} (${Math.round(overlayWidth)}x${Math.round(overlayHeight)})`;
+  }
+}
+
+// Update timeline display
+function updateTimeline() {
+  console.log('updateTimeline called:', { videoDuration, timelineStart, timelineEnd, rvTimeline: !!rvTimeline });
+  if (videoDuration > 0 && rvTimeline) {
+    const timelineWidth = rvTimeline.offsetWidth;
+    const startPos = timelineStart * timelineWidth;
+    const endPos = timelineEnd * timelineWidth;
+    
+    console.log('Timeline positions:', { timelineWidth, startPos, endPos });
+    
+    rvTimelineSelection.style.left = startPos + 'px';
+    rvTimelineSelection.style.width = (endPos - startPos) + 'px';
+    rvTimelineStart.style.left = startPos + 'px';
+    rvTimelineEnd.style.left = endPos + 'px';
+    
+    const startTime = (timelineStart * videoDuration).toFixed(1);
+    const endTime = (timelineEnd * videoDuration).toFixed(1);
+    const duration = (endTime - startTime).toFixed(1);
+    
+    // Show if timeline is custom or full video
+    const isFullVideo = timelineStart === 0 && timelineEnd === 1;
+    const statusText = isFullVideo ? 
+      `Full video (${duration}s)` : 
+      `Custom: ${startTime}s - ${endTime}s (${duration}s)`;
+    
+    rvTimelineInfo.textContent = statusText;
+    
+    // Visual feedback - change color if custom range
+    if (isFullVideo) {
+      rvTimelineSelection.style.background = 'rgba(0,123,255,0.3)';
+      rvTimelineSelection.style.border = '1px solid #007bff';
+    } else {
+      rvTimelineSelection.style.background = 'rgba(255,193,7,0.3)';
+      rvTimelineSelection.style.border = '1px solid #ffc107';
+    }
+  }
+}
+
+// Update current playback position on timeline
+function updateCurrentPosition() {
+  if (videoDuration > 0 && rvTimeline && rvSourceVideo) {
+    const currentTime = rvSourceVideo.currentTime;
+    const timelineWidth = rvTimeline.offsetWidth;
+    const currentPos = (currentTime / videoDuration) * timelineWidth;
+    
+    rvTimelineCurrent.style.left = currentPos + 'px';
+  }
+}
+
+// Update music timeline
+function updateMusicTimeline() {
+  if (musicDuration > 0) {
+    const trackWidth = rvMusicTrack.offsetWidth;
+    const offsetPos = (musicOffset / musicDuration) * trackWidth;
+    const fadeInWidth = (parseFloat(rvFi.value) / musicDuration) * trackWidth;
+    const fadeOutWidth = (parseFloat(rvFo.value) / musicDuration) * trackWidth;
+    
+    rvMusicOffset.style.left = offsetPos + 'px';
+    rvMusicFadeIn.style.left = offsetPos + 'px';
+    rvMusicFadeIn.style.width = fadeInWidth + 'px';
+    rvMusicFadeOut.style.left = (trackWidth - fadeOutWidth) + 'px';
+    rvMusicFadeOut.style.width = fadeOutWidth + 'px';
+    
+    rvMusicInfo.textContent = `Offset: ${musicOffset.toFixed(1)}s | Fade in: ${rvFi.value}s | Fade out: ${rvFo.value}s`;
+  }
+}
+
+// Handle video file selection
+rvVideo.addEventListener('change', (e) => {
+  if (e.target.files[0]) {
+    const file = e.target.files[0];
+    const url = URL.createObjectURL(file);
+    
+    rvSourceVideo.src = url;
+    rvSourceVideo.onloadedmetadata = () => {
+      videoWidth = rvSourceVideo.videoWidth;
+      videoHeight = rvSourceVideo.videoHeight;
+      videoDuration = rvSourceVideo.duration;
+      videoLoaded = true;
+      
+      // Show live preview and timeline
+      rvLivePreview.style.display = 'block';
+      
+      // Initial crop preview
+      updateCropPreview();
+      
+      // Initialize timeline
+      if (rvTimeline && videoDuration > 0) {
+        updateTimeline();
+        console.log('Timeline initialized:', { videoDuration, timelineStart, timelineEnd });
+      }
+      
+      // Add corner handle event listeners
+      addCornerHandlers();
+      
+      // Add video timeupdate listener for timeline position
+      rvSourceVideo.addEventListener('timeupdate', updateCurrentPosition);
+      
+      rvStatus.textContent = `Video loaded: ${videoWidth}x${videoHeight} (${videoDuration.toFixed(1)}s)`;
+    };
+  }
+});
+
+// Handle music file selection
+rvMusic.addEventListener('change', (e) => {
+  if (e.target.files[0]) {
+    const file = e.target.files[0];
+    const url = URL.createObjectURL(file);
+    
+    const audio = new Audio(url);
+    audio.addEventListener('loadedmetadata', () => {
+      musicDuration = audio.duration;
+      rvMusicTimeline.style.display = 'block';
+      updateMusicTimeline();
+    });
+  }
+});
+
+// Update preview when sliders change
+rvX.addEventListener('input', updateCropPreview);
+rvY.addEventListener('input', updateCropPreview);
+
+// Add drag functionality to crop overlay
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragStartOffsetX = 0;
+let dragStartOffsetY = 0;
+
+rvCropOverlay.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragStartOffsetX = parseFloat(rvX.value);
+  dragStartOffsetY = parseFloat(rvY.value);
+  e.preventDefault();
+});
+
+// Add corner handle drag functionality
+let cornerDragging = false;
+let cornerDragStartX = 0;
+let cornerDragStartY = 0;
+let cornerDragStartXVal = 0;
+let cornerDragStartYVal = 0;
+let cornerDragStartZoom = 1.0;
+let cornerIndex = -1; // 0 TL, 1 TR, 2 BL, 3 BR
+
+// Add event listeners to corner handles
+function addCornerHandlers() {
+  const handles = rvCropHandles.querySelectorAll('.crop-handle');
+  handles.forEach((handle, index) => {
+    handle.addEventListener('mousedown', (e) => {
+      cornerDragging = true;
+      cornerDragStartX = e.clientX;
+      cornerDragStartY = e.clientY;
+      cornerDragStartXVal = parseFloat(rvX.value);
+      cornerDragStartYVal = parseFloat(rvY.value);
+      cornerDragStartZoom = cropZoom;
+      cornerIndex = index;
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Corner handle drag started:', { index, cornerDragStartXVal, cornerDragStartYVal });
+    });
+  });
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const deltaX = e.clientX - dragStartX;
+    const deltaY = e.clientY - dragStartY;
+
+    const scale = rvSourceVideo.offsetWidth / videoWidth;
+    const cropWidth = 270 * scale;
+    const cropHeight = 480 * scale;
+
+    const maxDeltaX = rvSourceVideo.offsetWidth - cropWidth;
+    const maxDeltaY = rvSourceVideo.offsetHeight - cropHeight;
+
+    const newOffsetX = dragStartOffsetX + (deltaX / maxDeltaX);
+    const newOffsetY = dragStartOffsetY + (deltaY / maxDeltaY);
+
+    rvX.value = Math.max(0, Math.min(1, newOffsetX));
+    rvY.value = Math.max(0, Math.min(1, newOffsetY));
+
+    updateCropPreview();
+  } else if (cornerDragging) {
+    const deltaX = e.clientX - cornerDragStartX;
+    const deltaY = e.clientY - cornerDragStartY;
+
+    // Resize by vertical movement; keep 9:16; adjust zoom; keep position sliders
+    const displayH = rvSourceVideo.clientHeight;
+    const startOverlayH = rvCropOverlay.offsetHeight;
+
+    // Determine sign based on corner dragged: top corners invert vertical delta
+    const vertSign = (cornerIndex === 0 || cornerIndex === 1) ? -1 : 1;
+    const desiredH = Math.max(40, Math.min(displayH, startOverlayH + vertSign * deltaY));
+    const newZoom = Math.max(1.0, Math.min(8.0, displayH / desiredH));
+    cropZoom = newZoom;
+
+    console.log('Corner dragging resize:', { cornerIndex, deltaY, desiredH, newZoom });
+    updateCropPreview();
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  isDragging = false;
+  cornerDragging = false;
+});
+
+// Add zoom functionality with mouse wheel
+rvSourceVideo.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  const currentWidth = rvSourceVideo.offsetWidth;
+  const newWidth = Math.max(200, Math.min(800, currentWidth * zoomFactor));
+  rvSourceVideo.style.maxWidth = newWidth + 'px';
+  updateCropPreview();
+});
+
+// Timeline drag functionality
+let timelineDragging = null;
+let timelineDragStart = 0;
+let timelineDragStartPos = 0;
+
+rvTimelineStart.addEventListener('mousedown', (e) => {
+  timelineDragging = 'start';
+  timelineDragStart = e.clientX;
+  timelineDragStartPos = timelineStart;
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('Timeline start drag started');
+});
+
+rvTimelineEnd.addEventListener('mousedown', (e) => {
+  timelineDragging = 'end';
+  timelineDragStart = e.clientX;
+  timelineDragStartPos = timelineEnd;
+  e.preventDefault();
+  e.stopPropagation();
+  console.log('Timeline end drag started');
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!timelineDragging) return;
+  
+  const deltaX = e.clientX - timelineDragStart;
+  const timelineWidth = rvTimeline.offsetWidth;
+  const timeDelta = (deltaX / timelineWidth);
+  
+  console.log('Timeline dragging:', { timelineDragging, deltaX, timelineWidth, timeDelta });
+  
+  if (timelineDragging === 'start') {
+    const newStart = Math.max(0, Math.min(timelineEnd, timelineDragStartPos + timeDelta));
+    timelineStart = newStart;
+  } else if (timelineDragging === 'end') {
+    const newEnd = Math.max(timelineStart, Math.min(1, timelineDragStartPos + timeDelta));
+    timelineEnd = newEnd;
+  }
+  
+  updateTimeline();
+});
+
+document.addEventListener('mouseup', () => {
+  if (timelineDragging) {
+    console.log('Timeline drag ended:', { timelineStart, timelineEnd });
+  }
+  if (cornerDragging) {
+    console.log('Corner drag ended:', { x: rvX.value, y: rvY.value });
+  }
+  timelineDragging = null;
+  cornerDragging = false;
+});
+
+// Add click-to-position functionality for timeline
+rvTimeline.addEventListener('click', (e) => {
+  if (timelineDragging) return; // Don't interfere with dragging
+  
+  const rect = rvTimeline.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const timelineWidth = rvTimeline.offsetWidth;
+  const clickPercent = clickX / timelineWidth;
+  
+  console.log('Timeline clicked:', { clickX, timelineWidth, clickPercent });
+  
+  // If click is closer to start handle, move start
+  // If click is closer to end handle, move end
+  const startDistance = Math.abs(clickPercent - timelineStart);
+  const endDistance = Math.abs(clickPercent - timelineEnd);
+  
+  if (startDistance < endDistance) {
+    timelineStart = Math.max(0, Math.min(timelineEnd, clickPercent));
+  } else {
+    timelineEnd = Math.max(timelineStart, Math.min(1, clickPercent));
+  }
+  
+  updateTimeline();
+});
+
+// Add button functionality to set start/end from current video position
+rvSetStart.addEventListener('click', () => {
+  if (rvSourceVideo && videoDuration > 0) {
+    const currentTime = rvSourceVideo.currentTime;
+    const newStart = currentTime / videoDuration;
+    
+    // Ensure start is before end (allow very short clips)
+    if (newStart < timelineEnd) {
+      timelineStart = Math.max(0, newStart);
+      updateTimeline();
+      console.log('Set start from video position:', { currentTime, newStart });
+    } else {
+      console.log('Cannot set start: must be before end');
+    }
+  }
+});
+
+rvSetEnd.addEventListener('click', () => {
+  if (rvSourceVideo && videoDuration > 0) {
+    const currentTime = rvSourceVideo.currentTime;
+    const newEnd = currentTime / videoDuration;
+    
+    // Ensure end is after start (allow very short clips)
+    if (newEnd > timelineStart) {
+      timelineEnd = Math.min(1, newEnd);
+      updateTimeline();
+      console.log('Set end from video position:', { currentTime, newEnd });
+    } else {
+      console.log('Cannot set end: must be after start');
+    }
+  }
+});
+
+// Music timeline drag functionality
+let musicDragging = false;
+let musicDragStart = 0;
+
+rvMusicOffset.addEventListener('mousedown', (e) => {
+  musicDragging = true;
+  musicDragStart = e.clientX;
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!musicDragging) return;
+  
+  const deltaX = e.clientX - musicDragStart;
+  const trackWidth = rvMusicTrack.offsetWidth;
+  const timeDelta = (deltaX / trackWidth) * musicDuration;
+  
+  musicOffset = Math.max(0, Math.min(musicDuration, musicOffset + timeDelta));
+  rvOff.value = musicOffset.toFixed(1);
+  
+  updateMusicTimeline();
+  musicDragStart = e.clientX;
+});
+
+document.addEventListener('mouseup', () => {
+  musicDragging = false;
+});
+
+// Update music timeline when fade values change
+rvFi.addEventListener('input', updateMusicTimeline);
+rvFo.addEventListener('input', updateMusicTimeline);
+rvOff.addEventListener('input', () => {
+  musicOffset = parseFloat(rvOff.value) || 0;
+  updateMusicTimeline();
+});
+
+// Keyboard controls for fine adjustment
+document.addEventListener('keydown', (e) => {
+  if (!videoLoaded) return;
+  
+  const step = e.shiftKey ? 0.1 : 0.01; // Shift for larger steps
+  
+  switch(e.key) {
+    case 'ArrowLeft':
+      e.preventDefault();
+      rvX.value = Math.max(0, parseFloat(rvX.value) - step);
+      updateCropPreview();
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      rvX.value = Math.min(1, parseFloat(rvX.value) + step);
+      updateCropPreview();
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      rvY.value = Math.max(0, parseFloat(rvY.value) - step);
+      updateCropPreview();
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      rvY.value = Math.min(1, parseFloat(rvY.value) + step);
+      updateCropPreview();
+      break;
+    case 'Home':
+      e.preventDefault();
+      rvX.value = 0.5;
+      rvY.value = 0.5;
+      updateCropPreview();
+      break;
+  }
+});
+
+// Double-click to center crop
+rvCropOverlay.addEventListener('dblclick', (e) => {
+  e.preventDefault();
+  rvX.value = 0.5;
+  rvY.value = 0.5;
+  updateCropPreview();
+  
+  // Visual feedback
+  rvCropOverlay.style.borderColor = '#00ff00';
+  setTimeout(() => {
+    rvCropOverlay.style.borderColor = 'red';
+  }, 200);
+});
+
+rvRun.addEventListener('click', async () => {
+  if (!rvVideo.files[0]) { rvStatus.textContent = 'Выберите видео'; return; }
+  
+  // Debug timeline values
+  const startTime = (timelineStart * videoDuration).toFixed(2);
+  const endTime = (timelineEnd * videoDuration).toFixed(2);
+  console.log('Rendering with timeline:', { 
+    timelineStart, timelineEnd, videoDuration, 
+    startTime, endTime, 
+    isFullVideo: timelineStart === 0 && timelineEnd === 1 
+  });
+  
+  rvStatus.textContent = 'Рендер...';
+  const fd = new FormData();
+  fd.append('video', rvVideo.files[0]);
+  if (rvMusic.files[0]) fd.append('music', rvMusic.files[0]);
+  fd.append('crop_x_pct', rvX.value);
+  fd.append('crop_y_pct', rvY.value);
+  fd.append('music_offset_s', rvOff.value);
+  fd.append('fade_in_s', rvFi.value);
+  fd.append('fade_out_s', rvFo.value);
+  fd.append('start_time', startTime);
+  fd.append('end_time', endTime);
+  fd.append('zoom', String(cropZoom));
+  try {
+    const r = await fetch('/api/video/render_vertical', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    rvStatus.textContent = 'Готово';
+    // Show preview and update vertical media hidden field
+    rvPrev.innerHTML = '';
+    const v = document.createElement('video');
+    v.src = j.output_url; v.controls = true; v.style.maxWidth='320px'; v.style.maxHeight='180px';
+    rvPrev.appendChild(v);
+    hiddenV.value = j.output_rel; // set as vertical media for submit
+    updateTextPreviews();
+  } catch (e) {
+    rvStatus.textContent = 'Ошибка рендера: ' + e.message;
+  }
+});
+document.addEventListener('htmx:afterSwap', (e) => {
+  if (e.target && e.target.id === 'text_en') {
+    updateTextPreviews();
+    updateXCounter();
+  }
+  if (e.target && e.target.id === 'tags_input') {
+    updateTextPreviews();
+  }
+});
 updateTextPreviews();
 updateXCounter();
 
@@ -209,6 +928,50 @@ clearBtn.addEventListener('click', async () => {
   updateTextPreviews();
   updateXCounter();
   await fetch('/api/draft/clear', { method: 'POST' });
+});
+
+// Toggle all platforms
+document.getElementById('toggle_all_btn').addEventListener('click', () => {
+  const boxes = Array.from(document.querySelectorAll('input.pf[type="checkbox"]'));
+  const allChecked = boxes.every(b => b.checked);
+  boxes.forEach(b => b.checked = !allChecked);
+  queueSave();
+});
+
+// Re-hydrate previews from draft on load if we have server paths
+document.addEventListener('DOMContentLoaded', () => {
+  const norm = hiddenN.value;
+  if (norm) {
+    const url = '/media/' + norm.split('/').pop();
+    const ext = (norm.split('.').pop() || '').toLowerCase();
+    const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext);
+    if (isImg) {
+      const img = document.createElement('img');
+      img.src = url; img.style.maxWidth='320px'; img.style.maxHeight='180px';
+      prevN.innerHTML=''; prevN.appendChild(img);
+    } else {
+      const v = document.createElement('video');
+      v.src = url; v.controls = true; v.style.maxWidth='320px'; v.style.maxHeight='180px';
+      prevN.innerHTML=''; prevN.appendChild(v);
+    }
+  }
+  const vert = hiddenV.value;
+  if (vert) {
+    const url = '/media/' + vert.split('/').pop();
+    const ext = (vert.split('.').pop() || '').toLowerCase();
+    const isImg = ['jpg','jpeg','png','gif','webp'].includes(ext);
+    if (isImg) {
+      const img = document.createElement('img');
+      img.src = url; img.style.maxWidth='320px'; img.style.maxHeight='180px';
+      prevV.innerHTML=''; prevV.appendChild(img);
+    } else {
+      const v = document.createElement('video');
+      v.src = url; v.controls = true; v.style.maxWidth='320px'; v.style.maxHeight='180px';
+      prevV.innerHTML=''; prevV.appendChild(v);
+    }
+  }
+  updateTextPreviews();
+  updateXCounter();
 });
 </script>
 {% endblock %}

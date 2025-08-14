@@ -1,11 +1,16 @@
 {
-  "text_ru": "",
-  "text_en": "",
+  "text_ru": "Test test",
+  "text_en": "Test Test",
   "tags": "",
   "platforms": [
     "vk",
     "x",
-    "discord"
+    "discord",
+    "yt",
+    "fb_ru",
+    "fb_en",
+    "reddit",
+    "tiktok"
   ],
   "scheduled_at": "",
   "media_path": ""

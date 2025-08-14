@@ -54,3 +54,4 @@ node_modules/
 # Coverage/pytest
 .coverage
 .pytest_cache/
+vendor/ffmpeg/ffmpeg.exe

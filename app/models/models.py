@@ -14,6 +14,9 @@ class PlatformEnum(str, Enum):
     discord = "discord"
     tiktok = "tiktok"
     vk_video = "vk_video"
+    fb_ru = "fb_ru"
+    fb_en = "fb_en"
+    reddit = "reddit"
 
 class BriefTypeEnum(str, Enum):
     news = "news"
@@ -67,6 +70,7 @@ class Brief(SQLModel, table=True):
     user_id: int = Field(index=True, foreign_key="users.id")
     type: BriefTypeEnum
     text_ru: Optional[str] = None
+    title: Optional[str] = None
     text_en: Optional[str] = None
     tags_json: Optional[str] = None
     media_path: Optional[str] = None
