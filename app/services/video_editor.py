@@ -55,6 +55,24 @@ def render_vertical_with_music(
     Steps: scale to height 1920, crop 1080x1920 using provided offsets, optional music mix with fades.
     """
     ffmpeg = _ffmpeg_path()
+    
+    def _probe_duration_seconds(path: str) -> float:
+        """Return media duration in seconds using ffprobe; 0.0 on failure."""
+        try:
+            import subprocess, json
+            ffprobe = ffmpeg.replace("ffmpeg", "ffprobe") if "ffmpeg" in ffmpeg else "ffprobe"
+            args = [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "format=duration",
+                "-of", "default=nk=1:nw=1",
+                path,
+            ]
+            out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True).strip()
+            return float(out)
+        except Exception:
+            return 0.0
 
     # Build filtergraph: scale and crop
     # Scale height to 1920, preserve aspect, width becomes sw
@@ -84,29 +102,52 @@ def render_vertical_with_music(
         input_args.extend(["-i", input_video])
     
     cmd = [ffmpeg] + input_args
+    
+    # Determine render duration for correct fade-out timing (post-trim duration)
+    if end_time and end_time > start_time:
+        render_duration = max(0.0, float(end_time - start_time))
+    else:
+        render_duration = _probe_duration_seconds(input_video)
 
     if music_path and os.path.exists(music_path):
-        # Audio filter for music: delay start, apply fade in/out, then mix with original
-        # Convert delay to ms
+        # Audio filter for music: delay start, then mix with original; apply fades to the FINAL mix
         delay_ms = max(0, int(music_offset_s * 1000))
-        # Build audio filters
-        af_parts = []
-        af_parts.append(f"[1:a]adelay={delay_ms}|{delay_ms}")
-        if fade_in_s and fade_in_s > 0:
-            af_parts[-1] += f",afade=t=in:st={music_offset_s}:d={fade_in_s}"
-        # For fade-out we need estimated out start; approximate using video duration during mixing with shortest/duration=first
-        # Use t'fade_out' near the end; as we do not know duration here, we can still apply fade out with start after offset
-        if fade_out_s and fade_out_s > 0:
-            # start fade-out at offset + 1s as minimal; user should adjust if needed in subsequent renders
-            af_parts[-1] += f",afade=t=out:st={max(0.0, music_offset_s)}:d={fade_out_s}"
-        af_parts[-1] += "[am]"
+        # Prepare delayed music track
+        music_chain = f"[1:a]adelay={delay_ms}|{delay_ms}[am]"
+        # Compute fade-out start relative to render duration
+        fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
 
-        a_filter = ",".join(af_parts)
-        # Full filter_complex combines video and audio
-        fc = f"[0:v]{vf}[v];{a_filter};[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a]"
+        # Build filter_complex: mix original audio with delayed music, then apply fades to mix
+        post_fades = []
+        if fade_in_s and float(fade_in_s) > 0:
+            post_fades.append(f"afade=t=in:st=0:d={float(fade_in_s)}")
+        if fade_out_s and float(fade_out_s) > 0:
+            post_fades.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
+        post_chain = ",".join(post_fades) if post_fades else "anull"
+
+        fc = (
+            f"[0:v]{vf}[v];"
+            f"{music_chain};"
+            f"[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a0];"
+            f"[a0]{post_chain}[a]"
+        )
         cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
     else:
-        cmd += ["-vf", vf]
+        # No external music: apply fade-in and fade-out to original video audio
+        if (fade_in_s and fade_in_s > 0) or (fade_out_s and fade_out_s > 0):
+            # Always apply fades to the final audio stream
+            fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
+            parts = []
+            if fade_in_s and float(fade_in_s) > 0:
+                parts.append(f"afade=t=in:st=0:d={float(fade_in_s)}")
+            if fade_out_s and float(fade_out_s) > 0:
+                parts.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
+            post_chain = ",".join(parts) if parts else "anull"
+            fc = f"[0:v]{vf}[v];[0:a]{post_chain}[a]"
+            cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        else:
+            # No fades needed, just video processing
+            cmd += ["-vf", vf]
 
     # Output settings
     cmd += [
