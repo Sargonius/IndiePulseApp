@@ -103,6 +103,36 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             # prefer normal video/image if provided via job payload override or draft hidden field
             media_rel: Optional[str] = None
             try:
+                # Helper to build first tweet that always includes hashtags, trimming base text first
+                def _compose_main_and_remaining(text_body: str, tag_str: str) -> tuple[str, str]:
+                    body = (text_body or '').strip()
+                    tags = (tag_str or '').strip()
+                    if not tags:
+                        if len(body) <= 280:
+                            return body, ''
+                        # trim body to 280 on word boundary
+                        head = body[:280]
+                        cut = head.rfind(' ')
+                        if cut > 40:
+                            head = head[:cut]
+                        tail = body[len(head):].lstrip()
+                        return head, tail
+                    # ensure hashtags stay in the first tweet; trim body if needed
+                    fixed_suffix = ('\n' + tags)
+                    budget = 280 - len(fixed_suffix)
+                    if budget <= 0:
+                        # degenerate: hashtags alone exceed/meet limit → keep as much of tags as possible
+                        head = (fixed_suffix)[:280]
+                        return head, body  # push entire body to replies
+                    if len(body) <= budget:
+                        return (body + fixed_suffix), ''
+                    # need to trim body to fit
+                    head = body[:budget]
+                    cut = head.rfind(' ')
+                    if cut > 40:
+                        head = head[:cut]
+                    remaining = body[len(head):].lstrip()
+                    return (head + fixed_suffix), remaining
                 import json as _json
                 override = None
                 if job and job.payload_json:
@@ -148,9 +178,9 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     # Use v2 create tweet with media
                     import httpx
                     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-                    # Build thread: first tweet with text+hashtags limited to 280; if overflow, continue in replies
-                    text1 = (base_text + (('\n'+hashtags) if hashtags else ''))
-                    payload = {"text": text1[:280], "media": {"media_ids": [media_id]}}
+                    # Build thread ensuring hashtags are in first tweet
+                    first_text, remaining = _compose_main_and_remaining(base_text, hashtags)
+                    payload = {"text": first_text, "media": {"media_ids": [media_id]}}
                     with httpx.Client(timeout=20) as h:
                         r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
                         d = r.json()
@@ -158,8 +188,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                             raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
                         tid = (d.get('data') or {}).get('id')
                         url = f"https://twitter.com/i/web/status/{tid}" if tid else None
-                        # If overflow beyond 280, post remaining text as replies (split on word boundaries)
-                        remaining = text1[280:]
+                        # Post remaining text as replies (split on word boundaries); hashtags are not repeated
                         import re
                         while remaining and tid:
                             chunk = remaining[:260]
@@ -173,10 +202,20 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                             remaining = remaining[len(chunk):].lstrip()
                 else:
                     # no media; thread similarly
-                    text1 = (base_text + (('\n'+hashtags) if hashtags else ''))
-                    tid2, url = client.tweet(text1)
+                    first_text, remaining = _compose_main_and_remaining(base_text, hashtags)
+                    tid2, url = client.tweet(first_text)
                     if tid2:
                         post.platform_post_id = tid2
+                    # continue thread for remainder
+                    if remaining and tid2:
+                        import re
+                        tid = tid2
+                        while remaining and tid:
+                            chunk = remaining[:260]
+                            m = re.search(r"^(.{1,260})(\s|$)", remaining)
+                            if m:
+                                chunk = m.group(1)
+                            tid = client.reply(tid, chunk)  # uses same bearer client
                 post.platform_url = url
                 if media_id and tid:
                     post.platform_post_id = tid

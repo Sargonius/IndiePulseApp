@@ -351,16 +351,47 @@ function updateTextPreviews() {
     rest = rest.slice(part.length).trimStart();
     if (chunks.length > 4) break; // limit preview to 5 tweets
   }
-  xPrevText.textContent = chunks[0] || '';
+  // Ensure hashtags stay in first tweet; trim body first
+  const bodyOnly = en.trim();
+  const hashOnly = tagsVal ? ('\n' + tagsVal) : '';
+  let first = '';
+  let remainder = '';
+  if (!hashOnly) {
+    first = full.slice(0, 280);
+    remainder = full.slice(first.length).trimStart();
+  } else {
+    const budget = 280 - hashOnly.length;
+    if (budget <= 0) {
+      first = hashOnly.slice(0, 280);
+      remainder = bodyOnly;
+    } else if (bodyOnly.length <= budget) {
+      first = bodyOnly + hashOnly;
+      remainder = '';
+    } else {
+      let head = bodyOnly.slice(0, budget);
+      const cut = head.lastIndexOf(' ');
+      if (cut > 40) head = head.slice(0, cut);
+      first = head + hashOnly;
+      remainder = bodyOnly.slice(head.length).trimStart();
+    }
+  }
+  xPrevText.textContent = first;
   xThreadContainer.innerHTML = '';
-  for (let i = 1; i < chunks.length; i++) {
+  // Re-split remainder into ~260-char chunks for replies
+  let rest2 = remainder;
+  while (rest2.length > 0) {
+    let part = rest2.slice(0, 260);
+    const idx = part.lastIndexOf(' ');
+    if (rest2.length > 260 && idx > 80) part = part.slice(0, idx);
     const d = document.createElement('div');
     d.style.marginTop = '2px';
     d.style.paddingLeft = '8px';
     d.style.borderLeft = '2px solid #e5e7eb';
     d.style.color = '#555';
-    d.textContent = chunks[i];
+    d.textContent = part;
     xThreadContainer.appendChild(d);
+    rest2 = rest2.slice(part.length).trimStart();
+    if (xThreadContainer.childElementCount > 5) break;
   }
   vkPrevText.textContent = ru + (tagsVal ? ('\n' + tagsVal) : '');
   ytPrevDesc.textContent = (en || ru) + tagsSuffix;
@@ -379,9 +410,12 @@ function updateTextPreviews() {
 
 function updateXCounter() {
   const en = document.getElementById('text_en').value;
-  const len = [...en].length;
-  xCounter.textContent = `X: ${len}/280`;
-  xCounter.style.color = len > 280 ? 'red' : '#666';
+  const tagsVal = (document.getElementById('tags_input')?.value || '').trim();
+  const full = en + (tagsVal ? ('\n' + tagsVal) : '');
+  const len = [...full].length;
+  const over = Math.max(0, len - 280);
+  xCounter.textContent = over > 0 ? `X: ${len}/280 (overflow +${over})` : `X: ${len}/280`;
+  xCounter.style.color = over > 0 ? 'red' : '#666';
   const words = (en.trim().match(/\S+/g) || []).length;
   wordCounter.textContent = `Words: ${words}`;
 }

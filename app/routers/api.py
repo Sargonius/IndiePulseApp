@@ -737,6 +737,15 @@ def x_test_tweet(text: str = Form("Hello from IndiePulse")):
     token = (cfg.get("x_access_token") or "").strip()
     if not token:
         return HTMLResponse("<span style='color:orange'>X не подключён</span>")
+    # Validate token scopes and status
+    try:
+        with httpx.Client(timeout=10) as client:
+            me = client.get("https://api.twitter.com/2/users/me", headers={"Authorization": f"Bearer {token}"})
+            info = me.json()
+            if me.status_code >= 400:
+                return HTMLResponse(f"<span style='color:red'>X token invalid: {info}</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>X check failed: {str(exc)}</span>")
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     payload = {"text": text[:280]}
     with httpx.Client(timeout=15) as client:
@@ -1378,6 +1387,40 @@ def jobs_refresh_metrics(request: Request, id: Optional[int] = Form(None), id_q:
         from app.jobs.tasks import refresh_metrics_for_post
         refresh_metrics_for_post.schedule(args=(post_id,), delay=0)
     # return refreshed table (status may update shortly after)
+    from app.models.models import Job as _Job
+    rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+
+
+@router.post("/jobs/retry")
+def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    from app.models.models import Job, JobStatusEnum, JobKindEnum, Post
+    import json as _json
+    job_id = id or id_q
+    if not job_id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    job = session.get(Job, job_id)
+    if not job:
+        return HTMLResponse("<span style='color:red'>job_not_found</span>", status_code=404)
+    # Only retry publish jobs
+    if getattr(job, 'kind', None) != JobKindEnum.publish:
+        return HTMLResponse("<span style='color:orange'>retry_only_for_publish</span>")
+    # Extract post_id
+    post_id = None
+    try:
+        post_id = (_json.loads(job.payload_json or '{}') or {}).get('post_id')
+    except Exception:
+        post_id = None
+    if not post_id:
+        return HTMLResponse("<span style='color:red'>no_post_in_payload</span>", status_code=400)
+    # Create a new queued job with same payload
+    nj = Job(kind=JobKindEnum.publish, payload_json=job.payload_json, status=JobStatusEnum.queued)
+    session.add(nj)
+    session.commit()
+    session.refresh(nj)
+    from app.jobs.tasks import publish_news_post
+    publish_news_post.schedule(args=(nj.id, post_id), delay=0)
+    # refresh table
     from app.models.models import Job as _Job
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
     return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
