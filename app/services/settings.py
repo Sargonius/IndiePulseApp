@@ -11,6 +11,8 @@ SETTINGS_PATH = ".settings.json"
 
 DEFAULTS: Dict[str, Any] = {
 	"discord_webhook_url": "",
+	"discord_webhook_ru": "",
+	"discord_webhook_en": "",
 	"vk_client_id": "",
 	"vk_client_secret": "",
 	"vk_group_id": "",
@@ -48,6 +50,9 @@ DEFAULTS: Dict[str, Any] = {
     "reddit_subreddit_en": "",
     # TikTok (placeholder for export-based workflow)
     "tiktok_export_dir": "render",
+    # OpenAI (optional for translation)
+    "openai_api_key": "",
+    "openai_model": "gpt-4o-mini",
 }
 
 

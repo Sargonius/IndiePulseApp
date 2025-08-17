@@ -5,7 +5,7 @@ from app.routers import pages, api
 from app.db.session import create_db_and_tables, migrate_db
 from app.core.logging import setup_logging, request_logger
 from dotenv import load_dotenv
-import os
+import os, time
 
 setup_logging()
 load_dotenv()
@@ -19,6 +19,11 @@ def on_startup():
     os.makedirs("logs", exist_ok=True)
     create_db_and_tables()
     migrate_db()
+    # simple cache-busting version for static assets
+    try:
+        app.state.asset_version = str(int(time.time()))
+    except Exception:
+        app.state.asset_version = "1"
 
 app.include_router(pages.router)
 app.include_router(api.router)

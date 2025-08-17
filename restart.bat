@@ -44,7 +44,7 @@ if exist .env (
 if not exist logs mkdir logs
 
 REM Start server in background and save PID (hidden window), logs redirected
-powershell -NoProfile -Command "$args = @('-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%'); $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $args -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/server.out.log' -RedirectStandardError 'logs/server.err.log' -PassThru; [IO.File]::WriteAllText('.server.pid', $p.Id)"
+powershell -NoProfile -Command "$argv = @('-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%'); if (Test-Path '.autoreload') { $argv += @('--reload','--reload-dir','app','--reload-dir','app/templates','--reload-dir','app/static') }; $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $argv -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/server.out.log' -RedirectStandardError 'logs/server.err.log' -PassThru; [IO.File]::WriteAllText('.server.pid', $p.Id)"
 
 REM Give the server a moment to bind the port, then probe /health
 >nul timeout /t 2 /nobreak

@@ -21,8 +21,20 @@ import io, zipfile
 from app.services.video_editor import render_vertical_with_music
 from app.services.video_editor import _ffmpeg_path, install_ffmpeg_win
 from app.core.config import STEAM_APP_ID
+from fastapi.templating import Jinja2Templates
 
 router = APIRouter(prefix="/api")
+templates_api = Jinja2Templates(directory='app/templates')
+
+
+def _render_autoreload_button_html(enabled: bool) -> str:
+    cls = "icon-btn" + (" active" if enabled else "")
+    title = "Автообновление включено" if enabled else "Включить автообновление"
+    # Render a button that updates the content of the fixed wrapper span (#nav_ar_btn)
+    return (
+        f"<button class=\"{cls}\" title=\"{title}\" "
+        f"hx-post=\"/api/system/toggle_autoreload\" hx-target=\"#nav_ar_btn\" hx-swap=\"innerHTML\">↻</button>"
+    )
 
 class TranslateReq(BaseModel):
     ru_text: str
@@ -45,6 +57,37 @@ class BriefIn(BaseModel):
 
 class BriefOut(BaseModel):
     id: int
+@router.get("/translate/test_openai")
+def test_openai():
+    try:
+        cfg = load_settings()
+        api_key = (cfg.get("openai_api_key") or "").strip()
+        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        if not api_key:
+            return {"ok": False, "error": "no_api_key"}
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": "You translate RU to EN."},
+                {"role": "user", "content": "Переведи на английский: Привет мир"},
+            ],
+        }
+        with httpx.Client(timeout=15) as client:
+            r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+            data = {"status": r.status_code}
+            try:
+                data["json"] = r.json()
+            except Exception:
+                data["text"] = r.text[:400]
+            return {"ok": r.status_code < 400, "response": data}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
 
 @router.post("/translate")
 def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form(None)):
@@ -55,41 +98,87 @@ def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form
         return any('а' <= ch <= 'я' or 'А' <= ch <= 'Я' for ch in s)
     en = ""
     err = None
+    provider = ""
+    # 1) Try OpenAI if configured
     try:
-        from deep_translator import GoogleTranslator, MyMemoryTranslator, LibreTranslator
-        # Prefer public LibreTranslate instances first
-        for host in (
-            'https://libretranslate.de',
-            'https://translate.astian.org',
-        ):
-            try:
-                en = LibreTranslator(source='ru', target='en', host=host).translate(src) or ""
-                if en and not contains_cyrillic(en):
-                    break
-            except Exception as e_lt:
-                err = e_lt
-                # embed provider info in the textarea as a comment for debugging in UI
-                pass
-        # Try Google then MyMemory as additional fallbacks
-        if not en or contains_cyrillic(en):
-            try:
-                en = GoogleTranslator(source='ru', target='en').translate(src) or ""
-            except Exception as e1:
-                err = e1
-        if not en or contains_cyrillic(en):
-            try:
-                en = MyMemoryTranslator(source='ru', target='en').translate(src) or ""
-            except Exception as e2:
-                err = e2
-    except Exception as e:
-        err = e
-    # Fallback: if still empty or Cyrillic, prefix with EN marker to make it obvious
+        cfg = load_settings()
+        api_key = (cfg.get("openai_api_key") or "").strip()
+        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        if api_key and model:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": model,
+                "temperature": 0.2,
+                "messages": [
+                    {"role": "system", "content": "You are a professional localization translator. Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is. Do not add commentary; return only the translated text."},
+                    {"role": "user", "content": f"Translate to English, preserving markup:\n\n{src}"},
+                ],
+            }
+            with httpx.Client(timeout=20) as client:
+                r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+                if r.status_code < 400:
+                    data = r.json()
+                    en = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+                    if en:
+                        provider = f"openai:{model}"
+                    else:
+                        try:
+                            logger.warning("openai_empty_response model=%s raw=%s", model, str(data)[:400])
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        logger.warning("openai_http_error status=%s model=%s body=%s", r.status_code, model, r.text[:400])
+                    except Exception:
+                        pass
+    except Exception as e_oa:
+        err = e_oa
+    # 2) Fallback chain via deep_translator
+    if not en or contains_cyrillic(en):
+        try:
+            from deep_translator import GoogleTranslator, MyMemoryTranslator, LibreTranslator
+            for host in (
+                'https://libretranslate.de',
+                'https://translate.astian.org',
+            ):
+                try:
+                    en = LibreTranslator(source='ru', target='en', host=host).translate(src) or ""
+                    if en and not contains_cyrillic(en):
+                        provider = f"libre:{host}"
+                        break
+                except Exception as e_lt:
+                    err = e_lt
+            if not en or contains_cyrillic(en):
+                try:
+                    en = GoogleTranslator(source='ru', target='en').translate(src) or ""
+                    if en and not contains_cyrillic(en):
+                        provider = "google"
+                except Exception as e1:
+                    err = e1
+            if not en or contains_cyrillic(en):
+                try:
+                    en = MyMemoryTranslator(source='ru', target='en').translate(src) or ""
+                    if en and not contains_cyrillic(en):
+                        provider = "mymemory"
+                except Exception as e2:
+                    err = e2
+        except Exception as e:
+            err = e
+    # 3) Final fallback: echo with EN: prefix
     if not en or contains_cyrillic(en):
         en = f"EN: {src}"
+        if not provider:
+            provider = "fallback"
     save_draft({"text_ru": src, "text_en": en})
-    # Include a small HTML comment with provider/fallback info to aid debugging in-page (not visible)
-    info = "fallback" if en.startswith("EN: ") else "ok"
-    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\">{en}</textarea><!-- {info} -->"
+    info = provider or ("fallback" if en.startswith("EN: ") else "ok")
+    try:
+        logger.info(f"translate provider={info} in_len={len(src)} out_len={len(en)}")
+    except Exception:
+        pass
+    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\" data-translator=\"{info}\">{en}</textarea><!-- provider: {info} -->"
     return HTMLResponse(html)
 
 @router.post("/hashtags/suggest")
@@ -186,8 +275,189 @@ def list_posts(limit: int = 10, session: Session = Depends(get_session)):
 @router.get("/metrics/refresh")
 def metrics_refresh(post_id: int, session: Session = Depends(get_session)):
     from app.jobs.tasks import refresh_metrics_for_post
+    # Immediate schedule for generic metrics
     refresh_metrics_for_post.schedule(args=(post_id,), delay=0)
+    # Inline poll for Reddit visibility if applicable
+    from app.models.models import Post
+    post = session.get(Post, post_id)
+    if not post:
+        return {"ok": False, "error": "post_not_found"}
+    plat = str(post.platform)
+    # Generic: if already has URL or post_id, consider it done
+    from app.models.models import PostStatusEnum
+    if post.status == PostStatusEnum.running and (post.platform_url or post.platform_post_id):
+        post.status = PostStatusEnum.done
+        session.add(post)
+        session.commit()
+        return {"ok": True, "status": "done"}
+
+    if plat.endswith('reddit') and post.platform_post_id:
+        try:
+            from app.services.settings import load_settings
+            from app.services.reddit_client import RedditClient
+            cfg = load_settings()
+            cid = (cfg.get('reddit_client_id') or '').strip()
+            csec = (cfg.get('reddit_client_secret') or '').strip()
+            uname = (cfg.get('reddit_username') or '').strip()
+            pwd = (cfg.get('reddit_password') or '').strip()
+            rc = RedditClient(cid, csec, uname, pwd)
+            # If visible (not removed/spam), keep URL; mark done
+            # PRAW submission by id: full name requires t3_ prefix
+            fullname = post.platform_post_id if post.platform_post_id.startswith('t3_') else f"t3_{post.platform_post_id}"
+            subm = rc.reddit.submission(id=fullname.split('_')[-1])
+            # If available, update platform_url and mark done
+            post.platform_url = subm.permalink and f"https://reddit.com{subm.permalink}" or post.platform_url
+            from app.models.models import PostStatusEnum
+            post.status = PostStatusEnum.done
+            session.add(post)
+            session.commit()
+        except Exception as exc:
+            # Non-fatal; return info
+            return {"ok": True, "note": f"reddit_poll_error: {str(exc)}"}
     return {"ok": True}
+
+
+@router.post("/posts/remove")
+def remove_post(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    from app.models.models import Post
+    pid = id or id_q
+    if not pid:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    p = session.get(Post, pid)
+    if not p:
+        return HTMLResponse("<span style='color:red'>post_not_found</span>", status_code=404)
+    session.delete(p)
+    session.commit()
+    # Return refreshed posts partial
+    from sqlmodel import select as _select
+    rows = session.exec(_select(Post).order_by(Post.created_at.desc()).limit(50)).all()
+    # Reuse same enrichment from pages.py to avoid duplication would require import; simple inline copy here
+    data = []
+    import json as _json
+    for p2 in rows:
+        metrics = {}
+        try:
+            if getattr(p2, 'metrics_json', None):
+                metrics = _json.loads(p2.metrics_json) or {}
+        except Exception:
+            metrics = {}
+        def pick(*keys):
+            for k in keys:
+                if metrics.get(k) is not None:
+                    return metrics.get(k)
+            return None
+        data.append({
+            'id': p2.id,
+            'platform_text': (p2.platform.value if hasattr(p2.platform, 'value') else str(p2.platform)),
+            'status_text': (p2.status.value if hasattr(p2.status, 'value') else str(p2.status)),
+            'brief_id': getattr(p2, 'brief_id', None),
+            'scheduled_at': getattr(p2, 'scheduled_at', None),
+            'published_at': getattr(p2, 'published_at', None),
+            'platform_url': getattr(p2, 'platform_url', None),
+            'm_like': pick('like', 'likes'),
+            'm_repost': pick('retweet', 'reposts'),
+            'm_reply': pick('reply', 'comments'),
+            'm_quote': pick('quote', 'views'),
+            'tags': getattr(p2, 'brief', None) and getattr(p2.brief, 'tags_json', None),
+        })
+    return templates_api.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data})
+
+
+@router.post("/posts/refresh_metrics")
+def refresh_post_metrics(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    pid = id or id_q
+    if not pid:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    from app.jobs.tasks import refresh_metrics_for_post
+    refresh_metrics_for_post.schedule(args=(pid,), delay=0)
+    # Return refreshed table after scheduling
+    from app.models.models import Post
+    from sqlmodel import select as _select
+    rows = session.exec(_select(Post).order_by(Post.created_at.desc()).limit(50)).all()
+    # minimal: just trigger client-side refresh; but we return table to keep UX consistent
+    # Enrich like above
+    data = []
+    import json as _json
+    for p2 in rows:
+        metrics = {}
+        try:
+            if getattr(p2, 'metrics_json', None):
+                metrics = _json.loads(p2.metrics_json) or {}
+        except Exception:
+            metrics = {}
+        def pick(*keys):
+            for k in keys:
+                if metrics.get(k) is not None:
+                    return metrics.get(k)
+            return None
+        data.append({
+            'id': p2.id,
+            'platform_text': (p2.platform.value if hasattr(p2.platform, 'value') else str(p2.platform)),
+            'status_text': (p2.status.value if hasattr(p2.status, 'value') else str(p2.status)),
+            'brief_id': getattr(p2, 'brief_id', None),
+            'scheduled_at': getattr(p2, 'scheduled_at', None),
+            'published_at': getattr(p2, 'published_at', None),
+            'platform_url': getattr(p2, 'platform_url', None),
+            'm_like': pick('like', 'likes'),
+            'm_repost': pick('retweet', 'reposts'),
+            'm_reply': pick('reply', 'comments'),
+            'm_quote': pick('quote', 'views'),
+            'tags': getattr(p2, 'brief', None) and getattr(p2.brief, 'tags_json', None),
+        })
+    return templates_api.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data})
+
+
+@router.post("/system/restart")
+def system_restart():
+    """Request a full app restart by invoking restart.bat (Windows)."""
+    try:
+        import subprocess, os
+        script = os.path.abspath('restart.bat')
+        if not os.path.exists(script):
+            return HTMLResponse("<span style='color:red'>restart.bat not found</span>", status_code=500)
+        # Use PowerShell to detach and hide window
+        cmd = [
+            'powershell', '-NoProfile', '-Command',
+            f"Start-Process -FilePath '{script}' -WorkingDirectory '{os.getcwd()}' -WindowStyle Hidden"
+        ]
+        creationflags = 0
+        try:
+            import subprocess as _sp
+            if hasattr(_sp, 'DETACHED_PROCESS'): creationflags |= _sp.DETACHED_PROCESS
+            if hasattr(_sp, 'CREATE_NEW_PROCESS_GROUP'): creationflags |= _sp.CREATE_NEW_PROCESS_GROUP
+        except Exception:
+            pass
+        subprocess.Popen(cmd, creationflags=creationflags)
+        return HTMLResponse("<span style='color:orange'>Restarting... (logs in logs/server.* and logs/worker.*)</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>Restart failed: {str(exc)}</span>", status_code=500)
+
+
+@router.post("/system/toggle_autoreload")
+def system_toggle_autoreload(enable: Optional[bool] = Form(None)):
+    import os
+    try:
+        flag = os.path.abspath('.autoreload')
+        if enable is None:
+            # toggle
+            enable = not os.path.exists(flag)
+        if enable:
+            with open(flag, 'w') as f:
+                f.write('1')
+            return HTMLResponse(_render_autoreload_button_html(True))
+        else:
+            if os.path.exists(flag):
+                os.remove(flag)
+            return HTMLResponse(_render_autoreload_button_html(False))
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>Toggle failed: {str(exc)}</span>", status_code=500)
+
+
+@router.get("/system/autoreload_status")
+def system_autoreload_status():
+    import os
+    enabled = os.path.exists('.autoreload')
+    return HTMLResponse(_render_autoreload_button_html(enabled))
 
 @router.post("/discord/webhook")
 def save_discord_webhook(url: str = Form(...)):
@@ -197,6 +467,17 @@ def save_discord_webhook(url: str = Form(...)):
     save_settings({"discord_webhook_url": url})
     # Return small HTML snippet for htmx
     return HTMLResponse("<span style='color:green'>Discord webhook сохранён</span>")
+
+@router.post("/discord/webhooks/save")
+def save_discord_webhooks(url_ru: str = Form(""), url_en: str = Form("")):
+    updates = {}
+    if (url_ru or "").strip():
+        updates["discord_webhook_ru"] = url_ru.strip()
+    if (url_en or "").strip():
+        updates["discord_webhook_en"] = url_en.strip()
+    if updates:
+        save_settings(updates)
+    return HTMLResponse("<span style='color:green'>Webhooks updated</span>")
 
 @router.post("/discord/test")
 def discord_send_test():
@@ -239,6 +520,9 @@ def save_settings_endpoint(
     reddit_username: str = Form(""),
     reddit_password: str = Form(""),
     reddit_subreddit_en: str = Form(""),
+    # OpenAI
+    openai_api_key: str = Form(""),
+    openai_model: str = Form(""),
 ):
     # Only update keys that are non-empty to avoid wiping other settings
     updates = {}
@@ -292,6 +576,10 @@ def save_settings_endpoint(
         updates["reddit_password"] = reddit_password.strip()
     if reddit_subreddit_en.strip():
         updates["reddit_subreddit_en"] = reddit_subreddit_en.strip()
+    if openai_api_key.strip():
+        updates["openai_api_key"] = openai_api_key.strip()
+    if openai_model.strip():
+        updates["openai_model"] = openai_model.strip()
     save_settings(updates)
     # Ask htmx to reload the page so new values are visible
     return Response(content="", headers={"HX-Redirect": "/accounts"})
@@ -820,3 +1108,276 @@ def video_install_ffmpeg():
         return {"ok": True, "path": path}
     except Exception as exc:
         return HTMLResponse(f"<span style='color:red'>FFmpeg install failed: {str(exc)}</span>", status_code=500)
+
+
+@router.post("/steam/translate_text")
+def steam_translate_text(
+    title_ru: str = Form(""),
+    subtitle: str = Form(""),
+    short_desc: str = Form(""),
+    body_ru: str = Form(""),
+):
+    """Translate Steam RU fields to EN in one go. Uses OpenAI first, then falls back to public translators."""
+    src = {
+        "title": (title_ru or "").strip(),
+        "subtitle": (subtitle or "").strip(),
+        "short_desc": (short_desc or "").strip(),
+        "body": (body_ru or "").strip(),
+    }
+    provider = ""
+    out = {"title_en": "", "subtitle_en": "", "short_desc_en": "", "body_en": ""}
+    try:
+        cfg = load_settings()
+        api_key = (cfg.get("openai_api_key") or "").strip()
+        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        if api_key and model:
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            system = (
+                "You are a professional localization translator for Steam Partner Events. "
+                "Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is in the 'body'. "
+                "Return ONLY a compact JSON object with keys: title_en, subtitle_en, short_desc_en, body_en."
+            )
+            user = (
+                f"title: {src['title']}\n"
+                f"subtitle: {src['subtitle']}\n"
+                f"short_desc: {src['short_desc']}\n"
+                f"body: {src['body']}\n"
+                "Translate all fields to English."
+            )
+            payload = {"model": model, "temperature": 0.2, "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]}
+            with httpx.Client(timeout=25) as client:
+                r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+                if r.status_code < 400:
+                    data = r.json()
+                    content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+                    import json as _json
+                    try:
+                        parsed = _json.loads(content)
+                        out.update({
+                            "title_en": (parsed.get("title_en") or "").strip(),
+                            "subtitle_en": (parsed.get("subtitle_en") or "").strip(),
+                            "short_desc_en": (parsed.get("short_desc_en") or "").strip(),
+                            "body_en": (parsed.get("body_en") or "").strip(),
+                        })
+                        provider = f"openai:{model}"
+                    except Exception as pe:
+                        try:
+                            logger.warning("steam_translate parse_json_failed raw=%s", content[:400])
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        logger.warning("openai_http_error steam status=%s model=%s body=%s", r.status_code, model, r.text[:400])
+                    except Exception:
+                        pass
+    except Exception as exc:
+        try:
+            logger.warning("steam_translate openai_error: %s", str(exc))
+        except Exception:
+            pass
+    # Fallbacks if any field missing
+    def contains_cyrillic(s: str) -> bool:
+        return any('а' <= ch <= 'я' or 'А' <= ch <= 'Я' for ch in s)
+    if not all(out.values()) or any(contains_cyrillic(v) for v in out.values()):
+        try:
+            from deep_translator import GoogleTranslator, MyMemoryTranslator, LibreTranslator
+            def tr(s: str) -> str:
+                if not s: return ""
+                for host in ('https://libretranslate.de','https://translate.astian.org'):
+                    try:
+                        v = LibreTranslator(source='ru', target='en', host=host).translate(s) or ""
+                        if v and not contains_cyrillic(v):
+                            return v
+                    except Exception: pass
+                try:
+                    v = GoogleTranslator(source='ru', target='en').translate(s) or ""
+                    if v and not contains_cyrillic(v):
+                        return v
+                except Exception: pass
+                try:
+                    v = MyMemoryTranslator(source='ru', target='en').translate(s) or ""
+                    if v and not contains_cyrillic(v):
+                        return v
+                except Exception: pass
+                return s
+            if not out["title_en"] or contains_cyrillic(out["title_en"]): out["title_en"] = tr(src['title'])
+            if not out["subtitle_en"] or contains_cyrillic(out["subtitle_en"]): out["subtitle_en"] = tr(src['subtitle'])
+            if not out["short_desc_en"] or contains_cyrillic(out["short_desc_en"]): out["short_desc_en"] = tr(src['short_desc'])
+            if not out["body_en"] or contains_cyrillic(out["body_en"]): out["body_en"] = tr(src['body'])
+            if not provider:
+                provider = "fallback"
+        except Exception as exc:
+            provider = provider or "fallback"
+    try:
+        logger.info(f"steam_translate provider={provider} tlen={len(src['title'])} blen={len(src['body'])}")
+    except Exception:
+        pass
+    out["provider"] = provider or ""
+    return out
+
+
+@router.get("/jobs/active")
+def jobs_active(session: Session = Depends(get_session)):
+    from app.models.models import Job, JobStatusEnum
+    from sqlmodel import select
+    rows = session.exec(
+        select(Job).where(Job.status.in_([JobStatusEnum.queued, JobStatusEnum.running])).order_by(Job.created_at.desc()).limit(100)
+    ).all()
+    items = []
+    for j in rows:
+        items.append({
+            "id": j.id,
+            "kind": getattr(j.kind, 'value', str(j.kind)),
+            "status": getattr(j.status, 'value', str(j.status)),
+            "created_at": getattr(j, 'created_at', None).isoformat() if getattr(j, 'created_at', None) else None,
+        })
+    return {"count": len(items), "jobs": items}
+
+
+@router.post("/jobs/cleanup_stuck")
+def jobs_cleanup_stuck(minutes: int = 10, action: str = "mark_error", session: Session = Depends(get_session)):
+    """Mark 'running' jobs older than N minutes as error or retry them.
+    action in {mark_error, retry}
+    """
+    from app.models.models import Job, JobStatusEnum, Post, PostStatusEnum, JobKindEnum
+    from sqlmodel import select
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = _dt.utcnow() - _td(minutes=max(1, minutes))
+    rows = session.exec(
+        select(Job).where(Job.status == JobStatusEnum.running).order_by(Job.created_at.asc()).limit(200)
+    ).all()
+    affected = []
+    for j in rows:
+        try:
+            created = getattr(j, 'created_at', None)
+            if not created or created > cutoff:
+                continue
+            # Extract post_id if present
+            import json as _json
+            post_id = None
+            try:
+                post_id = (_json.loads(j.payload_json or '{}') or {}).get('post_id')
+            except Exception:
+                post_id = None
+            p = session.get(Post, post_id) if post_id else None
+            if action == 'retry':
+                # Mark job error and requeue a new job for the same post
+                j.status = JobStatusEnum.error
+                j.last_error = (j.last_error or '') + ' [auto-cleanup: timeout]'
+                if p is not None and p.status == PostStatusEnum.running:
+                    p.status = PostStatusEnum.queued
+                session.add(j)
+                if p is not None:
+                    session.add(p)
+                session.commit()
+                # Create a new publish job
+                if post_id:
+                    nj = Job(kind=JobKindEnum.publish, payload_json=j.payload_json, status=JobStatusEnum.queued)
+                    session.add(nj)
+                    session.commit()
+                    session.refresh(nj)
+                    from app.jobs.tasks import publish_news_post
+                    publish_news_post.schedule(args=(nj.id, post_id), delay=0)
+                    affected.append({"old_job": j.id, "new_job": nj.id, "post_id": post_id})
+            else:
+                # mark_error
+                j.status = JobStatusEnum.error
+                j.last_error = (j.last_error or '') + ' [auto-cleanup: timeout]'
+                if p is not None and p.status == PostStatusEnum.running:
+                    p.status = PostStatusEnum.error
+                    p.error_text = (p.error_text or '') + ' [auto-cleanup: timeout]'
+                session.add(j)
+                if p is not None:
+                    session.add(p)
+                session.commit()
+                affected.append({"job": j.id, "post_id": post_id})
+        except Exception as exc:
+            try:
+                logger.error(f"jobs_cleanup error for job={getattr(j,'id',None)}: {exc}")
+            except Exception:
+                pass
+    return {"ok": True, "affected": affected}
+
+
+@router.post("/jobs/kill")
+def jobs_kill(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    job_id = id or id_q
+    if not job_id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    from app.models.models import Job, JobStatusEnum, Post, PostStatusEnum
+    import json as _json
+    job = session.get(Job, job_id)
+    if not job:
+        return HTMLResponse("<span style='color:red'>job_not_found</span>", status_code=404)
+    # mark job error and related post canceled
+    job.status = JobStatusEnum.error
+    job.last_error = (job.last_error or '') + ' [killed_by_user]'
+    post_id = None
+    try:
+        post_id = (_json.loads(job.payload_json or '{}') or {}).get('post_id')
+    except Exception:
+        post_id = None
+    if post_id:
+        post = session.get(Post, post_id)
+        if post and post.status in (PostStatusEnum.queued, PostStatusEnum.running):
+            post.status = PostStatusEnum.canceled
+            session.add(post)
+    session.add(job)
+    session.commit()
+    # return refreshed jobs table
+    from app.models.models import Job as _Job
+    rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+
+
+@router.post("/jobs/remove")
+def jobs_remove(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    job_id = id or id_q
+    if not job_id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    from app.models.models import Job, Post, PostStatusEnum
+    import json as _json
+    job = session.get(Job, job_id)
+    if not job:
+        return HTMLResponse("<span style='color:red'>job_not_found</span>", status_code=404)
+    # Best-effort cancel related post if running/queued
+    try:
+        post_id = (_json.loads(job.payload_json or '{}') or {}).get('post_id')
+    except Exception:
+        post_id = None
+    if post_id:
+        post = session.get(Post, post_id)
+        if post and post.status in (PostStatusEnum.queued, PostStatusEnum.running):
+            post.status = PostStatusEnum.canceled
+            session.add(post)
+    session.delete(job)
+    session.commit()
+    from app.models.models import Job as _Job
+    rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+
+
+@router.post("/jobs/refresh_metrics")
+def jobs_refresh_metrics(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    job_id = id or id_q
+    if not job_id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    from app.models.models import Job
+    import json as _json
+    job = session.get(Job, job_id)
+    if not job:
+        return HTMLResponse("<span style='color:red'>job_not_found</span>", status_code=404)
+    try:
+        post_id = (_json.loads(job.payload_json or '{}') or {}).get('post_id')
+    except Exception:
+        post_id = None
+    if post_id:
+        from app.jobs.tasks import refresh_metrics_for_post
+        refresh_metrics_for_post.schedule(args=(post_id,), delay=0)
+    # return refreshed table (status may update shortly after)
+    from app.models.models import Job as _Job
+    rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})

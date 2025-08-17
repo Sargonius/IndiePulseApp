@@ -170,24 +170,28 @@ form.addEventListener('submit', async (e) => {
   if (j.steam_create_url) steamLink.href = j.steam_create_url;
   alert('Assets exported to: ' + lastExportDir);
 });
-// Translate RU→EN using existing endpoint from News page
+// Translate RU→EN using OpenAI-first Steam endpoint
 document.getElementById('btn_translate').addEventListener('click', async ()=>{
-  const ru = document.getElementById('body_ru').value;
+  const t = document.querySelector('input[name="title_ru"]').value;
+  const sub = document.getElementById('subtitle').value;
+  const sd = document.getElementById('short_desc').value;
+  const body = document.getElementById('body_ru').value;
   const fd = new FormData();
-  fd.append('text_ru', ru);
-  const r = await fetch('/api/translate', { method: 'POST', body: fd });
+  fd.append('title_ru', t);
+  fd.append('subtitle', sub);
+  fd.append('short_desc', sd);
+  fd.append('body_ru', body);
+  const r = await fetch('/api/steam/translate_text', { method: 'POST', body: fd });
   if (r.ok) {
-    const html = await r.text();
-    const tmp = document.createElement('div'); tmp.innerHTML = html;
-    const ta = tmp.querySelector('textarea');
-    if (ta) {
-      document.getElementById('body_en').value = ta.textContent || ta.value || '';
-      renderPreviews();
-    }
+    const j = await r.json();
+    document.querySelector('input[name="title_en"]').value = j.title_en || '';
+    document.getElementById('subtitle_en').value = j.subtitle_en || '';
+    document.getElementById('short_desc_en').value = j.short_desc_en || '';
+    document.getElementById('body_en').value = j.body_en || '';
+    renderPreviews();
+  } else {
+    alert('Translate failed');
   }
-  // Also copy subtitle/short desc
-  document.getElementById('subtitle_en').value = document.getElementById('subtitle').value;
-  document.getElementById('short_desc_en').value = document.getElementById('short_desc').value;
 });
 
 openBtn.addEventListener('click', async () => {

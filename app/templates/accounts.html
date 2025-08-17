@@ -22,6 +22,38 @@
 </section>
 
 <section class="card" style="margin-top:16px;">
+<h3>Translation (OpenAI, optional)</h3>
+<form hx-post="/api/settings/save" hx-target="#ai_status" hx-swap="innerHTML">
+	<div>
+		<label>OpenAI API Key</label><br/>
+		<input type="password" name="openai_api_key" value="" placeholder="sk-..." style="width: 520px;" />
+	</div>
+	<div style="margin-top:6px;">
+		<label>Model</label><br/>
+		<input type="text" name="openai_model" value="{{ openai_model or 'gpt-4o-mini' }}" style="width: 360px;" />
+	</div>
+	<button type="submit" class="btn btn-primary" style="margin-top:8px;">Сохранить</button>
+</form>
+<div id="ai_status"></div>
+</section>
+
+<section class="card" style="margin-top:16px;">
+<h3>Discord (multi-channel)</h3>
+<form hx-post="/api/discord/webhooks/save" hx-target="#discord_multi_status" hx-swap="innerHTML">
+	<div>
+		<label>Webhook RU (#showcase-ru)</label><br/>
+		<input type="text" name="url_ru" value="{{ vk_client_id if false }}" placeholder="https://discord.com/api/webhooks/..." style="width:520px;" />
+	</div>
+	<div style="margin-top:6px;">
+		<label>Webhook EN (#showcase-en)</label><br/>
+		<input type="text" name="url_en" value="" placeholder="https://discord.com/api/webhooks/..." style="width:520px;" />
+	</div>
+	<button type="submit" class="btn btn-primary" style="margin-top:8px;">Сохранить вебхуки</button>
+</form>
+<div id="discord_multi_status"></div>
+</section>
+
+<section class="card" style="margin-top:16px;">
 <h3>X / Twitter</h3>
 <form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
 	<div>

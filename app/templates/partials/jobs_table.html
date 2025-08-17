@@ -7,6 +7,7 @@
 		<th>Последняя ошибка</th>
 		<th>Создано</th>
 		<th>Обновлено</th>
+		<th>Действия</th>
 	</tr>
 	{% for j in jobs %}
 	<tr>
@@ -22,6 +23,14 @@
 		<td>{{ j.last_error or '' }}</td>
 		<td>{{ j.created_at }}</td>
 		<td>{{ j.updated_at }}</td>
+		<td>
+			<div class="row" style="gap:6px; align-items:center;">
+				<button class="btn" title="Refresh metrics" hx-post="/api/jobs/refresh_metrics" hx-include="closest tr" hx-target="#jobs_table" hx-swap="outerHTML">⟳</button>
+				<button class="btn" title="Stop" hx-post="/api/jobs/kill" hx-include="closest tr" hx-target="#jobs_table" hx-swap="outerHTML">■</button>
+				<button class="btn" title="Remove" hx-post="/api/jobs/remove" hx-include="closest tr" hx-target="#jobs_table" hx-swap="outerHTML">✖</button>
+				<input type="hidden" name="id" value="{{ j.id }}" />
+			</div>
+		</td>
 	</tr>
 	{% endfor %}
 </table>

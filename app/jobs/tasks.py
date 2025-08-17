@@ -31,28 +31,38 @@ def publish_news_post(job_id: int, post_id: int) -> str:
         session.commit()
         # Simulate publish work; if discord, try sending
         if str(post.platform) == 'PlatformEnum.discord' or str(post.platform) == 'discord':
-            url = None
-            url = load_settings().get('discord_webhook_url')
-            if url:
-                client = DiscordClient(url)
+            settings = load_settings()
+            # Compose per-language messages and target webhooks
+            from app.models.models import Brief
+            brief = session.get(Brief, post.brief_id)
+            text_ru = (brief.text_ru or '').strip() if brief else ''
+            text_en = (brief.text_en or '').strip() if brief else ''
+            media_path = getattr(brief, 'media_path', None) if brief else None
+            if media_path:
+                p = media_path.replace('\\', '/')
+                if not p.startswith('media/'):
+                    p = f"media/{p}"
+                import os as _os
+                media_path = _os.path.abspath(p)
+
+            targets = []
+            if text_ru and settings.get('discord_webhook_ru'):
+                targets.append((settings.get('discord_webhook_ru'), text_ru))
+            if text_en and settings.get('discord_webhook_en'):
+                targets.append((settings.get('discord_webhook_en'), text_en))
+            # Fallback: if no specific webhooks configured, use default once with whichever text available
+            if not targets and settings.get('discord_webhook_url'):
+                fallback_text = text_en or text_ru or '[IndiePulse] New post'
+                targets.append((settings.get('discord_webhook_url'), fallback_text))
+
+            last_url = None
+            for wh_url, content in targets:
                 try:
-                    # Compose message and include media if any
-                    from app.models.models import Brief
-                    brief = session.get(Brief, post.brief_id)
-                    # Exclude hashtags on Discord
-                    base_text = (brief.text_en or brief.text_ru or '') if brief else '[IndiePulse] New post'
-                    text = base_text
-                    media_path = getattr(brief, 'media_path', None) if brief else None
-                    if media_path:
-                        p = media_path.replace('\\', '/')
-                        if not p.startswith('media/'):
-                            p = f"media/{p}"
-                        # Use absolute path to avoid CWD issues
-                        import os as _os
-                        media_path = _os.path.abspath(p)
-                    _, murl = client.send_message(text, file_path=media_path)
-                    post.platform_url = murl
+                    client = DiscordClient(wh_url)
+                    _, murl = client.send_message(content, file_path=media_path)
+                    last_url = murl or last_url
                 except Exception as exc:
+                    # continue to next target but record error on post/job
                     post.status = PostStatusEnum.error
                     post.error_text = str(exc)
                     if job is not None:
@@ -63,6 +73,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         session.add(job)
                     session.commit()
                     return 'error'
+            post.platform_url = last_url
         elif str(post.platform) == 'PlatformEnum.x' or str(post.platform) == 'x':
             from app.services.x_client import XClient
             from app.services.x_media import XMediaUploader
@@ -81,13 +92,13 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             # Compose text from brief if available
             from app.models.models import Brief
             brief = session.get(Brief, post.brief_id)
-            text = (brief.text_en or brief.text_ru or '') if brief else ''
-            # Include hashtags on X
+            base_text = (brief.text_en or brief.text_ru or '') if brief else ''
+            hashtags = ''
             if brief and getattr(brief, 'tags_json', None):
                 try:
-                    text = (text + '\n' + brief.tags_json).strip()
+                    hashtags = (brief.tags_json or '').strip()
                 except Exception:
-                    pass
+                    hashtags = ''
             media_id: Optional[str] = None
             # prefer normal video/image if provided via job payload override or draft hidden field
             media_rel: Optional[str] = None
@@ -137,7 +148,9 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     # Use v2 create tweet with media
                     import httpx
                     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-                    payload = {"text": text[:280], "media": {"media_ids": [media_id]}}
+                    # Build thread: first tweet with text+hashtags limited to 280; if overflow, continue in replies
+                    text1 = (base_text + (('\n'+hashtags) if hashtags else ''))
+                    payload = {"text": text1[:280], "media": {"media_ids": [media_id]}}
                     with httpx.Client(timeout=20) as h:
                         r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
                         d = r.json()
@@ -145,8 +158,23 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                             raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
                         tid = (d.get('data') or {}).get('id')
                         url = f"https://twitter.com/i/web/status/{tid}" if tid else None
+                        # If overflow beyond 280, post remaining text as replies (split on word boundaries)
+                        remaining = text1[280:]
+                        import re
+                        while remaining and tid:
+                            chunk = remaining[:260]
+                            # try to break on whitespace
+                            m = re.search(r"^(.{1,260})(\s|$)", remaining)
+                            if m:
+                                chunk = m.group(1)
+                            from app.services.x_client import XClient as _XC
+                            xc = _XC(token)
+                            tid = xc.reply(tid, chunk)
+                            remaining = remaining[len(chunk):].lstrip()
                 else:
-                    tid2, url = client.tweet(text)
+                    # no media; thread similarly
+                    text1 = (base_text + (('\n'+hashtags) if hashtags else ''))
+                    tid2, url = client.tweet(text1)
                     if tid2:
                         post.platform_post_id = tid2
                 post.platform_url = url
@@ -348,8 +376,17 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.commit()
                 return 'error'
             brief = session.get(Brief, post.brief_id)
-            title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or 'Post from IndiePulse')[:290]
-            body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
+            full_body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
+            # Split first paragraph as header and remainder for comment
+            first_par = full_body.strip().split('\n\n', 1)[0] if full_body else ''
+            rest_text = ''
+            if '\n\n' in full_body:
+                rest_text = full_body.split('\n\n', 1)[1].strip()
+            elif len(full_body) > 500:
+                first_par, rest_text = full_body[:500], full_body[500:]
+            # Title from first paragraph; fallback to explicit title
+            title = ((getattr(brief, 'title', None) or first_par or getattr(brief, 'text_en', None) or 'Post from IndiePulse'))[:290]
+            body = ''  # main post body left empty; we will add the remainder as a comment
             if brief and getattr(brief, 'tags_json', None):
                 try:
                     body = (body + '\n' + brief.tags_json).strip()
@@ -357,8 +394,54 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     pass
             try:
                 rc = RedditClient(cid, csec, uname, pwd)
-                permalink = rc.submit_text(sub, title=title, body=body)
-                post.platform_url = f"https://reddit.com{permalink}" if permalink else None
+                # choose media if present
+                media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                url = None; sid = None
+                if media_rel:
+                    import os as _os, mimetypes as _m
+                    p = media_rel.replace('\\','/')
+                    if not p.startswith('media/'):
+                        p = f"media/{p}"
+                    path = _os.path.abspath(p)
+                    ctype = _m.guess_type(path)[0] or ''
+                    if ctype.startswith('image/'):
+                        # Reddit supports jpg/png best; convert others to PNG
+                        if not (ctype.endswith('jpeg') or ctype.endswith('jpg') or ctype.endswith('png')):
+                            try:
+                                from PIL import Image
+                                img = Image.open(path).convert('RGB')
+                                tmp_path = _os.path.join('render', f"reddit_{post.id}_image.png")
+                                _os.makedirs('render', exist_ok=True)
+                                img.save(tmp_path, format='PNG', optimize=True)
+                                path = _os.path.abspath(tmp_path)
+                            except Exception:
+                                pass
+                        sid, url = rc.submit_image(sub, title=title, image_path=path)
+                    elif ctype.startswith('video/'):
+                        sid, url = rc.submit_video(sub, title=title, video_path=path)
+                if not sid:
+                    sid, url = rc.submit_text(sub, title=title, text=body)
+                post.platform_post_id = sid
+                post.platform_url = url
+                # Mark done and return to avoid falling through into unrelated branches
+                from app.models.models import PostStatusEnum, JobStatusEnum
+                post.status = PostStatusEnum.done
+                from datetime import datetime as _dt
+                post.published_at = _dt.utcnow()
+                if job is not None:
+                    job.status = JobStatusEnum.done
+                    session.add(job)
+                session.add(post)
+                session.commit()
+                # If there is remaining text, schedule a comment thread with retries
+                if rest_text:
+                    reddit_reply_comment.schedule(args=(post.platform_post_id, rest_text, 1), delay=30)
+                try:
+                    from app.jobs.tasks import refresh_metrics_for_post
+                    refresh_metrics_for_post.schedule(args=(post.id,), delay=2)
+                except Exception:
+                    pass
+                return 'ok'
             except Exception as exc:
                 post.status = PostStatusEnum.error
                 post.error_text = str(exc)
@@ -370,7 +453,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
-            message = (brief.text_ru if is_ru else brief.text_en) or brief.text_en or brief.text_ru or ''
+            # Build a message if needed for FB branch; Reddit handled above
+            message = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
             # include hashtags for FB
             if brief and getattr(brief, 'tags_json', None):
                 try:
@@ -386,7 +470,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 import os as _os
                 path_abs = _os.path.abspath(p)
             try:
-                fb = FacebookClient(page_token)
+                from app.services.facebook_client import FacebookClient as _FB
+                fb = _FB(page_token)
                 if path_abs:
                     resp = fb.create_photo(page_id, path_abs, caption=message)
                 else:
@@ -604,3 +689,26 @@ def refresh_metrics_for_post(post_id: int) -> str:
         session.add(post)
         session.commit()
         return "ok"
+
+
+@huey.task()
+def reddit_reply_comment(submission_id: str, text: str, attempt: int = 1) -> str:
+    """Post a follow-up comment to a Reddit submission, with simple retry backoff."""
+    try:
+        from app.services.settings import load_settings
+        from app.services.reddit_client import RedditClient
+        cfg = load_settings()
+        cid = (cfg.get('reddit_client_id') or '').strip()
+        csec = (cfg.get('reddit_client_secret') or '').strip()
+        uname = (cfg.get('reddit_username') or '').strip()
+        pwd = (cfg.get('reddit_password') or '').strip()
+        if not (cid and csec and uname and pwd and submission_id):
+            return "not_configured"
+        rc = RedditClient(cid, csec, uname, pwd)
+        rc.comment(submission_id, text[:10000])
+        return "ok"
+    except Exception as exc:
+        # Retry a couple of times with backoff (Reddit can be slow to make posts commentable)
+        if attempt < 5:
+            reddit_reply_comment.schedule(args=(submission_id, text, attempt + 1), delay=min(300, 30 * attempt))
+        return f"error: {exc}"

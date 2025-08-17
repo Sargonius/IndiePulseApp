@@ -12,6 +12,7 @@
 		<th>Ответы/Комменты</th>
 		<th>Цитаты/Просмотры</th>
 		<th>Хэштеги</th>
+		<th>Действия</th>
 	</tr>
 	{% for p in posts %}
 	<tr>
@@ -33,6 +34,13 @@
 		<td>{{ p.m_reply if p.m_reply is not none else '—' }}</td>
 		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
 		<td class="muted" style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ p.tags or '' }}</td>
+		<td>
+			<div class="row" style="gap:6px; align-items:center;">
+				<button class="btn" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-include="closest tr" hx-target="#posts_table" hx-swap="outerHTML">⟳</button>
+				<button class="btn" title="Remove" hx-post="/api/posts/remove" hx-include="closest tr" hx-target="#posts_table" hx-swap="outerHTML">✖</button>
+				<input type="hidden" name="id" value="{{ p.id }}" />
+			</div>
+		</td>
 	</tr>
 	{% endfor %}
 </table>

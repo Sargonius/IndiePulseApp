@@ -10,6 +10,7 @@ from app.db.session import get_session
 from app.models.models import Brief, Post, PlatformEnum, PostStatusEnum, Job, JobKindEnum, JobStatusEnum
 from app.jobs.tasks import publish_news_post
 from app.services.draft_store import load_draft, save_draft, clear_draft
+from app.services.settings import load_settings
 from app.jobs.tasks import refresh_metrics_for_post
 from app.services.settings import load_settings
 
@@ -50,12 +51,23 @@ def _enrich_posts(posts):
 
 @router.get('/', response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse('index.html', {'request': request})
+    return templates.TemplateResponse('index.html', {'request': request, 'body_class': 'page-index'})
 
 @router.get('/news', response_class=HTMLResponse)
 def news_form(request: Request):
     draft = load_draft()
-    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft})
+    cfg = load_settings()
+    platforms_ready = {
+        'discord': bool((cfg.get('discord_webhook_ru') or cfg.get('discord_webhook_en') or cfg.get('discord_webhook_url') or '').strip()),
+        'x': bool((cfg.get('x_access_token') or '').strip()),
+        'vk': bool(((cfg.get('vk_access_token') or '').strip()) and ((cfg.get('vk_group_id') or '').strip())),
+        'yt': bool(((cfg.get('yt_access_token') or '').strip()) and ((cfg.get('yt_refresh_token') or '').strip())),
+        'fb_ru': bool(((cfg.get('fb_ru_page_id') or '').strip()) and ((cfg.get('fb_ru_page_access_token') or '').strip())),
+        'fb_en': bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip())),
+        'reddit': bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip())),
+        'tiktok': True,
+    }
+    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready})
 
 @router.get('/steam', response_class=HTMLResponse)
 def steam_export_page(request: Request):
@@ -96,6 +108,8 @@ def accounts(request: Request):
             'reddit_client_secret': cfg.get('reddit_client_secret', ''),
             'reddit_username': cfg.get('reddit_username', ''),
             'reddit_subreddit_en': cfg.get('reddit_subreddit_en', ''),
+            'openai_api_key': cfg.get('openai_api_key', ''),
+            'openai_model': cfg.get('openai_model', ''),
         },
     )
 
@@ -198,6 +212,11 @@ def submit_news(
                 enum_val = PlatformEnum(p)
             except ValueError:
                 continue
+            # Failsafe: skip platforms lacking required media
+            if p in ('yt', 'tiktok'):
+                has_vertical = bool((media_vertical or '').strip()) or bool((media_path or '').strip())
+                if not has_vertical:
+                    continue
             post = Post(
                 user_id=1,
                 brief_id=brief.id,

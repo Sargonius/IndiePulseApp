@@ -33,6 +33,31 @@ class RedditClient:
             logger.error(f"Reddit submission failed: {e}")
             raise RuntimeError(f"Reddit submission failed: {e}")
 
+    def submit_image(self, subreddit_name: str, title: str, image_path: str) -> Tuple[str, str]:
+        try:
+            subreddit = self.reddit.subreddit(subreddit_name)
+            submission = subreddit.submit_image(title=title, image_path=image_path)
+            return submission.id, submission.url
+        except Exception as e:
+            logger.error(f"Reddit image submission failed: {e}")
+            raise RuntimeError(f"Reddit image submission failed: {e}")
+
+    def submit_video(self, subreddit_name: str, title: str, video_path: str, thumbnail_path: str | None = None) -> Tuple[str, str]:
+        try:
+            subreddit = self.reddit.subreddit(subreddit_name)
+            submission = subreddit.submit_video(title=title, video_path=video_path, thumbnail_path=thumbnail_path)
+            return submission.id, submission.url
+        except Exception as e:
+            logger.error(f"Reddit video submission failed: {e}")
+            raise RuntimeError(f"Reddit video submission failed: {e}")
+
+    def comment(self, submission_id: str, text: str) -> None:
+        try:
+            subm = self.reddit.submission(id=submission_id)
+            subm.reply(text)
+        except Exception as e:
+            logger.error(f"Reddit comment failed: {e}")
+
     def test_connection(self) -> bool:
         """Test if the Reddit connection is working"""
         try:

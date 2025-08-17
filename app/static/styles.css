@@ -12,7 +12,7 @@
 }
 
 * { box-sizing: border-box; }
-html { margin: 0; padding: 0; }
+html { margin: 0; padding: 0; overflow-y: scroll; scrollbar-gutter: stable; }
 
 body {
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
@@ -28,24 +28,36 @@ body {
 }
 
 header {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  z-index: 10;
+  z-index: 1000;
   margin-top: 0;
+  transform: translateZ(0);
 }
 
 header .inner {
-  max-width: 1120px;
+  width: 1120px; /* fixed width to avoid jitter across screens */
   margin: 0 auto;
   padding: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 56px;
 }
 
 header h1 { margin: 0; font-size: 18px; }
+
+nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
 
 nav a {
   color: var(--text);
@@ -55,8 +67,29 @@ nav a {
   margin-right: 4px;
 }
 nav a:hover { background: #f1f5f9; }
+nav a.active { background: var(--primary); color: #fff; }
 
-main { margin-top: 12px; }
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+.icon-btn:hover { background: #f8fafc; }
+.icon-btn.active { background: #e0f2fe; border-color: #93c5fd; }
+.nav-inline { display: inline-flex; margin-left: 8px; }
+.nav-inline { width: 40px; height: 32px; align-items: center; justify-content: center; }
+
+main { margin-top: 0; padding-top: 64px; }
+
+/* Page-specific tweak to eliminate unexpected top offset on index only */
+/* Index no longer needs special sticky; keep uniform behavior */
+body.page-index main, body.page-index .container:first-child { margin-top: 0 !important; }
 
 /* Buttons */
 button, .btn {
