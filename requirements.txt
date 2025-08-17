@@ -19,3 +19,4 @@ google-auth-oauthlib
 praw
 deep-translator
 requests-oauthlib
+pillow

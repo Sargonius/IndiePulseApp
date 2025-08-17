@@ -1,2 +1,138 @@
-﻿body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-header h1 { margin: 0 0 16px; }
+﻿:root {
+  --bg: #fafafa;
+  --card: #ffffff;
+  --text: #1e1e1e;
+  --muted: #666;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+  --primary-600: #1d4ed8;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+}
+
+* { box-sizing: border-box; }
+html { margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+  margin-top: 0;
+}
+
+header .inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+header h1 { margin: 0; font-size: 18px; }
+
+nav a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-right: 4px;
+}
+nav a:hover { background: #f1f5f9; }
+
+main { margin-top: 12px; }
+
+/* Buttons */
+button, .btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.02s;
+}
+
+button:hover, .btn:hover { background: #f8fafc; }
+button:active, .btn:active { transform: translateY(1px); }
+
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary-600); border-color: var(--primary-600); }
+.btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* Forms */
+input[type="text"], input[type="password"], input[type="datetime-local"], textarea, select {
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 8px 10px;
+  border-radius: 8px;
+  outline: none;
+}
+input[type="text"], input[type="password"], input[type="datetime-local"], select { min-width: 260px; }
+textarea { width: 100%; max-width: 720px; }
+
+label { font-weight: 600; }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: #f8fafc; font-weight: 700; }
+tbody tr:nth-child(odd) { background: #fcfcfc; }
+
+#posts_table a, #jobs_table a { color: var(--primary); }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.badge.success { background: #dcfce7; color: #166534; }
+.badge.error { background: #fee2e2; color: #991b1b; }
+.badge.running { background: #fff7ed; color: #9a3412; }
+.badge.default { background: #e5e7eb; color: #374151; }
+
+/* Dropzones */
+#drop_zone_normal, #drop_zone_vertical {
+  width: 320px; height: 180px; border: 2px dashed #94a3b8; color: #64748b;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 8px; background: #f8fafc;
+}
+#drop_zone_normal:hover, #drop_zone_vertical:hover { background: #f1f5f9; }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+
+/* htmx indicator default behavior */
+.htmx-indicator { display: none; }
+/* Show indicator when either parent or the indicator itself has htmx-request */
+.htmx-request .htmx-indicator, .htmx-indicator.htmx-request { display: inline-block; }
+
+/* Utilities */
+.muted { color: var(--muted); }
+.grid { display: grid; gap: 12px; }
+.grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+  nav a { padding: 6px 8px; }
+}

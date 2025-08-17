@@ -1,15 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Публикации</h2>
-<div>
-    <button hx-get="/posts/partial" hx-target="#posts_table" hx-swap="outerHTML">Обновить</button>
-    <button hx-get="/posts/partial" hx-target="#posts_table" hx-swap="outerHTML" hx-trigger="every 3s">Автообновление</button>
-    <button id="refresh_metrics_btn">Обновить метрики</button>
-</div>
+<div class="toolbar">
+    <button class="btn" hx-get="/posts/partial" hx-target="#posts_table" hx-swap="outerHTML">Обновить</button>
+    <label class="row" style="gap:6px;">
+      <input type="checkbox" id="auto_refresh_toggle" /> Автообновление (5с)
+    </label>
+    <button id="refresh_metrics_btn" class="btn">Обновить метрики</button>
+    <span id="refresh_status" class="muted"></span>
+  </div>
 <div id="posts_table" hx-get="/posts/partial" hx-trigger="load" hx-swap="outerHTML"></div>
 
 <script>
 document.getElementById('refresh_metrics_btn').addEventListener('click', async () => {
+  const btn = document.getElementById('refresh_metrics_btn');
+  const status = document.getElementById('refresh_status');
   const rows = document.querySelectorAll('#posts_table tr');
   const ids = [];
   rows.forEach((tr, idx) => {
@@ -20,11 +25,24 @@ document.getElementById('refresh_metrics_btn').addEventListener('click', async (
       if (id) ids.push(id);
     }
   });
+  btn.disabled = true;
+  status.textContent = `Отправка ${ids.length} заданий...`;
   for (const id of ids) {
     fetch(`/api/metrics/refresh?post_id=${encodeURIComponent(id)}`);
   }
   // refresh table after a short delay
-  setTimeout(() => { htmx.trigger('#posts_table', 'refresh'); }, 1200);
+  setTimeout(() => { htmx.trigger('#posts_table', 'refresh'); btn.disabled = false; status.textContent = 'Готово'; setTimeout(()=>status.textContent='', 1500); }, 1200);
+});
+
+// Auto refresh toggle
+const toggle = document.getElementById('auto_refresh_toggle');
+const tableDiv = document.getElementById('posts_table');
+toggle.addEventListener('change', () => {
+  if (toggle.checked) {
+    tableDiv.setAttribute('hx-trigger', 'load, every 5s');
+  } else {
+    tableDiv.setAttribute('hx-trigger', 'load');
+  }
 });
 </script>
 {% endblock %}

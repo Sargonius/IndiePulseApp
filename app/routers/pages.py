@@ -43,6 +43,7 @@ def _enrich_posts(posts):
             'm_repost': pick('retweet', 'reposts'),
             'm_reply': pick('reply', 'comments'),
             'm_quote': pick('quote', 'views'),
+            'tags': getattr(p, 'brief', None) and getattr(p.brief, 'tags_json', None),
         }
         enriched.append(row)
     return enriched
@@ -155,13 +156,28 @@ def submit_news(
     if media_normal:
         media_path = f"media/{media_normal}" if not media_normal.startswith('media/') else media_normal
 
+    # Merge weekday auto-tags into tags before creating brief
+    weekday_auto = []
+    if scheduled_at:
+        try:
+            when_dt = datetime.fromisoformat(scheduled_at)
+            if when_dt.weekday() == 5:
+                weekday_auto.append('#screenshotsaturday')
+            if when_dt.weekday() == 2:
+                weekday_auto.append('#wishlistwednesday')
+        except Exception:
+            pass
+    tags_final = (tags or '').strip()
+    if weekday_auto:
+        tags_final = (tags_final + ' ' + ' '.join(weekday_auto)).strip()
+
     brief = Brief(
         user_id=1,
         type='news',
         text_ru=text_ru or '',
         text_en=text_en or '',
         title=(yt_title or '').strip() or None,
-        tags_json=tags or '',
+        tags_json=tags_final,
         media_path=media_path,
     )
     session.add(brief)
@@ -173,6 +189,7 @@ def submit_news(
         when_dt: Optional[datetime] = None
         if scheduled_at:
             try:
+                # Interpret as local machine time coming from the browser (naive)
                 when_dt = datetime.fromisoformat(scheduled_at)
             except Exception:
                 when_dt = None
@@ -192,29 +209,43 @@ def submit_news(
             created_posts.append(post)
         session.commit()
 
-    # Enqueue immediate publish tasks for posts without schedule
+    # Enqueue publish tasks for all posts; if scheduled_at is in the past, run immediately
     for post in created_posts:
-        if post.scheduled_at is None:
-            # Include media override per platform (vertical for yt, normal for others)
-            import json as _json
+        import json as _json
+        media_rel = None
+        try:
+            if str(post.platform) in (str(PlatformEnum.yt), 'yt'):
+                media_rel = (media_vertical or '').strip() or None
+            else:
+                media_rel = (media_normal or '').strip() or None
+        except Exception:
             media_rel = None
-            try:
-                if str(post.platform) in (str(PlatformEnum.yt), 'yt'):
-                    media_rel = (media_vertical or '').strip() or None
-                else:
-                    media_rel = (media_normal or '').strip() or None
-            except Exception:
-                media_rel = None
-            payload = {"post_id": post.id}
-            if media_rel:
-                payload["media_rel"] = media_rel
-            if str(post.platform) in (str(PlatformEnum.yt), 'yt') and (yt_title or '').strip():
-                payload["yt_title"] = (yt_title or '').strip()
-            job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
-            session.add(job)
-            session.commit()
-            session.refresh(job)
-            publish_news_post.schedule(args=(job.id, post.id), delay=0)
+        payload = {"post_id": post.id}
+        if media_rel:
+            payload["media_rel"] = media_rel
+        if str(post.platform) in (str(PlatformEnum.yt), 'yt') and (yt_title or '').strip():
+            payload["yt_title"] = (yt_title or '').strip()
+        job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        # Compute delay based on local now
+        try:
+            from datetime import datetime as _dt
+            # Use local naive time; if scheduled_at has tzinfo, convert to naive local approximation
+            target = post.scheduled_at
+            if target is not None and getattr(target, 'tzinfo', None) is not None:
+                try:
+                    target = target.replace(tzinfo=None)
+                except Exception:
+                    pass
+            if target is not None:
+                delay_s = int(max(0, (target - _dt.now()).total_seconds()))
+            else:
+                delay_s = 0
+        except Exception:
+            delay_s = 0
+        publish_news_post.schedule(args=(job.id, post.id), delay=delay_s)
 
     # Clear draft on successful queue
     clear_draft()

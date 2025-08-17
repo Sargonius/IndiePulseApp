@@ -1,7 +1,27 @@
 ﻿{% extends "base.html" %}
 {% block content %}
-  <p>MVP scaffold is running.</p>
-  <p>Health: <a href="/health">/health</a></p>
-  <p><a href="/news">Перейти к форме «Новость»</a></p>
-  <p><a href="/posts">Публикации</a> | <a href="/jobs">Журнал задач</a></p>
+  <div class="grid cols-3">
+    <div class="card">
+      <h3>Быстрые действия</h3>
+      <div class="stack" style="margin-top:8px;">
+        <a class="btn btn-primary" href="/news">Создать новость</a>
+        <a class="btn" href="/posts">Открыть публикации</a>
+        <a class="btn" href="/jobs">Открыть журнал задач</a>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Состояние</h3>
+      <div class="muted">Приложение запущено</div>
+      <div style="margin-top:6px;">
+        Health: <a href="/health">/health</a>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Инструменты</h3>
+      <div class="stack" style="margin-top:8px;">
+        <a class="btn" href="/steam">Steam Export</a>
+        <a class="btn" href="/accounts">Аккаунты</a>
+      </div>
+    </div>
+  </div>
 {% endblock %}

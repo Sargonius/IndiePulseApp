@@ -29,12 +29,187 @@ def _ffmpeg_path() -> str:
     for path in common_paths:
         if os.path.exists(path):
             return path
-    
+
+    # Attempt auto-download on Windows
+    if os.name == "nt":
+        try:
+            os.makedirs(os.path.join("vendor", "ffmpeg"), exist_ok=True)
+            zip_path = os.path.join("vendor", "ffmpeg", "ffmpeg_win64.zip")
+            # Try a list of known mirrors (first working one will be used)
+            urls = [
+                # BtbN GitHub builds (latest nightly)
+                "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+                # Gyan.dev release essentials (versioned; may change over time)
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            ]
+            import httpx, zipfile, io, shutil
+            data: Optional[bytes] = None
+            last_err: Optional[Exception] = None
+            for u in urls:
+                try:
+                    with httpx.Client(timeout=30.0) as c:
+                        r = c.get(u)
+                        r.raise_for_status()
+                        data = r.content
+                        break
+                except Exception as e:
+                    last_err = e
+                    data = None
+                    continue
+            if data is None:
+                raise RuntimeError(f"failed_to_download_ffmpeg: {last_err}")
+            with open(zip_path, "wb") as f:
+                f.write(data)
+            # Extract and locate ffmpeg.exe and ffprobe.exe
+            with zipfile.ZipFile(zip_path, 'r') as z:
+                members = z.namelist()
+                # Try to find bin/ffmpeg.exe within the archive
+                ffmpeg_member = next((m for m in members if m.lower().endswith("/bin/ffmpeg.exe")), None)
+                ffprobe_member = next((m for m in members if m.lower().endswith("/bin/ffprobe.exe")), None)
+                # Some archives may store at root
+                if not ffmpeg_member:
+                    ffmpeg_member = next((m for m in members if m.lower().endswith("ffmpeg.exe")), None)
+                if not ffprobe_member:
+                    ffprobe_member = next((m for m in members if m.lower().endswith("ffprobe.exe")), None)
+                if not ffmpeg_member:
+                    raise RuntimeError("ffmpeg_exe_not_found_in_archive")
+                # Extract to temp dir and copy
+                temp_dir = os.path.join("vendor", "ffmpeg", "_tmp")
+                os.makedirs(temp_dir, exist_ok=True)
+                z.extract(ffmpeg_member, temp_dir)
+                if ffprobe_member:
+                    z.extract(ffprobe_member, temp_dir)
+                # Compute extracted paths
+                ffmpeg_src = os.path.join(temp_dir, ffmpeg_member)
+                ffprobe_src = os.path.join(temp_dir, ffprobe_member) if ffprobe_member else None
+                # Normalize separators
+                ffmpeg_src = ffmpeg_src.replace("/", os.sep)
+                if ffprobe_src:
+                    ffprobe_src = ffprobe_src.replace("/", os.sep)
+                dest_dir = os.path.join("vendor", "ffmpeg")
+                ffmpeg_dest = os.path.join(dest_dir, "ffmpeg.exe")
+                ffprobe_dest = os.path.join(dest_dir, "ffprobe.exe")
+                shutil.copy2(ffmpeg_src, ffmpeg_dest)
+                if ffprobe_src and os.path.exists(ffprobe_src):
+                    shutil.copy2(ffprobe_src, ffprobe_dest)
+                # Cleanup temp and zip
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                try:
+                    os.remove(zip_path)
+                except Exception:
+                    pass
+                if os.path.exists(ffmpeg_dest):
+                    return ffmpeg_dest
+        except Exception as e:
+            # Fall through to error with a helpful message
+            raise RuntimeError(
+                "FFmpeg not found and auto-download failed. Please install FFmpeg and add it to PATH, "
+                "or place ffmpeg.exe in vendor/ffmpeg/. "
+                f"Details: {e}"
+            )
+
     raise RuntimeError(
         "FFmpeg not found. Please install FFmpeg and add it to PATH, "
         "or place ffmpeg.exe in vendor/ffmpeg/ directory. "
         "Download from: https://ffmpeg.org/download.html"
     )
+
+
+def install_ffmpeg_win() -> str:
+    """Attempt to download and install FFmpeg into vendor/ffmpeg on Windows.
+    Returns the path to ffmpeg.exe on success, raises RuntimeError on failure.
+    """
+    if os.name != "nt":
+        raise RuntimeError("auto-install supported on Windows only")
+
+    dest_dir = os.path.join("vendor", "ffmpeg")
+    os.makedirs(dest_dir, exist_ok=True)
+    zip_path = os.path.join(dest_dir, "ffmpeg_win64.zip")
+
+    urls = [
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+    ]
+
+    last_err: Optional[Exception] = None
+    data: Optional[bytes] = None
+    # First try Python httpx (works if TLS/mirror ok)
+    try:
+        import httpx
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) IndiePulse/1.0"}
+        for u in urls:
+            try:
+                with httpx.Client(timeout=40.0, follow_redirects=True, headers=headers) as c:
+                    r = c.get(u)
+                    r.raise_for_status()
+                    data = r.content
+                    break
+            except Exception as e:
+                last_err = e
+                data = None
+                continue
+        if data is not None:
+            with open(zip_path, "wb") as f:
+                f.write(data)
+    except Exception as e:
+        last_err = e
+        data = None
+
+    # Fallback: PowerShell Invoke-WebRequest (handles some TLS/cert configs better)
+    if data is None:
+        import subprocess
+        for u in urls:
+            try:
+                cmd = [
+                    "powershell", "-NoProfile", "-Command",
+                    f"Invoke-WebRequest -UseBasicParsing -Uri '{u}' -OutFile '{zip_path}'"
+                ]
+                proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if proc.returncode == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 0:
+                    break
+            except Exception as e2:
+                last_err = e2
+        if not (os.path.exists(zip_path) and os.path.getsize(zip_path) > 0):
+            raise RuntimeError(f"download_failed: {last_err}")
+
+    # Extract and place binaries
+    import zipfile, shutil
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        members = z.namelist()
+        ffmpeg_member = next((m for m in members if m.lower().endswith("/bin/ffmpeg.exe")), None)
+        ffprobe_member = next((m for m in members if m.lower().endswith("/bin/ffprobe.exe")), None)
+        if not ffmpeg_member:
+            ffmpeg_member = next((m for m in members if m.lower().endswith("ffmpeg.exe")), None)
+        if not ffprobe_member:
+            ffprobe_member = next((m for m in members if m.lower().endswith("ffprobe.exe")), None)
+        if not ffmpeg_member:
+            raise RuntimeError("ffmpeg_exe_not_found_in_archive")
+        temp_dir = os.path.join(dest_dir, "_tmp")
+        os.makedirs(temp_dir, exist_ok=True)
+        z.extract(ffmpeg_member, temp_dir)
+        if ffprobe_member:
+            z.extract(ffprobe_member, temp_dir)
+        ffmpeg_src = os.path.join(temp_dir, ffmpeg_member).replace("/", os.sep)
+        ffprobe_src = os.path.join(temp_dir, ffprobe_member).replace("/", os.sep) if ffprobe_member else None
+        ffmpeg_dest = os.path.join(dest_dir, "ffmpeg.exe")
+        ffprobe_dest = os.path.join(dest_dir, "ffprobe.exe")
+        shutil.copy2(ffmpeg_src, ffmpeg_dest)
+        if ffprobe_src and os.path.exists(ffprobe_src):
+            shutil.copy2(ffprobe_src, ffprobe_dest)
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+    try:
+        os.remove(zip_path)
+    except Exception:
+        pass
+    if not os.path.exists(ffmpeg_dest):
+        raise RuntimeError("ffmpeg_install_failed")
+    return ffmpeg_dest
 
 
 def render_vertical_with_music(
@@ -59,8 +234,14 @@ def render_vertical_with_music(
     def _probe_duration_seconds(path: str) -> float:
         """Return media duration in seconds using ffprobe; 0.0 on failure."""
         try:
-            import subprocess, json
-            ffprobe = ffmpeg.replace("ffmpeg", "ffprobe") if "ffmpeg" in ffmpeg else "ffprobe"
+            import subprocess, json, os as _os
+            # Resolve ffprobe in the same directory as ffmpeg when using a full path
+            if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
+                base_dir = _os.path.dirname(ffmpeg)
+                exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
+                ffprobe = _os.path.join(base_dir, exe)
+            else:
+                ffprobe = "ffprobe"
             args = [
                 ffprobe,
                 "-v", "error",
@@ -73,6 +254,29 @@ def render_vertical_with_music(
             return float(out)
         except Exception:
             return 0.0
+
+    def _probe_has_audio(path: str) -> bool:
+        """Return True if input has at least one audio stream."""
+        try:
+            import subprocess, os as _os
+            if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
+                base_dir = _os.path.dirname(ffmpeg)
+                exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
+                ffprobe = _os.path.join(base_dir, exe)
+            else:
+                ffprobe = "ffprobe"
+            args = [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=index",
+                "-of", "csv=p=0",
+                path,
+            ]
+            out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True).strip()
+            return bool(out)
+        except Exception:
+            return False
 
     # Build filtergraph: scale and crop
     # Scale height to 1920, preserve aspect, width becomes sw
@@ -109,8 +313,10 @@ def render_vertical_with_music(
     else:
         render_duration = _probe_duration_seconds(input_video)
 
+    has_audio = _probe_has_audio(input_video)
+
     if music_path and os.path.exists(music_path):
-        # Audio filter for music: delay start, then mix with original; apply fades to the FINAL mix
+        # Audio filter with music. If input has no audio, use only music track.
         delay_ms = max(0, int(music_offset_s * 1000))
         # Prepare delayed music track
         music_chain = f"[1:a]adelay={delay_ms}|{delay_ms}[am]"
@@ -125,17 +331,26 @@ def render_vertical_with_music(
             post_fades.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
         post_chain = ",".join(post_fades) if post_fades else "anull"
 
-        fc = (
-            f"[0:v]{vf}[v];"
-            f"{music_chain};"
-            f"[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a0];"
-            f"[a0]{post_chain}[a]"
-        )
-        cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        if has_audio:
+            fc = (
+                f"[0:v]{vf}[v];"
+                f"{music_chain};"
+                f"[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a0];"
+                f"[a0]{post_chain}[a]"
+            )
+            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        else:
+            # No input audio: use only delayed music, then apply fades
+            fc = (
+                f"[0:v]{vf}[v];"
+                f"{music_chain};"
+                f"[am]{post_chain}[a]"
+            )
+            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
     else:
-        # No external music: apply fade-in and fade-out to original video audio
-        if (fade_in_s and fade_in_s > 0) or (fade_out_s and fade_out_s > 0):
-            # Always apply fades to the final audio stream
+        # No external music
+        if has_audio and ((fade_in_s and fade_in_s > 0) or (fade_out_s and fade_out_s > 0)):
+            # Apply fades to input audio only if audio exists
             fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
             parts = []
             if fade_in_s and float(fade_in_s) > 0:
@@ -146,7 +361,7 @@ def render_vertical_with_music(
             fc = f"[0:v]{vf}[v];[0:a]{post_chain}[a]"
             cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
         else:
-            # No fades needed, just video processing
+            # No audio present or no fades needed: just video processing (no audio mapping)
             cmd += ["-vf", vf]
 
     # Output settings

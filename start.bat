@@ -24,6 +24,6 @@ if exist .env (
   )
 )
 
-REM Write server PID to .server.pid for restart script
-powershell -NoProfile -Command "$p = Start-Process -FilePath '.\\.venv\\Scripts\\python.exe' -ArgumentList '-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%' -PassThru; Set-Content -Path '.server.pid' -Value $p.Id"
+REM Run foreground debug server so logs are visible
+call start_debug.bat
 endlocal

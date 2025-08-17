@@ -3,6 +3,7 @@ from typing import Optional
 from .huey_app import huey
 from sqlmodel import Session
 from app.db.session import engine
+from huey import crontab
 
 
 @huey.task()
@@ -38,15 +39,9 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     # Compose message and include media if any
                     from app.models.models import Brief
                     brief = session.get(Brief, post.brief_id)
-                    # Exclude hashtags for Discord
+                    # Exclude hashtags on Discord
                     base_text = (brief.text_en or brief.text_ru or '') if brief else '[IndiePulse] New post'
-                    tags = ''
-                    try:
-                        import json as _json
-                        tags = ' ' + ' '.join([t for t in (brief.tags_json or '').split() if t.startswith('#')]) if brief and brief.tags_json else ''
-                    except Exception:
-                        tags = ''
-                    text = base_text  # no hashtags for discord by request
+                    text = base_text
                     media_path = getattr(brief, 'media_path', None) if brief else None
                     if media_path:
                         p = media_path.replace('\\', '/')
@@ -434,6 +429,13 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 pass
             if not title:
                 title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
+            # For YouTube, include hashtags in description as well
+            desc = 'Uploaded via IndiePulse'
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    desc = (desc + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
             yt = YouTubeClient(
                 access_token=(cfg.get('yt_access_token') or '').strip(),
                 refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
@@ -441,7 +443,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 client_secret=(cfg.get('yt_client_secret') or '').strip(),
             )
             try:
-                vid, url = yt.upload_short(path, title=title, description='Uploaded via IndiePulse')
+                vid, url = yt.upload_short(path, title=title, description=desc)
                 post.platform_post_id = vid
                 post.platform_url = url
             except Exception as exc:
@@ -506,6 +508,43 @@ def publish_news_post(job_id: int, post_id: int) -> str:
     return "ok"
 
 
+@huey.periodic_task(crontab(minute='*'))
+def enqueue_due_posts() -> str:
+    """Every minute, enqueue publish jobs for posts that reached their scheduled time
+    but are still in queued status (useful for posts created before scheduling logic changed)."""
+    from app.models.models import Post, PostStatusEnum, Job, JobKindEnum, JobStatusEnum
+    from sqlmodel import select
+    from datetime import datetime as _dt
+    import json as _json
+    with Session(engine) as session:
+        now = _dt.now()
+        rows = session.exec(
+            select(Post).where(
+                Post.status == PostStatusEnum.queued,
+                Post.scheduled_at.is_not(None),
+                Post.scheduled_at <= now,
+            ).limit(100)
+        ).all()
+        scheduled = 0
+        for post in rows:
+            # Skip if there is already a queued/running job for this post
+            existing = session.exec(
+                select(Job).where(
+                    Job.kind == JobKindEnum.publish,
+                    Job.payload_json.contains(f'"post_id": {post.id}'),
+                    Job.status.in_([JobStatusEnum.queued, JobStatusEnum.running])
+                ).limit(1)
+            ).first()
+            if existing:
+                continue
+            payload = {"post_id": post.id}
+            job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            publish_news_post.schedule(args=(job.id, post.id), delay=0)
+            scheduled += 1
+        return f"scheduled={scheduled}"
 @huey.task()
 def refresh_metrics_for_post(post_id: int) -> str:
     from app.models.models import Post

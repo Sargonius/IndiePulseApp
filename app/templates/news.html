@@ -5,7 +5,7 @@
 	<div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
 		<div>
 			<label>Видео (обычное, VK/X/Discord)</label><br/>
-			<div id="drop_zone_normal" style="width:320px;height:180px;border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#666;cursor:pointer;">
+			<div id="drop_zone_normal">
 				Перетащите файл сюда или кликните (normal)
 			</div>
 			<input type="file" id="media_input_normal" accept="video/*,image/*" style="display:none;" />
@@ -14,7 +14,7 @@
 
 			<div style="height:12px;"></div>
 			<label>Видео (вертикальное 9:16, Shorts/TikTok)</label><br/>
-			<div id="drop_zone_vertical" style="width:320px;height:180px;border:2px dashed #999;display:flex;align-items:center;justify-content:center;color:#666;cursor:pointer;">
+			<div id="drop_zone_vertical">
 				Перетащите файл сюда или кликните (vertical)
 			</div>
 			<input type="file" id="media_input_vertical" accept="video/*,image/*" style="display:none;" />
@@ -25,7 +25,7 @@
 			<label>Текст (RU)</label><br/>
             <textarea name="text_ru" id="text_ru" rows="6" cols="80" required>{{ draft.text_ru if draft else '' }}</textarea>
 			<div style="margin:6px 0;">
-                <button type="button" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Обновить перевод</button>
+                <button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Обновить перевод</button>
                 <span id="tr_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Перевод...</span>
 			</div>
             <label>Перевод (EN)</label><br/>
@@ -35,14 +35,14 @@
 			<div style="margin-top:6px;">
 				<label>Хэштеги (через пробел)</label><br/>
                 <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie" style="width: 520px;" />
-                <button type="button" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
+                <button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
                 <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Генерация...</span>
                 <div id="tags_target" style="display:none;"></div>
 			</div>
 		</div>
 	</div>
     <div style="margin-top:10px;">
-        <label>Платформы</label> <button type="button" id="toggle_all_btn" style="margin-left:8px;">Выбрать все</button><br/>
+        <label>Платформы</label> <button type="button" class="btn" id="toggle_all_btn" style="margin-left:8px;">Выбрать все</button><br/>
         <label><input class="pf" type="checkbox" name="platforms" value="vk" checked /> VK</label>
         <label><input class="pf" type="checkbox" name="platforms" value="x" checked /> X/Twitter</label>
         <label><input class="pf" type="checkbox" name="platforms" value="discord" checked /> Discord</label>
@@ -53,17 +53,23 @@
         <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked /> TikTok</label>
     </div>
 	<div>
-		<label>Дата/время (ISO, опционально)</label><br/>
-		<input type="text" name="scheduled_at" placeholder="2025-08-01T12:00:00" />
+		<label>Дата/время (опционально)</label><br/>
+		<div class="row" style="gap:8px; align-items:center;">
+			<input type="datetime-local" name="scheduled_at" id="scheduled_at" />
+			<button type="button" class="btn" id="pick_now">Сейчас</button>
+			<button type="button" class="btn" id="pick_next_morning">Завтра утром (9:00)</button>
+			<button type="button" class="btn" id="pick_next_day">Завтра (13:00)</button>
+			<button type="button" class="btn" id="pick_next_evening">Сегодня вечером (20:00)</button>
+		</div>
 	</div>
 	<div style="margin-top:12px;">
-    <button type="submit">Сохранить и поставить в очередь</button>
-    <button type="button" id="clear_draft_btn" style="margin-left:8px;">Очистить черновик</button>
+    <button type="submit" class="btn btn-primary">Сохранить и поставить в очередь</button>
+    <button type="button" id="clear_draft_btn" class="btn" style="margin-left:8px;">Очистить черновик</button>
 	</div>
 </form>
 
 <div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;">
-  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+  <div class="card" style="min-width:320px;max-width:480px;">
     <div style="font-weight:600;margin-bottom:8px;">X / Twitter (превью)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:36px;height:36px;border-radius:50%;background:#ccc;"></div>
@@ -74,7 +80,7 @@
       </div>
     </div>
   </div>
-  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+  <div class="card" style="min-width:320px;max-width:480px;">
     <div style="font-weight:600;margin-bottom:8px;">VK (превью)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:40px;height:40px;border-radius:4px;background:#4a76a8;"></div>
@@ -85,7 +91,7 @@
       </div>
     </div>
   </div>
-  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:320px;max-width:480px;">
+  <div class="card" style="min-width:320px;max-width:480px;">
     <div style="font-weight:600;margin-bottom:8px;">YouTube Shorts (превью)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:40px;height:40px;border-radius:4px;background:#ff0000;"></div>
@@ -96,7 +102,7 @@
     </div>
   </div>
 
-  <div style="border:1px solid #ddd;border-radius:8px;padding:12px;min-width:400px;max-width:600px;">
+  <div class="card" style="min-width:400px;max-width:600px;">
     <div style="font-weight:600;margin-bottom:8px;">Vertical Render (helper)</div>
     
     <!-- Video Upload -->
@@ -204,9 +210,10 @@
     
     <!-- Action Buttons -->
     <div style="margin-top:12px;">
-      <button type="button" id="rv_run" style="background:#4CAF50;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
+      <button type="button" id="rv_run" class="btn btn-success">
         🎬 Render Vertical Video
       </button>
+      <button type="button" id="rv_install" class="btn" style="margin-left:8px;">Install FFmpeg</button>
       <span id="rv_status" style="margin-left:8px;color:#666;"></span>
     </div>
     
@@ -899,7 +906,23 @@ rvRun.addEventListener('click', async () => {
     hiddenV.value = j.output_rel; // set as vertical media for submit
     updateTextPreviews();
   } catch (e) {
-    rvStatus.textContent = 'Ошибка рендера: ' + e.message;
+    rvStatus.textContent = 'Ошибка рендера: ' + e.message + ' — возможно, не установлен FFmpeg. Нажмите "Install FFmpeg".';
+  }
+});
+
+// Install FFmpeg on Windows (auto-download into vendor/ffmpeg)
+document.getElementById('rv_install').addEventListener('click', async () => {
+  const btn = document.getElementById('rv_install');
+  btn.disabled = true; rvStatus.textContent = 'Установка FFmpeg...';
+  try {
+    const r = await fetch('/api/video/install_ffmpeg', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    rvStatus.textContent = 'FFmpeg готов: ' + (j.path || 'installed');
+  } catch (e) {
+    rvStatus.textContent = 'Не удалось установить FFmpeg: ' + e.message;
+  } finally {
+    btn.disabled = false;
   }
 });
 document.addEventListener('htmx:afterSwap', (e) => {
@@ -922,7 +945,8 @@ clearBtn.addEventListener('click', async () => {
   const sched = document.querySelector('input[name="scheduled_at"]');
   if (sched) sched.value = '';
   document.querySelectorAll('input[name="platforms"]').forEach(ch => ch.checked = false);
-  preview.innerHTML = '';
+  const preview = document.getElementById('preview_normal');
+  if (preview) preview.innerHTML = '';
   xPrevMedia.innerHTML = '';
   vkPrevMedia.innerHTML = '';
   updateTextPreviews();
@@ -972,6 +996,40 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   updateTextPreviews();
   updateXCounter();
+});
+
+// Scheduling helpers (local machine time)
+function pad2(n){ return String(n).padStart(2,'0'); }
+function setLocal(dt){
+  const el = document.getElementById('scheduled_at');
+  if (!el) return;
+  const yyyy = dt.getFullYear();
+  const mm = pad2(dt.getMonth()+1);
+  const dd = pad2(dt.getDate());
+  const hh = pad2(dt.getHours());
+  const mi = pad2(dt.getMinutes());
+  el.value = `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  queueSave();
+}
+document.getElementById('pick_next_morning')?.addEventListener('click', () => {
+  const now = new Date();
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 9, 0, 0);
+  setLocal(t);
+});
+document.getElementById('pick_now')?.addEventListener('click', () => {
+  const now = new Date();
+  setLocal(now);
+});
+document.getElementById('pick_next_day')?.addEventListener('click', () => {
+  const now = new Date();
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 13, 0, 0);
+  setLocal(t);
+});
+document.getElementById('pick_next_evening')?.addEventListener('click', () => {
+  const now = new Date();
+  let t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0);
+  if (t <= now) t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 20, 0, 0);
+  setLocal(t);
 });
 </script>
 {% endblock %}

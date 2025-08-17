@@ -1,4 +1,4 @@
-<table id="posts_table" border="1" cellpadding="6" cellspacing="0" hx-get="/posts/partial" hx-trigger="refresh" hx-swap="outerHTML">
+<table id="posts_table" class="table" hx-get="/posts/partial" hx-trigger="refresh" hx-swap="outerHTML">
 	<tr>
 		<th>ID</th>
 		<th>Платформа</th>
@@ -11,6 +11,7 @@
 		<th>Ретвиты/Репосты</th>
 		<th>Ответы/Комменты</th>
 		<th>Цитаты/Просмотры</th>
+		<th>Хэштеги</th>
 	</tr>
 	{% for p in posts %}
 	<tr>
@@ -18,10 +19,10 @@
 		<td>{{ p.platform_text }}</td>
 		<td>
 			{% set s = p.status_text %}
-			{% if s == 'done' %}<span style="color:green">done</span>
-			{% elif s == 'error' %}<span style="color:red">error</span>
-			{% elif s == 'running' %}<span style="color:orange">running</span>
-			{% else %}{{ s }}{% endif %}
+			{% if s == 'done' %}<span class="badge success">done</span>
+			{% elif s == 'error' %}<span class="badge error">error</span>
+			{% elif s == 'running' %}<span class="badge running">running</span>
+			{% else %}<span class="badge default">{{ s }}</span>{% endif %}
 		</td>
 		<td>{{ p.brief_id }}</td>
 		<td>{{ p.scheduled_at or '' }}</td>
@@ -31,6 +32,7 @@
 		<td>{{ p.m_repost if p.m_repost is not none else '—' }}</td>
 		<td>{{ p.m_reply if p.m_reply is not none else '—' }}</td>
 		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
+		<td class="muted" style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ p.tags or '' }}</td>
 	</tr>
 	{% endfor %}
 </table>

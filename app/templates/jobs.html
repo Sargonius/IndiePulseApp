@@ -1,11 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Журнал задач</h2>
-<div>
-	<button hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML">Обновить</button>
-	<button hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML" hx-trigger="every 3s">Автообновление</button>
+<div class="toolbar">
+	<button class="btn" hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML">Обновить</button>
+	<label class="row" style="gap:6px;">
+		<input type="checkbox" id="jobs_auto_refresh" /> Автообновление (5с)
+	</label>
 </div>
 <div id="jobs_table" hx-get="/jobs/partial" hx-trigger="load" hx-swap="outerHTML"></div>
-{% include 'partials/jobs_table.html' %}
+<script>
+const jobsToggle = document.getElementById('jobs_auto_refresh');
+const jobsDiv = document.getElementById('jobs_table');
+jobsToggle.addEventListener('change', () => {
+	if (jobsToggle.checked) {
+		jobsDiv.setAttribute('hx-trigger', 'load, every 5s');
+	} else {
+		jobsDiv.setAttribute('hx-trigger', 'load');
+	}
+});
+</script>
 {% endblock %}
 

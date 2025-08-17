@@ -29,7 +29,7 @@ if exist .worker.pid (
 )
 
 echo Installing/Updating dependencies...
-".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
+".venv\Scripts\python.exe" -m pip install --upgrade pip
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 
 set HOST=127.0.0.1
@@ -41,11 +41,24 @@ if exist .env (
   )
 )
 
-REM Start server in background and save PID
-powershell -NoProfile -Command "$p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList '-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%' -PassThru; Set-Content -Path '.server.pid' -Value $p.Id" >nul
+if not exist logs mkdir logs
 
-REM Start worker in background and save PID
-powershell -NoProfile -Command "$p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList '-m','app.worker' -PassThru; Set-Content -Path '.worker.pid' -Value $p.Id" >nul
+REM Start server in background and save PID (hidden window), logs redirected
+powershell -NoProfile -Command "$args = @('-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%'); $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $args -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/server.out.log' -RedirectStandardError 'logs/server.err.log' -PassThru; [IO.File]::WriteAllText('.server.pid', $p.Id)"
 
-echo Restart complete.
+REM Give the server a moment to bind the port, then probe /health
+>nul timeout /t 2 /nobreak
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://%HOST%:%PORT%/health; if ($r.StatusCode -lt 400) { exit 0 } else { exit 1 } } catch { exit 1 }"
+if errorlevel 1 (
+  echo Server probe failed. Tail of logs/server.err.log:
+  powershell -NoProfile -Command "if (Test-Path 'logs/server.err.log') { Get-Content 'logs/server.err.log' -Tail 50 } else { Write-Host 'no server.err.log yet' }"
+  echo Falling back to foreground start for diagnostics...
+  call start_debug.bat
+  goto :eof
+)
+
+REM Start worker in background and save PID (hidden window), logs redirected
+powershell -NoProfile -Command "$args = @('-m','app.worker'); $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $args -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/worker.out.log' -RedirectStandardError 'logs/worker.err.log' -PassThru; [IO.File]::WriteAllText('.worker.pid', $p.Id)"
+
+echo Restart complete. Server logs: logs\server.out.log / logs\server.err.log. Worker logs: logs\worker.out.log / logs\worker.err.log
 endlocal

@@ -1,4 +1,4 @@
-<table id="jobs_table" border="1" cellpadding="6" cellspacing="0">
+<table id="jobs_table" class="table">
 	<tr>
 		<th>ID</th>
 		<th>Вид</th>
@@ -13,10 +13,10 @@
 		<td>{{ j.id }}</td>
 		<td>{{ j.kind }}</td>
 		<td>
-			{% if j.status == 'done' %}<span style="color:green">done</span>
-			{% elif j.status == 'error' %}<span style="color:red">error</span>
-			{% elif j.status == 'running' %}<span style="color:orange">running</span>
-			{% else %}{{ j.status }}{% endif %}
+			{% if j.status == 'done' %}<span class="badge success">done</span>
+			{% elif j.status == 'error' %}<span class="badge error">error</span>
+			{% elif j.status == 'running' %}<span class="badge running">running</span>
+			{% else %}<span class="badge default">{{ j.status }}</span>{% endif %}
 		</td>
 		<td>{{ j.attempt }}</td>
 		<td>{{ j.last_error or '' }}</td>

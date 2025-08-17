@@ -1,62 +1,469 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Steam Export</h2>
-<p>Export content for Steam Partner Events (manual upload).</p>
+<p>Export content for Steam Partner Events (manual upload). Default App ID: {{ config.STEAM_APP_ID if config else '' }}.</p>
 
-<form method="post" action="/api/steam/export" enctype="multipart/form-data">
-    <div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
-        <div style="min-width:400px;">
+<form method="post" action="/api/steam/export" enctype="multipart/form-data" id="steam_form">
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items:start;">
+        <div>
             <h3>RU Content</h3>
             <div>
                 <label>Title (RU)</label><br/>
                 <input type="text" name="title_ru" value="{{ draft.title_ru if draft else '' }}" style="width: 100%;" required />
             </div>
             <div style="margin-top:12px;">
-                <label>Body (RU)</label><br/>
-                <textarea name="body_ru" rows="8" style="width: 100%;" required>{{ draft.body_ru if draft else '' }}</textarea>
+                <label>Subtitle (<=120)</label><br/>
+                <input type="text" name="subtitle" id="subtitle" maxlength="120" style="width:100%;" />
+                <div class="muted" id="subtitle_counter">0/120</div>
+            </div>
+            <div style="margin-top:12px;">
+                <label>Short Description (<=180)</label><br/>
+                <input type="text" name="short_desc" id="short_desc" maxlength="180" style="width:100%;" />
+                <div class="muted" id="short_desc_counter">0/180</div>
+            </div>
+            <div style="margin-top:12px;">
+                <label>Body (RU)</label>
+                <div class="toolbar" id="tb_ru" style="margin:4px 0 6px 0;"></div>
+                <textarea name="body_ru" id="body_ru" rows="8" style="width: 100%;" required>{{ draft.body_ru if draft else '' }}</textarea>
+                <div id="preview_ru" class="card" style="margin-top:6px; padding:8px;"></div>
             </div>
         </div>
         
-        <div style="min-width:400px;">
+        <div>
             <h3>EN Content</h3>
             <div>
                 <label>Title (EN)</label><br/>
                 <input type="text" name="title_en" value="{{ draft.title_en if draft else '' }}" style="width: 100%;" required />
             </div>
             <div style="margin-top:12px;">
-                <label>Body (EN)</label><br/>
-                <textarea name="body_en" rows="8" style="width: 100%;" required>{{ draft.body_en if draft else '' }}</textarea>
+                <label>Subtitle (<=120)</label><br/>
+                <input type="text" name="subtitle_en" id="subtitle_en" maxlength="120" style="width:100%;" />
+            </div>
+            <div style="margin-top:12px;">
+                <label>Short Description (<=180)</label><br/>
+                <input type="text" name="short_desc_en" id="short_desc_en" maxlength="180" style="width:100%;" />
+            </div>
+            <div style="margin:6px 0;">
+                <button type="button" class="btn" id="btn_translate">Translate RU→EN</button>
+                <span id="tr_status" class="htmx-indicator" style="display:none;">...</span>
+            </div>
+            <div style="margin-top:12px;">
+                <label>Body (EN)</label>
+                <div class="toolbar" id="tb_en" style="margin:4px 0 6px 0;"></div>
+                <textarea name="body_en" id="body_en" rows="8" style="width: 100%;" required>{{ draft.body_en if draft else '' }}</textarea>
+                <div id="preview_en" class="card" style="margin-top:6px; padding:8px;"></div>
             </div>
         </div>
     </div>
     
     <div style="margin-top:16px;">
-        <h3>Images</h3>
-        <div style="display:flex; gap:16px;">
-            <div>
-                <label>Header Image</label><br/>
-                <input type="file" name="header" accept="image/*" />
+        <h3>Main Image 800x450</h3>
+        <div>
+            <input type="file" name="main_image" id="main_image" accept="image/*" />
+            <div class="muted">We will resize to 800x450 automatically if needed.</div>
+            <input type="hidden" name="crop_x_pct" id="crop_x_pct" value="0.5" />
+            <input type="hidden" name="crop_y_pct" id="crop_y_pct" value="0.5" />
+            <input type="hidden" name="crop_scale" id="crop_scale" value="1.0" />
+            <div id="steam_preview" style="margin-top:10px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; align-items:start;">
+                <div style="position:relative; border:1px solid #ddd; border-radius:6px; padding:6px;">
+                    <div class="muted" style="margin-bottom:4px;">Original (drag to select)</div>
+                    <canvas id="steam_canvas_original" width="800" height="450" style="display:block; max-width:100%; cursor:move;"></canvas>
+                </div>
+                <div style="position:relative; border:1px solid #ddd; border-radius:6px; padding:6px;">
+                    <div class="muted" style="margin-bottom:4px;">Final (with overlay)</div>
+                    <canvas id="steam_canvas_final" width="800" height="450" style="display:block; max-width:100%;"></canvas>
+                </div>
             </div>
-            <div>
-                <label>Inline Image</label><br/>
-                <input type="file" name="inline" accept="image/*" />
+        </div>
+        <div style="margin-top:8px;">
+            <label><input type="checkbox" name="overlay_enabled" checked /> Add overlay</label>
+            <div class="row" style="margin-top:6px;">
+                <input type="text" name="overlay_version" value="VERSION 0.7.0" placeholder="VERSION 0.7.0" style="min-width:260px;" />
+                <input type="text" name="overlay_sub" value="FEATURE-COMPLETE UPDATE!" placeholder="FEATURE-COMPLETE UPDATE!" style="min-width:260px;" />
             </div>
+            <div class="row" style="margin-top:6px;">
+                <label>Version gradient:</label>
+                <input type="color" name="ov_v_start" value="#d9c8ff" />
+                <input type="color" name="ov_v_end" value="#7a5cf8" />
+                <label style="margin-left:8px;">Subtitle gradient:</label>
+                <input type="color" name="ov_sub_start" value="#ff9ac4" />
+                <input type="color" name="ov_sub_end" value="#ff5a9a" />
+            </div>
+            <div class="row" style="margin-top:6px;">
+                <label>Version stroke:</label>
+                <input type="color" name="ov_v_stroke_color" value="#000000" />
+                <input type="number" name="ov_v_stroke_px" value="1" min="0" max="10" style="width:70px;" />
+                <label style="margin-left:8px;">Subtitle stroke:</label>
+                <input type="color" name="ov_sub_stroke_color" value="#000000" />
+                <input type="number" name="ov_sub_stroke_px" value="1" min="0" max="10" style="width:70px;" />
+            </div>
+            <div class="row" style="margin-top:6px;">
+                <label>Version font size:</label>
+                <input type="number" name="ov_v_size" value="72" min="24" max="140" style="width:80px;" />
+                <label style="margin-left:8px;">Weight:</label>
+                <select name="ov_v_weight"><option value="400">400</option><option value="600">600</option><option value="700" selected>700</option><option value="800">800</option><option value="900">900</option></select>
+                <label style="margin-left:8px;">Subtitle font size:</label>
+                <input type="number" name="ov_sub_size" value="36" min="16" max="100" style="width:80px;" />
+                <label style="margin-left:8px;">Weight:</label>
+                <select name="ov_sub_weight"><option value="400">400</option><option value="600" selected>600</option><option value="700">700</option><option value="800">800</option></select>
+                <label style="margin-left:8px;">Subtitle offset (Y):</label>
+                <input type="number" name="sub_offset_y" value="10" min="-50" max="200" style="width:90px;" />
+                <label style="margin-left:8px;">Background:</label>
+                <input type="checkbox" name="show_bg" checked />
+            </div>
+            <div class="muted">Overlay example: big version line + smaller subheader, centered near bottom.</div>
         </div>
     </div>
     
     <div style="margin-top:16px;">
-        <button type="submit">Export ZIP</button>
+        <button type="submit" class="btn btn-primary">Export Assets Folder</button>
+        <button type="button" id="open_folder_btn" class="btn">Open folder with assets</button>
+        <a class="btn" id="steam_link" href="https://steamcommunity.com/games/2847510/partnerevents/create" target="_blank">Open Steam Partner Events</a>
     </div>
 </form>
 
 <div style="margin-top:24px; padding:12px; background:#f5f5f5; border-radius:4px;">
     <h4>Instructions:</h4>
     <ol>
-        <li>Fill in both RU and EN content</li>
-        <li>Upload header and inline images if needed</li>
-        <li>Click "Export ZIP" to download a ZIP file</li>
-        <li>Extract the ZIP and use the files for Steam Partner Events</li>
-        <li>Files included: steam_ru.txt, steam_en.txt, header_*.jpg, inline_*.jpg</li>
+        <li>Fill in RU/EN content, subtitle (<=120), and short description (<=180).</li>
+        <li>Upload a main image (800x450). We auto-resize if needed.</li>
+        <li>Click "Export Assets Folder"; then "Open folder with assets" to drag & drop to Steam.</li>
     </ol>
 </div>
+
+<script>
+let lastExportDir = '';
+const form = document.getElementById('steam_form');
+const subtitle = document.getElementById('subtitle');
+const shortDesc = document.getElementById('short_desc');
+const subCounter = document.getElementById('subtitle_counter');
+const shortCounter = document.getElementById('short_desc_counter');
+const openBtn = document.getElementById('open_folder_btn');
+const steamLink = document.getElementById('steam_link');
+const fileInput = document.getElementById('main_image');
+const cx = document.getElementById('crop_x_pct');
+const cy = document.getElementById('crop_y_pct');
+const canvasOrig = document.getElementById('steam_canvas_original');
+const ctxOrig = canvasOrig.getContext('2d');
+const canvasFinal = document.getElementById('steam_canvas_final');
+const ctxFinal = canvasFinal.getContext('2d');
+let imgObj = null;
+let selX = 0, selY = 0, srcW = 0, srcH = 0, cropW = 0, cropH = 0;
+let dragging = false, dragStart = {x:0,y:0}, startSel = {x:0,y:0};
+let resizing = false, startScale = 1.0, handleSize = 24;
+
+function updateCounters(){
+  if (subtitle) subCounter.textContent = `${subtitle.value.length}/120`;
+  if (shortDesc) shortCounter.textContent = `${shortDesc.value.length}/180`;
+}
+subtitle?.addEventListener('input', updateCounters);
+shortDesc?.addEventListener('input', updateCounters);
+updateCounters();
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(form);
+  const r = await fetch('/api/steam/export', { method: 'POST', body: fd });
+  if (!r.ok) { alert('Export failed'); return; }
+  const j = await r.json();
+  lastExportDir = j.export_dir || '';
+  if (j.steam_create_url) steamLink.href = j.steam_create_url;
+  alert('Assets exported to: ' + lastExportDir);
+});
+// Translate RU→EN using existing endpoint from News page
+document.getElementById('btn_translate').addEventListener('click', async ()=>{
+  const ru = document.getElementById('body_ru').value;
+  const fd = new FormData();
+  fd.append('text_ru', ru);
+  const r = await fetch('/api/translate', { method: 'POST', body: fd });
+  if (r.ok) {
+    const html = await r.text();
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    const ta = tmp.querySelector('textarea');
+    if (ta) {
+      document.getElementById('body_en').value = ta.textContent || ta.value || '';
+      renderPreviews();
+    }
+  }
+  // Also copy subtitle/short desc
+  document.getElementById('subtitle_en').value = document.getElementById('subtitle').value;
+  document.getElementById('short_desc_en').value = document.getElementById('short_desc').value;
+});
+
+openBtn.addEventListener('click', async () => {
+  if (!lastExportDir) { alert('Export first'); return; }
+  await fetch('/api/steam/open_dir?path=' + encodeURIComponent(lastExportDir));
+});
+
+// Live preview with 16:9 crop box based on sliders
+function updateCanvas(){
+  ctxOrig.clearRect(0,0,canvasOrig.width, canvasOrig.height);
+  ctxFinal.clearRect(0,0,canvasFinal.width, canvasFinal.height);
+  if(!imgObj) return;
+  const aspect = 800/450;
+  const baseW = Math.min(srcW, Math.floor(srcH * aspect));
+  const cs = parseFloat(document.getElementById('crop_scale').value) || 1.0;
+  cropW = Math.max(2, Math.floor(baseW * cs));
+  cropH = Math.floor(cropW / aspect);
+  const maxX = Math.max(0, srcW - cropW);
+  const maxY = Math.max(0, srcH - cropH);
+  selX = Math.max(0, Math.min(maxX, selX));
+  selY = Math.max(0, Math.min(maxY, selY));
+  cx.value = (maxX ? selX / maxX : 0).toFixed(2);
+  cy.value = (maxY ? selY / maxY : 0).toFixed(2);
+  // original view: draw full image scaled to fit canvas height and draw crop rectangle
+  const scale = Math.min(canvasOrig.width / srcW, canvasOrig.height / srcH);
+  const dispW = Math.floor(srcW * scale), dispH = Math.floor(srcH * scale);
+  const offX = Math.floor((canvasOrig.width - dispW) / 2), offY = Math.floor((canvasOrig.height - dispH) / 2);
+  ctxOrig.drawImage(imgObj, 0, 0, srcW, srcH, offX, offY, dispW, dispH);
+  // draw crop box
+  ctxOrig.strokeStyle = '#ff6b6b'; ctxOrig.lineWidth = 3;
+  const boxX = offX + Math.floor(selX * scale);
+  const boxY = offY + Math.floor(selY * scale);
+  const boxW = Math.floor(cropW * scale), boxH = Math.floor(cropH * scale);
+  ctxOrig.strokeRect(boxX, boxY, boxW, boxH);
+  // draw resize handle (bottom-right)
+  ctxOrig.fillStyle = '#ff6b6b';
+  ctxOrig.fillRect(boxX + boxW - handleSize, boxY + boxH - handleSize, handleSize, handleSize);
+  // store for hit tests
+  canvasOrig._lastBox = {x:boxX, y:boxY, w:boxW, h:boxH, offX, offY, scale};
+
+  // final view: draw cropped region scaled to 800x450
+  ctxFinal.drawImage(imgObj, selX, selY, cropW, cropH, 0, 0, 800, 450);
+  // Overlay preview
+  const ovEnabled = document.querySelector('input[name="overlay_enabled"]').checked;
+  const ovVersion = document.querySelector('input[name="overlay_version"]').value.trim();
+  const ovSub = document.querySelector('input[name="overlay_sub"]').value.trim();
+  if (ovEnabled && (ovVersion || ovSub)) {
+    // Bottom band/offset
+    const subOffset = parseInt(document.querySelector('input[name="sub_offset_y"]').value || '10', 10);
+    const showBg = document.querySelector('input[name="show_bg"]')?.checked ?? true;
+    const vSize = parseInt(document.querySelector('input[name="ov_v_size"]').value || '72', 10);
+    const subSize = parseInt(document.querySelector('input[name="ov_sub_size"]').value || '36', 10);
+    const baseY = 290;
+    if (showBg) {
+      const bandY = Math.max(0, baseY - 20);
+      ctxFinal.fillStyle = 'rgba(0,0,0,0.35)';
+      ctxFinal.fillRect(0, bandY, 800, 200);
+    }
+    // Gradient text for version
+    if (ovVersion) {
+      const vStart = document.querySelector('input[name="ov_v_start"]').value || '#d9c8ff';
+      const vEnd = document.querySelector('input[name="ov_v_end"]').value || '#7a5cf8';
+      const strokeColor = document.querySelector('input[name="ov_v_stroke_color"]').value || '#000000';
+      const strokePx = parseInt(document.querySelector('input[name="ov_v_stroke_px"]').value || '1', 10);
+      const vWeight = parseInt((document.querySelector('select[name="ov_v_weight"]').value || '700'), 10);
+      const grad = ctxFinal.createLinearGradient(0, baseY, 0, baseY + vSize);
+      grad.addColorStop(0, vStart); grad.addColorStop(1, vEnd);
+      // pseudo-stroke by drawing text multiple times with offset
+      ctxFinal.textAlign = 'center'; ctxFinal.textBaseline = 'top';
+      ctxFinal.font = `${vWeight} ${vSize}px 'Staatliches', Arial`;
+      if (strokePx > 0) {
+        ctxFinal.fillStyle = strokeColor;
+        for (let dx=-strokePx; dx<=strokePx; dx++){
+          for (let dy=-strokePx; dy<=strokePx; dy++){
+            if (dx===0 && dy===0) continue;
+            ctxFinal.fillText(ovVersion, 400+dx, baseY+dy);
+          }
+        }
+      }
+      ctxFinal.fillStyle = grad;
+      // shadow
+      ctxFinal.shadowColor = 'rgba(0,0,0,0.6)'; ctxFinal.shadowBlur = 8; ctxFinal.shadowOffsetY = 2;
+      ctxFinal.fillText(ovVersion, 400, baseY);
+      ctxFinal.shadowBlur = 0; ctxFinal.shadowOffsetY = 0;
+    }
+    if (ovSub) {
+      const sStart = document.querySelector('input[name="ov_sub_start"]').value || '#ff9ac4';
+      const sEnd = document.querySelector('input[name="ov_sub_end"]').value || '#ff5a9a';
+      const strokeColor = document.querySelector('input[name="ov_sub_stroke_color"]').value || '#000000';
+      const strokePx = parseInt(document.querySelector('input[name="ov_sub_stroke_px"]').value || '1', 10);
+      const subWeight = parseInt((document.querySelector('select[name="ov_sub_weight"]').value || '600'), 10);
+      const grad2 = ctxFinal.createLinearGradient(0, baseY + vSize + subOffset, 0, baseY + vSize + subOffset + subSize);
+      grad2.addColorStop(0, sStart); grad2.addColorStop(1, sEnd);
+      ctxFinal.textAlign = 'center'; ctxFinal.textBaseline = 'top';
+      ctxFinal.font = `${subWeight} ${subSize}px 'Staatliches', Arial`;
+      if (strokePx > 0) {
+        ctxFinal.fillStyle = strokeColor;
+        for (let dx=-strokePx; dx<=strokePx; dx++){
+          for (let dy=-strokePx; dy<=strokePx; dy++){
+            if (dx===0 && dy===0) continue;
+            ctxFinal.fillText(ovSub, 400+dx, baseY + vSize + subOffset + dy);
+          }
+        }
+      }
+      ctxFinal.fillStyle = grad2;
+      // subtle shadow
+      ctxFinal.shadowColor = 'rgba(0,0,0,0.4)'; ctxFinal.shadowBlur = 4; ctxFinal.shadowOffsetY = 1;
+      ctxFinal.fillText(ovSub, 400, baseY + vSize + subOffset);
+      ctxFinal.shadowBlur = 0; ctxFinal.shadowOffsetY = 0;
+    }
+  }
+}
+
+cx.addEventListener('input', updateCanvas);
+cy.addEventListener('input', updateCanvas);
+
+fileInput.addEventListener('change', ()=>{
+  const f = fileInput.files && fileInput.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  const img = new Image();
+  img.onload = ()=>{ imgObj = img; srcW = img.naturalWidth; srcH = img.naturalHeight; selX = 0; selY = 0; updateCanvas(); };
+  img.src = url;
+});
+
+// Drag selection inside canvas
+function getMouse(e){
+  const rect = canvasOrig.getBoundingClientRect();
+  const scaleX = canvasOrig.width / rect.width;
+  const scaleY = canvasOrig.height / rect.height;
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+}
+
+canvasOrig.addEventListener('mousedown', (e)=>{
+  if (!imgObj) return;
+  const m = getMouse(e); const mx = m.x, my = m.y;
+  const box = canvasOrig._lastBox || {x:0,y:0,w:0,h:0,scale:1};
+  const boxX = box.x, boxY = box.y, boxW = box.w, boxH = box.h;
+  const inHandle = (mx >= boxX + boxW - handleSize && mx <= boxX + boxW && my >= boxY + boxH - handleSize && my <= boxY + boxH);
+  if (inHandle) {
+    resizing = true; startScale = parseFloat(document.getElementById('crop_scale').value) || 1.0;
+    dragStart = {x: mx, y: my};
+  } else {
+    dragging = true;
+    dragStart = {x: mx, y: my};
+    startSel = {x: selX, y: selY};
+  }
+});
+canvasOrig.addEventListener('mousemove', (e)=>{
+  if (!imgObj) return;
+  if (resizing) return; // handled in resize handler
+  if (!dragging) return;
+  const m = getMouse(e); const mx = m.x, my = m.y;
+  const dx = mx - dragStart.x;
+  const dy = my - dragStart.y;
+  // map canvas delta to source delta (scaled)
+  const scale = Math.min(canvasOrig.width / srcW, canvasOrig.height / srcH);
+  const scaleX = scale ? 1/scale : 1;
+  const scaleY = scale ? 1/scale : 1;
+  selX = startSel.x + Math.round(dx * scaleX);
+  selY = startSel.y + Math.round(dy * scaleY);
+  updateCanvas();
+});
+canvasOrig.addEventListener('mouseup', ()=>{ dragging = false; resizing = false; });
+canvasOrig.addEventListener('mouseleave', ()=>{ dragging = false; resizing = false; });
+
+// Resize by dragging the handle: adjust crop_scale (zoom)
+canvasOrig.addEventListener('mousemove', (e)=>{
+  if (!resizing || !imgObj) return;
+  const m = getMouse(e); const mx = m.x, my = m.y;
+  // resize by horizontal drag relative to canvas width
+  const delta = (mx - dragStart.x) / canvasOrig.width; // sensitivity across full width
+  let cs = Math.max(0.2, Math.min(1.0, startScale + delta)); // drag right -> zoom out, left -> zoom in
+  document.getElementById('crop_scale').value = cs.toFixed(2);
+  updateCanvas();
+});
+
+// Simple Steam BBCode toolbar and preview
+function wrapSelection(textarea, before, after) {
+  const start = textarea.selectionStart, end = textarea.selectionEnd;
+  const val = textarea.value;
+  const selected = val.slice(start, end);
+  const replaced = before + selected + after;
+  textarea.value = val.slice(0, start) + replaced + val.slice(end);
+  textarea.focus();
+  textarea.selectionStart = start + before.length;
+  textarea.selectionEnd = start + before.length + selected.length;
+  renderPreviews();
+}
+
+function initToolbar(tbId, taId){
+  const tb = document.getElementById(tbId);
+  const ta = document.getElementById(taId);
+  const buttons = [
+    ['H1','[h1]','[/h1]'], ['H2','[h2]','[/h2]'], ['H3','[h3]','[/h3]'],
+    ['B','[b]','[/b]'], ['I','[i]','[/i]'], ['U','[u]','[/u]'], ['S','[strike]','[/strike]'],
+    ['HR','[hr]','[/hr]'],
+    ['Quote','[quote]','[/quote]'], ['Code','[code]','[/code]'],
+    ['UL','[list]\n[*]','\n[/list]'], ['OL','[olist]\n[*]','\n[/olist]'],
+    ['URL','[url=]','[/url]']
+  ];
+  buttons.forEach(([label, pre, post])=>{
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn'; b.textContent = label;
+    b.addEventListener('click', ()=> wrapSelection(ta, pre, post));
+    tb.appendChild(b);
+  });
+}
+
+function steamToHtml(text){
+  let html = text
+    .replace(/\[h1\](.*?)\[\/h1\]/gis,'<h1>$1</h1>')
+    .replace(/\[h2\](.*?)\[\/h2\]/gis,'<h2>$1</h2>')
+    .replace(/\[h3\](.*?)\[\/h3\]/gis,'<h3>$1</h3>')
+    .replace(/\[b\](.*?)\[\/b\]/gis,'<strong>$1</strong>')
+    .replace(/\[i\](.*?)\[\/i\]/gis,'<em>$1</em>')
+    .replace(/\[u\](.*?)\[\/u\]/gis,'<u>$1</u>')
+    .replace(/\[strike\](.*?)\[\/strike\]/gis,'<del>$1</del>')
+    .replace(/\[hr\]\[\/hr\]/gis,'<hr/>')
+    .replace(/\[quote(?:=(.*?))?\](.*?)\[\/quote\]/gis,'<blockquote><strong>$1</strong><div>$2</div></blockquote>')
+    .replace(/\[code\](.*?)\[\/code\]/gis,'<pre>$1</pre>')
+    .replace(/\[url=(.*?)\](.*?)\[\/url\]/gis,'<a href="$1" target="_blank">$2</a>');
+  // lists
+  html = html.replace(/\[list\]([\s\S]*?)\[\/list\]/gi, (m, inner)=>'<ul>'+ inner.replace(/\[\*\](.*)/g,'<li>$1</li>') +'</ul>');
+  html = html.replace(/\[olist\]([\s\S]*?)\[\/olist\]/gi, (m, inner)=>'<ol>'+ inner.replace(/\[\*\](.*)/g,'<li>$1</li>') +'</ol>');
+  return html;
+}
+
+function renderPreviews(){
+  const ru = document.getElementById('body_ru').value;
+  const en = document.getElementById('body_en').value;
+  document.getElementById('preview_ru').innerHTML = steamToHtml(ru);
+  document.getElementById('preview_en').innerHTML = steamToHtml(en);
+}
+
+initToolbar('tb_ru', 'body_ru');
+initToolbar('tb_en', 'body_en');
+document.getElementById('body_ru').addEventListener('input', renderPreviews);
+document.getElementById('body_en').addEventListener('input', renderPreviews);
+// Update final preview when any overlay text or color changes
+['overlay_version','overlay_sub','ov_v_start','ov_v_end','ov_sub_start','ov_sub_end','overlay_enabled','ov_v_stroke_color','ov_v_stroke_px','ov_sub_stroke_color','ov_sub_stroke_px','ov_v_size','ov_sub_size','sub_offset_y','show_bg','ov_v_weight','ov_sub_weight'].forEach(id=>{
+  const el = document.querySelector(`input[name="${id}"]`);
+  if (el) el.addEventListener('input', updateCanvas);
+  if (el) el.addEventListener('change', updateCanvas);
+  const sel = document.querySelector(`select[name="${id}"]`);
+  if (sel) sel.addEventListener('input', updateCanvas);
+  if (sel) sel.addEventListener('change', updateCanvas);
+});
+
+// Persist settings in localStorage
+const LS_KEYS = ['overlay_enabled','overlay_version','overlay_sub','ov_v_start','ov_v_end','ov_sub_start','ov_sub_end','ov_v_stroke_color','ov_v_stroke_px','ov_sub_stroke_color','ov_sub_stroke_px','ov_v_size','ov_sub_size','sub_offset_y','show_bg','ov_v_weight','ov_sub_weight'];
+function saveSettings(){
+  LS_KEYS.forEach(k=>{
+    let el = document.querySelector(`input[name="${k}"]`) || document.querySelector(`select[name="${k}"]`);
+    if (!el) return;
+    const val = (el.type === 'checkbox') ? (el.checked ? '1':'0') : el.value;
+    try { localStorage.setItem('steam_'+k, val); } catch(e){}
+  });
+}
+function loadSettings(){
+  LS_KEYS.forEach(k=>{
+    let el = document.querySelector(`input[name="${k}"]`) || document.querySelector(`select[name="${k}"]`);
+    if (!el) return;
+    const v = localStorage.getItem('steam_'+k);
+    if (v === null) return;
+    if (el.type === 'checkbox') el.checked = (v==='1'); else el.value = v;
+  });
+}
+loadSettings();
+LS_KEYS.forEach(k=>{
+  const el = document.querySelector(`input[name="${k}"]`);
+  if (!el) return;
+  el.addEventListener('change', saveSettings);
+  el.addEventListener('input', saveSettings);
+});
+updateCanvas();
+renderPreviews();
+</script>
 {% endblock %}
