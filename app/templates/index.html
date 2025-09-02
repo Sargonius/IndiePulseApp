@@ -14,6 +14,7 @@
       <div class="muted">Приложение запущено</div>
       <div style="margin-top:6px;">
         Health: <a href="/health">/health</a>
+        <div id="active_jobs" style="margin-top:6px;">Активные задачи: <span id="jobs_count">—</span></div>
       </div>
     </div>
     <div class="card">
@@ -24,4 +25,17 @@
       </div>
     </div>
   </div>
+  <script>
+  document.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const r = await fetch('/api/jobs/active');
+      if (r.ok) {
+        const j = await r.json();
+        document.getElementById('jobs_count').textContent = (j && typeof j.count === 'number') ? j.count : '0';
+      }
+    } catch (e) {
+      document.getElementById('jobs_count').textContent = '0';
+    }
+  });
+  </script>
 {% endblock %}

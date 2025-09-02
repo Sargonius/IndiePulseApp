@@ -26,12 +26,15 @@
 	</header>
 	<main>
 		<div class="container">
-			<div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:8px;">
-				<button class="btn" title="Restart server" hx-post="/api/system/restart" hx-target="#restart_status" hx-swap="innerHTML">⭮ Перезапуск</button>
-			</div>
-			<div id="restart_status" class="muted" style="margin-bottom:12px;"></div>
+			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>
 	</main>
+    <footer>
+		<div class="container" style="padding-top:8px; padding-bottom:16px; font-size:12px; color:#666;">
+			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '1.0.0' }}</span>
+			<span style="margin-left:12px;">Last change: {{ request.app.state.app_last_change if request and request.app and request.app.state and request.app.state.app_last_change else 'Version 1.0.0 - Initial setup' }}</span>
+		</div>
+	</footer>
 </body>
 </html>

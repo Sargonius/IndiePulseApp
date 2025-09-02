@@ -22,6 +22,33 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.add(job)
                 session.commit()
             return "not_found"
+        # Skip if not queued anymore (avoid duplicate publish)
+        if post.status not in (PostStatusEnum.queued, PostStatusEnum.running):
+            return 'skipped_already_handled'
+
+        # Respect schedule edits: if scheduled_at is in the future, reschedule and exit
+        try:
+            if getattr(post, 'scheduled_at', None) is not None:
+                now = datetime.utcnow()
+                target = post.scheduled_at
+                if getattr(target, 'tzinfo', None) is not None:
+                    try:
+                        target = target.replace(tzinfo=None)
+                    except Exception:
+                        pass
+                if target and target > now:
+                    # Requeue this job for that future time
+                    from app.jobs.tasks import publish_news_post as _pub
+                    delay_s = int((target - now).total_seconds())
+                    _pub.schedule(args=(job_id, post_id), delay=max(1, delay_s))
+                    if job is not None:
+                        job.status = JobStatusEnum.queued
+                        session.add(job)
+                    session.commit()
+                    return 'rescheduled'
+        except Exception:
+            pass
+
         # mark running
         post.status = PostStatusEnum.running
         if job is not None:
@@ -37,13 +64,36 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             brief = session.get(Brief, post.brief_id)
             text_ru = (brief.text_ru or '').strip() if brief else ''
             text_en = (brief.text_en or '').strip() if brief else ''
-            media_path = getattr(brief, 'media_path', None) if brief else None
-            if media_path:
-                p = media_path.replace('\\', '/')
-                if not p.startswith('media/'):
-                    p = f"media/{p}"
+            # Build gallery list for Discord; prefer payload.gallery, else single media
+            gallery_files: list[str] = []
+            try:
+                import json as _json
+                override = None
+                parsed = {}
+                if job and job.payload_json:
+                    parsed = (_json.loads(job.payload_json) or {})
+                    override = parsed.get('media_rel')
+                raw_gallery = parsed.get('gallery') if isinstance(parsed, dict) else None
+                if isinstance(raw_gallery, list) and raw_gallery:
+                    gallery_files = [str(x) for x in raw_gallery if isinstance(x, str)]
+                else:
+                    media_rel = override or (getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None) if brief else None)
+                    if media_rel:
+                        gallery_files = [media_rel]
+            except Exception:
+                media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                if media_rel:
+                    gallery_files = [media_rel]
+            # Normalize to absolute paths
+            if gallery_files:
                 import os as _os
-                media_path = _os.path.abspath(p)
+                _abs_files = []
+                for rel in gallery_files:
+                    p = (rel or '').replace('\\', '/')
+                    if not p.startswith('media/'):
+                        p = f"media/{p}"
+                    _abs_files.append(_os.path.abspath(p))
+                gallery_files = _abs_files
 
             targets = []
             if text_ru and settings.get('discord_webhook_ru'):
@@ -59,7 +109,11 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             for wh_url, content in targets:
                 try:
                     client = DiscordClient(wh_url)
-                    _, murl = client.send_message(content, file_path=media_path)
+                    # Send all images in one message if available
+                    if gallery_files:
+                        _, murl = client.send_message(content, file_paths=gallery_files)
+                    else:
+                        _, murl = client.send_message(content)
                     last_url = murl or last_url
                 except Exception as exc:
                     # continue to next target but record error on post/job
@@ -78,7 +132,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             from app.services.x_client import XClient
             from app.services.x_media import XMediaUploader
             cfg = load_settings()
-            token = (cfg.get('x_access_token') or '').strip()
+            # Ensure/refresh token
+            try:
+                from app.routers.api import _x_ensure_token
+                token = _x_ensure_token()
+            except Exception:
+                token = (cfg.get('x_access_token') or '').strip()
             if not token:
                 post.status = PostStatusEnum.error
                 if job is not None:
@@ -99,7 +158,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     hashtags = (brief.tags_json or '').strip()
                 except Exception:
                     hashtags = ''
-            media_id: Optional[str] = None
+            media_ids: list[str] = []
             # prefer normal video/image if provided via job payload override or draft hidden field
             media_rel: Optional[str] = None
             try:
@@ -121,9 +180,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     fixed_suffix = ('\n' + tags)
                     budget = 280 - len(fixed_suffix)
                     if budget <= 0:
-                        # degenerate: hashtags alone exceed/meet limit → keep as much of tags as possible
-                        head = (fixed_suffix)[:280]
-                        return head, body  # push entire body to replies
+                        # Keep full hashtags (if they exceed 280, API will reject and caller will handle)
+                        return fixed_suffix, body  # push entire body to replies
                     if len(body) <= budget:
                         return (body + fixed_suffix), ''
                     # need to trim body to fit
@@ -137,13 +195,46 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 override = None
                 if job and job.payload_json:
                     try:
-                        override = (_json.loads(job.payload_json) or {}).get('media_rel')
+                        parsed = (_json.loads(job.payload_json) or {})
+                        override = parsed.get('media_rel')
+                        gallery_list = parsed.get('gallery') or []
                     except Exception:
                         override = None
+                        gallery_list = []
                 media_rel = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             except Exception:
                 media_rel = getattr(brief, 'media_path', None)
-            if media_rel:
+            # If gallery present, upload up to 4 images (X limit); else single media if present
+            gallery_media: list[str] = []
+            try:
+                if job and job.payload_json:
+                    import json as _json2
+                    parsed = (_json2.loads(job.payload_json) or {})
+                    if isinstance(parsed.get('gallery'), list):
+                        gallery_media = [str(x) for x in parsed.get('gallery') if isinstance(x, str)]
+            except Exception:
+                gallery_media = []
+            if gallery_media:
+                api_key = (cfg.get('x_api_key') or '').strip()
+                api_secret = (cfg.get('x_api_secret') or '').strip()
+                oauth_token = (cfg.get('x_oauth_token') or '').strip()
+                oauth_secret = (cfg.get('x_oauth_token_secret') or '').strip()
+                if api_key and api_secret and oauth_token and oauth_secret:
+                    try:
+                        uploader = XMediaUploader(oauth_token, oauth_secret, api_key, api_secret)
+                        for rel in gallery_media[:4]:
+                            path = rel.replace('\\', '/')
+                            if not path.startswith('media/'):
+                                path = f"media/{path}"
+                            import os as _os
+                            mid = uploader.upload(_os.path.abspath(path))
+                            media_ids.append(mid)
+                    except Exception as exc:
+                        if job is not None:
+                            job.last_error = f"x_gallery_upload_failed: {exc}"
+                            session.add(job)
+                            session.commit()
+            elif media_rel:
                 # Use OAuth1 for media upload (requires keys/tokens)
                 api_key = (cfg.get('x_api_key') or '').strip()
                 api_secret = (cfg.get('x_api_secret') or '').strip()
@@ -159,7 +250,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                                 path = f"media/{path}"
                             import os as _os
                             path = _os.path.abspath(path)
-                        media_id = uploader.upload(path)
+                        media_ids.append(uploader.upload(path))
                     except Exception as exc:
                         # if media upload fails, fallback to text-only
                         if job is not None:
@@ -174,50 +265,125 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         session.commit()
             client = XClient(token)
             try:
-                if media_id:
+                # Read x_thread option from job payload (default False)
+                thread_enabled = False
+                try:
+                    import json as _json
+                    if job and job.payload_json:
+                        val = (_json.loads(job.payload_json) or {}).get('x_thread')
+                        thread_enabled = True if val is True else False
+                except Exception:
+                    thread_enabled = False
+                if media_ids:
                     # Use v2 create tweet with media
-                    import httpx
+                    import httpx, re
                     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-                    # Build thread ensuring hashtags are in first tweet
-                    first_text, remaining = _compose_main_and_remaining(base_text, hashtags)
-                    payload = {"text": first_text, "media": {"media_ids": [media_id]}}
-                    with httpx.Client(timeout=20) as h:
-                        r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
-                        d = r.json()
+                    if not thread_enabled:
+                        # Do not split: send full text (may exceed 280). Do not trim or split on failure.
+                        full_text = (base_text or '').strip()
+                        if hashtags:
+                            full_text = (full_text + '\n' + hashtags).strip()
+                        payload = {"text": full_text, "media": {"media_ids": media_ids[:4]}}
+                        with httpx.Client(timeout=20) as h:
+                            r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
+                            d = r.json()
                         if r.status_code >= 400:
                             raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
                         tid = (d.get('data') or {}).get('id')
                         url = f"https://twitter.com/i/web/status/{tid}" if tid else None
-                        # Post remaining text as replies (split on word boundaries); hashtags are not repeated
-                        import re
-                        while remaining and tid:
-                            chunk = remaining[:260]
-                            # try to break on whitespace
-                            m = re.search(r"^(.{1,260})(\s|$)", remaining)
-                            if m:
-                                chunk = m.group(1)
-                            from app.services.x_client import XClient as _XC
-                            xc = _XC(token)
-                            tid = xc.reply(tid, chunk)
-                            remaining = remaining[len(chunk):].lstrip()
+                    else:
+                        # Split by sentence boundaries; ensure hashtags in first tweet
+                        def _sentence_chunks(text: str, limit: int) -> list[str]:
+                            parts = re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", text)
+                            chunks = []
+                            buf = ''
+                            for s in parts:
+                                s = s.strip()
+                                if not s:
+                                    continue
+                                if not buf:
+                                    buf = s
+                                elif len(buf) + 1 + len(s) <= limit:
+                                    buf += ' ' + s
+                                else:
+                                    chunks.append(buf)
+                                    buf = s
+                            if buf:
+                                chunks.append(buf)
+                            return chunks
+                        # Budget for first tweet includes hashtags
+                        fixed = ('\n' + hashtags) if hashtags else ''
+                        budget = 280 - len(fixed)
+                        chunks = _sentence_chunks((base_text or '').strip(), max(0, budget))
+                        first_body = chunks[0] if chunks else ''
+                        remaining = ' '.join(chunks[1:]).strip()
+                        first_text = (first_body + fixed).strip()
+                        payload = {"text": first_text, "media": {"media_ids": media_ids[:4]}}
+                        with httpx.Client(timeout=20) as h:
+                            r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
+                            d = r.json()
+                            if r.status_code >= 400:
+                                raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
+                            tid = (d.get('data') or {}).get('id')
+                            url = f"https://twitter.com/i/web/status/{tid}" if tid else None
+                            while thread_enabled and remaining and tid:
+                                segs = _sentence_chunks(remaining, 260)
+                                if not segs:
+                                    break
+                                chunk = segs[0]
+                                from app.services.x_client import XClient as _XC
+                                xc = _XC(token)
+                                tid = xc.reply(tid, chunk)
+                                remaining = remaining[len(chunk):].lstrip()
                 else:
-                    # no media; thread similarly
-                    first_text, remaining = _compose_main_and_remaining(base_text, hashtags)
-                    tid2, url = client.tweet(first_text)
-                    if tid2:
-                        post.platform_post_id = tid2
-                    # continue thread for remainder
-                    if remaining and tid2:
-                        import re
+                    # no media
+                    import re
+                    if not thread_enabled:
+                        # Do not split; post full text in one tweet
+                        full_text = (base_text or '').strip()
+                        if hashtags:
+                            full_text = (full_text + '\n' + hashtags).strip()
+                        tid2, url = client.tweet(full_text)
+                        if tid2:
+                            post.platform_post_id = tid2
+                    else:
+                        def _sentence_chunks(text: str, limit: int) -> list[str]:
+                            parts = re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", text)
+                            chunks = []
+                            buf = ''
+                            for s in parts:
+                                s = s.strip()
+                                if not s:
+                                    continue
+                                if not buf:
+                                    buf = s
+                                elif len(buf) + 1 + len(s) <= limit:
+                                    buf += ' ' + s
+                                else:
+                                    chunks.append(buf)
+                                    buf = s
+                            if buf:
+                                chunks.append(buf)
+                            return chunks
+                        fixed = ('\n' + hashtags) if hashtags else ''
+                        budget = 280 - len(fixed)
+                        chunks = _sentence_chunks((base_text or '').strip(), max(0, budget))
+                        first_body = chunks[0] if chunks else ''
+                        remaining = ' '.join(chunks[1:]).strip()
+                        first_text = (first_body + fixed).strip()
+                        tid2, url = client.tweet(first_text)
+                        if tid2:
+                            post.platform_post_id = tid2
                         tid = tid2
                         while remaining and tid:
-                            chunk = remaining[:260]
-                            m = re.search(r"^(.{1,260})(\s|$)", remaining)
-                            if m:
-                                chunk = m.group(1)
-                            tid = client.reply(tid, chunk)  # uses same bearer client
+                            segs = _sentence_chunks(remaining, 260)
+                            if not segs:
+                                break
+                            chunk = segs[0]
+                            tid = client.reply(tid, chunk)
+                            remaining = remaining[len(chunk):].lstrip()
                 post.platform_url = url
-                if media_id and tid:
+                if media_ids and tid:
                     post.platform_post_id = tid
             except Exception as exc:
                 post.status = PostStatusEnum.error
@@ -268,33 +434,49 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             try:
                 import json as _json
                 override = None
+                gallery_list = []
                 if job and job.payload_json:
                     try:
-                        override = (_json.loads(job.payload_json) or {}).get('media_rel')
+                        parsed = (_json.loads(job.payload_json) or {})
+                        override = parsed.get('media_rel')
+                        gallery_list = parsed.get('gallery') or []
                     except Exception:
                         override = None
+                        gallery_list = []
                 media_rel_vk = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                if (not media_rel_vk) and gallery_list:
+                    media_rel_vk = gallery_list[0]
             except Exception:
                 media_rel_vk = getattr(brief, 'media_path', None)
-            if media_rel_vk:
+            if media_rel_vk or gallery_list:
                 try:
                     import os as _os, mimetypes as _m
                     vk = VKClient(token)
-                    path = media_rel_vk
-                    if path:
-                        path = path.replace('\\', '/')
+                    attachments: list[str] = []
+                    candidates: list[str] = []
+                    if gallery_list:
+                        candidates = [str(x) for x in gallery_list if isinstance(x, str)]
+                    if media_rel_vk and not candidates:
+                        candidates = [media_rel_vk]
+                    for rel in candidates[:10]:
+                        path = rel.replace('\\', '/')
                         if not path.startswith('media/'):
                             path = f"media/{path}"
                         path = _os.path.abspath(path)
-                    ctype = _m.guess_type(path)[0] or ''
-                    if ctype.startswith('image/'):
-                        attachment = vk.upload_photo_to_wall(s, path)
-                    elif ctype.startswith('video/'):
-                        # Fallback: no wall video upload yet; include no attachment and rely on link/text
-                        if job is not None:
-                            job.last_error = (job.last_error or '') + ' vk_video_upload_not_implemented'
-                            session.add(job)
-                            session.commit()
+                        ctype = _m.guess_type(path)[0] or ''
+                        if ctype.startswith('image/'):
+                            try:
+                                att = vk.upload_photo_to_wall(s, path)
+                                if att: attachments.append(att)
+                            except Exception as _exc:
+                                pass
+                        elif ctype.startswith('video/'):
+                            # Fallback: no wall video upload yet
+                            if job is not None:
+                                job.last_error = (job.last_error or '') + ' vk_video_upload_not_implemented'
+                                session.add(job)
+                                session.commit()
+                    attachment = ','.join(attachments) if attachments else None
                 except Exception as exc:
                     attachment = None
                     if job is not None:
@@ -416,15 +598,23 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 return 'error'
             brief = session.get(Brief, post.brief_id)
             full_body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
-            # Split first paragraph as header and remainder for comment
-            first_par = full_body.strip().split('\n\n', 1)[0] if full_body else ''
-            rest_text = ''
-            if '\n\n' in full_body:
-                rest_text = full_body.split('\n\n', 1)[1].strip()
-            elif len(full_body) > 500:
-                first_par, rest_text = full_body[:500], full_body[500:]
-            # Title from first paragraph; fallback to explicit title
-            title = ((getattr(brief, 'title', None) or first_par or getattr(brief, 'text_en', None) or 'Post from IndiePulse'))[:290]
+            # Use job payload value for number of sentences in main post
+            sent_count = 2
+            try:
+                import json as _json
+                if job and job.payload_json:
+                    sc = (_json.loads(job.payload_json) or {}).get('reddit_sentences')
+                    if sc is not None:
+                        sent_count = max(1, min(10, int(sc)))
+            except Exception:
+                sent_count = 2
+            # Split by sentences and pack first N sentences as title; rest as comment
+            import re as _re
+            parts = _re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", full_body or '')
+            head = ' '.join([p.strip() for p in parts[:sent_count]]).strip()
+            rest_text = ' '.join([p.strip() for p in parts[sent_count:]]).strip()
+            # Title fallback
+            title = ((getattr(brief, 'title', None) or head or getattr(brief, 'text_en', None) or 'Post from IndiePulse'))[:290]
             body = ''  # main post body left empty; we will add the remainder as a comment
             if brief and getattr(brief, 'tags_json', None):
                 try:
@@ -435,6 +625,19 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 rc = RedditClient(cid, csec, uname, pwd)
                 # choose media if present
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                # Prefer override and then first gallery item
+                try:
+                    import json as _json
+                    if job and job.payload_json:
+                        parsed = (_json.loads(job.payload_json) or {})
+                        override = parsed.get('media_rel')
+                        gallery_list = parsed.get('gallery') or []
+                        if override:
+                            media_rel = override
+                        elif (not media_rel) and gallery_list:
+                            media_rel = gallery_list[0]
+                except Exception:
+                    pass
                 url = None; sid = None
                 if media_rel:
                     import os as _os, mimetypes as _m
@@ -459,7 +662,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     elif ctype.startswith('video/'):
                         sid, url = rc.submit_video(sub, title=title, video_path=path)
                 if not sid:
-                    sid, url = rc.submit_text(sub, title=title, text=body)
+                    sid, url = rc.submit_text(sub, title=title, text=head or body)
                 post.platform_post_id = sid
                 post.platform_url = url
                 # Mark done and return to avoid falling through into unrelated branches
@@ -511,15 +714,22 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             try:
                 from app.services.facebook_client import FacebookClient as _FB
                 fb = _FB(page_token)
+                from loguru import logger as _logger
+                _logger.info(f"fb.publish start platform={'fb_ru' if is_ru else 'fb_en'} page_id={page_id}")
                 if path_abs:
+                    _logger.info(f"fb.publish create_photo path={path_abs} msg_len={len(message or '')}")
                     resp = fb.create_photo(page_id, path_abs, caption=message)
                 else:
+                    _logger.info(f"fb.publish create_post msg_len={len(message or '')}")
                     resp = fb.create_post(page_id, message)
                 post_id = str(resp.get('post_id') or resp.get('id') or '')
+                _logger.info(f"fb.publish resp id={post_id} raw={str(resp)[:400]}")
                 post.platform_post_id = post_id
                 try:
                     post.platform_url = fb.get_permalink(post_id)
-                except Exception:
+                    _logger.info(f"fb.publish permalink={post.platform_url}")
+                except Exception as _exc:
+                    _logger.warning(f"fb.publish permalink error: {_exc}")
                     post.platform_url = None
             except Exception as exc:
                 post.status = PostStatusEnum.error
@@ -532,55 +742,56 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
-            path = media_rel.replace('\\', '/')
-            if not path.startswith('media/'):
-                path = f"media/{path}"
-            import os as _os
-            path = _os.path.abspath(path)
-            # Title preference: use explicit yt_title from job/brief if present, else EN then RU
-            title = None
-            try:
-                import json as _json
-                override = None
-                if job and job.payload_json:
-                    try:
-                        override = (_json.loads(job.payload_json) or {}).get('yt_title')
-                    except Exception:
-                        override = None
-                if override:
-                    title = override
-            except Exception:
-                pass
-            if not title:
-                title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
-            # For YouTube, include hashtags in description as well
-            desc = 'Uploaded via IndiePulse'
-            if brief and getattr(brief, 'tags_json', None):
+            if str(post.platform) == 'PlatformEnum.yt' or str(post.platform) == 'yt':
+                path = media_rel.replace('\\', '/')
+                if not path.startswith('media/'):
+                    path = f"media/{path}"
+                import os as _os
+                path = _os.path.abspath(path)
+                # Title preference: use explicit yt_title from job/brief if present, else EN then RU
+                title = None
                 try:
-                    desc = (desc + '\n' + brief.tags_json).strip()
+                    import json as _json
+                    override = None
+                    if job and job.payload_json:
+                        try:
+                            override = (_json.loads(job.payload_json) or {}).get('yt_title')
+                        except Exception:
+                            override = None
+                    if override:
+                        title = override
                 except Exception:
                     pass
-            yt = YouTubeClient(
-                access_token=(cfg.get('yt_access_token') or '').strip(),
-                refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
-                client_id=(cfg.get('yt_client_id') or '').strip(),
-                client_secret=(cfg.get('yt_client_secret') or '').strip(),
-            )
-            try:
-                vid, url = yt.upload_short(path, title=title, description=desc)
-                post.platform_post_id = vid
-                post.platform_url = url
-            except Exception as exc:
-                post.status = PostStatusEnum.error
-                post.error_text = str(exc)
-                if job is not None:
-                    job.status = JobStatusEnum.error
-                    job.last_error = str(exc)
-                session.add(post)
-                if job is not None:
-                    session.add(job)
-                session.commit()
-                return 'error'
+                if not title:
+                    title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
+                # For YouTube, include hashtags in description as well
+                desc = 'Uploaded via IndiePulse'
+                if brief and getattr(brief, 'tags_json', None):
+                    try:
+                        desc = (desc + '\n' + brief.tags_json).strip()
+                    except Exception:
+                        pass
+                yt = YouTubeClient(
+                    access_token=(cfg.get('yt_access_token') or '').strip(),
+                    refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
+                    client_id=(cfg.get('yt_client_id') or '').strip(),
+                    client_secret=(cfg.get('yt_client_secret') or '').strip(),
+                )
+                try:
+                    vid, url = yt.upload_short(path, title=title, description=desc)
+                    post.platform_post_id = vid
+                    post.platform_url = url
+                except Exception as exc:
+                    post.status = PostStatusEnum.error
+                    post.error_text = str(exc)
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = str(exc)
+                    session.add(post)
+                    if job is not None:
+                        session.add(job)
+                    session.commit()
+                    return 'error'
         else:
             # TikTok export: copy vertical media into export dir for manual upload
             if str(post.platform) in ('PlatformEnum.tiktok', 'tiktok'):
@@ -615,6 +826,72 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             else:
                 import time
                 time.sleep(1)
+        # Telegram (RU)
+        if str(post.platform) in ('PlatformEnum.tg', 'tg'):
+            try:
+                from app.services.settings import load_settings
+                from app.services.telegram_client import TelegramClient
+                from app.models.models import Brief
+                cfg = load_settings()
+                bot = (cfg.get('tg_bot_token') or '').strip()
+                chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+                brief = session.get(Brief, post.brief_id)
+                if not (bot and chat_id and brief):
+                    raise RuntimeError('tg_not_configured')
+                text = (brief.text_ru or brief.text_en or '')
+                # Include hashtags for TG
+                if brief and getattr(brief, 'tags_json', None):
+                    try:
+                        text = (text + '\n' + brief.tags_json).strip()
+                    except Exception:
+                        pass
+                client = TelegramClient(bot)
+                # Prefer image/video if available
+                media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                # Prefer override or first gallery
+                try:
+                    import json as _json
+                    if job and job.payload_json:
+                        parsed = (_json.loads(job.payload_json) or {})
+                        override = parsed.get('media_rel')
+                        gallery_list = parsed.get('gallery') or []
+                        if override:
+                            media_rel = override
+                        elif (not media_rel) and gallery_list:
+                            media_rel = gallery_list[0]
+                except Exception:
+                    pass
+                sent = None
+                if media_rel:
+                    import os as _os, mimetypes as _m
+                    p = media_rel.replace('\\','/')
+                    if not p.startswith('media/'):
+                        p = f"media/{p}"
+                    path = _os.path.abspath(p)
+                    ctype = _m.guess_type(path)[0] or ''
+                    if ctype.startswith('image/'):
+                        sent = client.send_photo(chat_id, path, caption=text[:1024])
+                    elif ctype.startswith('video/'):
+                        sent = client.send_video(chat_id, path, caption=text[:1024])
+                if not sent:
+                    sent = client.send_message(chat_id, text)
+                # Store message id
+                try:
+                    mid = ((sent.get('result') or {}).get('message_id') if isinstance(sent, dict) else None)
+                    post.platform_post_id = str(mid) if mid else None
+                except Exception:
+                    pass
+            except Exception as exc:
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
         # mark done
         post.status = PostStatusEnum.done
         post.published_at = datetime.utcnow()

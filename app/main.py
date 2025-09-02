@@ -24,6 +24,9 @@ def on_startup():
         app.state.asset_version = str(int(time.time()))
     except Exception:
         app.state.asset_version = "1"
+    # App versioning for footer
+    app.state.app_version = "1.0.2"
+    app.state.app_last_change = "Version 1.0.2 - Facebook test logging and integration fixes"
 
 app.include_router(pages.router)
 app.include_router(api.router)
@@ -39,3 +42,14 @@ templates = Jinja2Templates(directory="app/templates")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/version")
+def version():
+    try:
+        return {
+            "app_version": getattr(app.state, "app_version", "1.0.0"),
+            "last_change": getattr(app.state, "app_last_change", "Version 1.0.0 - Initial setup"),
+            "asset_version": getattr(app.state, "asset_version", "1"),
+        }
+    except Exception:
+        return {"app_version": "1.0.0"}

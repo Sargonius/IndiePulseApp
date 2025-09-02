@@ -26,7 +26,18 @@
 			{% else %}<span class="badge default">{{ s }}</span>{% endif %}
 		</td>
 		<td>{{ p.brief_id }}</td>
-		<td>{{ p.scheduled_at or '' }}</td>
+		<td>
+			{% set s = p.status_text %}
+			{% if s == 'queued' %}
+			<form class="row" style="gap:6px; align-items:center; flex-wrap:nowrap;" hx-post="/api/posts/update_schedule" hx-target="#posts_table" hx-swap="outerHTML">
+				<input type="hidden" name="id" value="{{ p.id }}" />
+				<input type="datetime-local" name="scheduled_at" value="{{ (p.scheduled_at.isoformat(timespec='minutes') if p.scheduled_at) or '' }}" />
+				<button class="btn btn-icon" title="Save">💾</button>
+			</form>
+			{% else %}
+			{{ p.scheduled_at or '' }}
+			{% endif %}
+		</td>
 		<td>{{ p.published_at or '' }}</td>
 		<td>{% if p.platform_url %}<a href="{{ p.platform_url }}" target="_blank">link</a>{% else %}—{% endif %}</td>
 		<td>{{ p.m_like if p.m_like is not none else '—' }}</td>
@@ -35,10 +46,9 @@
 		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
 		<td class="muted" style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ p.tags or '' }}</td>
 		<td>
-			<div class="row" style="gap:6px; align-items:center;">
-				<button class="btn" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-include="closest tr" hx-target="#posts_table" hx-swap="outerHTML">⟳</button>
-				<button class="btn" title="Remove" hx-post="/api/posts/remove" hx-include="closest tr" hx-target="#posts_table" hx-swap="outerHTML">✖</button>
-				<input type="hidden" name="id" value="{{ p.id }}" />
+			<div class="row" style="gap:6px; align-items:center; flex-wrap:nowrap;">
+				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-vals='{"id": {{ p.id }} }' hx-target="#posts_table" hx-swap="outerHTML">⟳</button>
+				<button class="btn btn-icon btn-red" title="Remove" hx-post="/api/posts/remove" hx-vals='{"id": {{ p.id }} }' hx-target="#posts_table" hx-swap="outerHTML">✖</button>
 			</div>
 		</td>
 	</tr>

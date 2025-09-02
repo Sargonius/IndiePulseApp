@@ -17,12 +17,14 @@ if exist .env (
   )
 )
 
-echo Starting IndiePulse at %HOST%:%PORT% (foreground, logs to console)...
-echo Press Ctrl+C to stop. Full server logs also in logs\app.log
+REM Free the port if occupied (best-effort) to avoid bind errors in debug
+powershell -NoProfile -Command "$port=%PORT%; $conns=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if($conns){ $pids=($conns | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique); foreach($procId in $pids){ try { Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue } catch {} } }"
+
+echo Starting IndiePulse at %HOST%:%PORT% (visible console)...
+echo Press Ctrl+C to stop.
 
 ".venv\Scripts\python.exe" -m uvicorn app.main:app --host %HOST% --port %PORT%
 echo Uvicorn exited with code %errorlevel%
-pause
 endlocal
 
 

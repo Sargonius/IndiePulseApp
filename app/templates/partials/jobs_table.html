@@ -24,11 +24,11 @@
 		<td>{{ j.created_at }}</td>
 		<td>{{ j.updated_at }}</td>
 		<td>
-			<div class="row" style="gap:6px; align-items:center;">
-				<button class="btn" title="Refresh metrics" hx-post="/api/jobs/refresh_metrics" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">⟳</button>
-				<button class="btn" title="Stop" hx-post="/api/jobs/kill" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">■</button>
-				<button class="btn" title="Retry" hx-post="/api/jobs/retry" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">↺</button>
-				<button class="btn" title="Remove" hx-post="/api/jobs/remove" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">✖</button>
+			<div class="row" style="gap:6px; align-items:center; flex-wrap:nowrap;">
+				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/jobs/refresh_metrics" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">⟳</button>
+				<button class="btn btn-icon btn-blue" title="Stop" hx-post="/api/jobs/kill" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">■</button>
+				<button class="btn btn-icon btn-orange" title="Retry" hx-post="/api/jobs/retry" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">↺</button>
+				<button class="btn btn-icon btn-red" title="Remove" hx-post="/api/jobs/remove" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">✖</button>
 			</div>
 		</td>
 	</tr>

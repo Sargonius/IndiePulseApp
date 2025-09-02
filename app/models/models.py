@@ -17,6 +17,7 @@ class PlatformEnum(str, Enum):
     fb_ru = "fb_ru"
     fb_en = "fb_en"
     reddit = "reddit"
+    tg = "tg"
 
 class BriefTypeEnum(str, Enum):
     news = "news"

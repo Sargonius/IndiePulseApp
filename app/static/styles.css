@@ -112,6 +112,23 @@ button:active, .btn:active { transform: translateY(1px); }
 .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
 
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.btn-green { background: #10b981; color: #fff; border-color: #10b981; }
+.btn-green:hover { background: #059669; border-color: #059669; }
+.btn-orange { background: #f59e0b; color: #fff; border-color: #f59e0b; }
+.btn-orange:hover { background: #d97706; border-color: #d97706; }
+.btn-red { background: #ef4444; color: #fff; border-color: #ef4444; }
+.btn-red:hover { background: #dc2626; border-color: #dc2626; }
+.btn-blue { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+.btn-blue:hover { background: #2563eb; border-color: #2563eb; }
 
 /* Forms */
 input[type="text"], input[type="password"], input[type="datetime-local"], textarea, select {

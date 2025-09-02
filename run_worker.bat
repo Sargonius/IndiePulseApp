@@ -6,7 +6,6 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 
-if not exist logs mkdir logs
-powershell -NoProfile -Command "$p = Start-Process -FilePath '.\\.venv\\Scripts\\python.exe' -ArgumentList '-m','app.worker' -RedirectStandardOutput 'logs\\worker.out.log' -RedirectStandardError 'logs\\worker.err.log' -PassThru; Set-Content -Path '.worker.pid' -Value $p.Id"
-echo Worker started. Logs: logs\worker.out.log / logs\worker.err.log
+start "IndiePulse Worker" cmd /k ".venv\Scripts\python.exe -m app.worker"
+echo Worker started in a visible window titled 'IndiePulse Worker'.
 endlocal

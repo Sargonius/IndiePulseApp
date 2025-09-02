@@ -65,6 +65,7 @@ def news_form(request: Request):
         'fb_ru': bool(((cfg.get('fb_ru_page_id') or '').strip()) and ((cfg.get('fb_ru_page_access_token') or '').strip())),
         'fb_en': bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip())),
         'reddit': bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip())),
+        'tg': bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip())),
         'tiktok': True,
     }
     return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready})
@@ -150,7 +151,10 @@ def submit_news(
     media: Optional[UploadFile] = File(None),
     media_normal: Optional[str] = Form(None),
     media_vertical: Optional[str] = Form(None),
+    gallery_order: Optional[str] = Form(None),
+    reddit_sentences: Optional[int] = Form(2),
     yt_title: Optional[str] = Form(None),
+    x_split: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
     media_path: Optional[str] = None
@@ -184,6 +188,20 @@ def submit_news(
     tags_final = (tags or '').strip()
     if weekday_auto:
         tags_final = (tags_final + ' ' + ' '.join(weekday_auto)).strip()
+
+    # Persist gallery list into draft for continuity across refreshes
+    if gallery_order is not None:
+        try:
+            save_draft({"gallery_normal": [x.strip() for x in (gallery_order or '').split(',') if x.strip()]})
+        except Exception:
+            pass
+
+    # Persist Reddit sentence count in draft for UX continuity
+    try:
+        n = max(1, min(10, int(reddit_sentences or 2)))
+        save_draft({"reddit_sentences": n})
+    except Exception:
+        pass
 
     brief = Brief(
         user_id=1,
@@ -240,10 +258,28 @@ def submit_news(
         except Exception:
             media_rel = None
         payload = {"post_id": post.id}
+        # Attach gallery list for platforms that support multiple images; clients will decide how to use it
+        try:
+            if (gallery_order or '').strip():
+                glist = [x.strip() for x in (gallery_order or '').split(',') if x.strip()]
+                if glist:
+                    payload["gallery"] = glist
+        except Exception:
+            pass
         if media_rel:
             payload["media_rel"] = media_rel
         if str(post.platform) in (str(PlatformEnum.yt), 'yt') and (yt_title or '').strip():
             payload["yt_title"] = (yt_title or '').strip()
+        # X thread option
+        if str(post.platform) in (str(PlatformEnum.x), 'x'):
+            payload["x_thread"] = bool(x_split)
+        # Pass reddit_sentences for Reddit thread behavior
+        try:
+            if str(post.platform) in (str(PlatformEnum.reddit), 'reddit'):
+                rn = max(1, min(10, int(reddit_sentences or 2)))
+                payload["reddit_sentences"] = rn
+        except Exception:
+            pass
         job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
         session.add(job)
         session.commit()

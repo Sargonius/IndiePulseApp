@@ -13,6 +13,15 @@
             <input type="hidden" name="media_normal" id="media_normal_hidden" value="{{ draft.media_normal_path if draft else '' }}" />
 
 			<div style="height:12px;"></div>
+			<label>Галерея изображений (multi)</label><br/>
+			<div id="drop_zone_gallery" style="width:320px;min-height:80px;border:2px dashed #94a3b8;color:#64748b;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#f8fafc;cursor:pointer;">
+				Перетащите несколько изображений сюда или кликните
+			</div>
+			<input type="file" id="media_input_gallery" accept="image/*" multiple style="display:none;" />
+			<div id="gallery_wrap" class="grid cols-2" style="margin-top:8px;"></div>
+			<input type="hidden" name="gallery_order" id="gallery_order_hidden" value="{{ (draft.gallery_normal | join(',')) if draft and draft.gallery_normal else '' }}" />
+
+			<div style="height:12px;"></div>
 			<label>Видео (вертикальное 9:16, Shorts/TikTok)</label><br/>
 			<div id="drop_zone_vertical">
 				Перетащите файл сюда или кликните (vertical)
@@ -50,7 +59,15 @@
         <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
         <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
         <label><input class="pf" type="checkbox" name="platforms" value="reddit" checked data-ready="{{ 1 if platforms_ready.reddit else 0 }}" /> Reddit (EN)</label>
+        <label><input class="pf" type="checkbox" name="platforms" value="tg" checked data-ready="{{ 1 if platforms_ready.tg else 0 }}" /> Telegram (RU)</label>
         <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked data-ready="{{ 1 if platforms_ready.tiktok else 0 }}" /> TikTok</label>
+    </div>
+    <div style="margin-top:6px;">
+      <label><input type="checkbox" name="x_split" id="x_split" /> Разбивать длинные X посты на тред (опция)</label>
+    </div>
+    <div style="margin-top:6px;">
+      <label>Reddit: предложений в основном посте</label>
+      <input type="number" id="rd_sentences" name="reddit_sentences" value="{{ draft.reddit_sentences if draft and draft.reddit_sentences else 2 }}" min="1" max="10" style="width:80px;" />
     </div>
 	<div>
 		<label>Дата/время (опционально)</label><br/>
@@ -189,14 +206,16 @@
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
             <label>Music (optional)</label>
             <input type="file" id="rv_music" accept="audio/*" />
+            <button type="button" id="rv_pick_music" class="btn">Pick from folder</button>
+            <select id="rv_music_list" style="min-width:200px;"></select>
           </div>
           
           <!-- Music Timeline -->
           <div id="rv_music_timeline" style="margin-top:8px;display:none;">
             <div style="font-weight:600;margin-bottom:4px;">Music Timeline</div>
-            <div style="position:relative;height:30px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
+            <div style="position:relative;height:60px;background:#f0f0f0;border-radius:4px;margin-bottom:4px;">
               <div id="rv_music_track" style="position:relative;height:100%;cursor:pointer;">
-                <div id="rv_music_bg" style="position:absolute;top:0;left:0;right:0;bottom:0;background:#ddd;"></div>
+                <canvas id="rv_music_wave" width="600" height="60" style="position:absolute;left:0;top:0;width:100%;height:100%;"></canvas>
                 <div id="rv_music_offset" style="position:absolute;top:0;width:2px;height:100%;background:#ff6b6b;cursor:ew-resize;"></div>
                 <div id="rv_music_fade_in" style="position:absolute;top:0;height:100%;background:rgba(255,107,107,0.3);"></div>
                 <div id="rv_music_fade_out" style="position:absolute;top:0;height:100%;background:rgba(255,107,107,0.3);"></div>
@@ -250,6 +269,7 @@ function queueSave() {
         fd.append('scheduled_at', sched);
         const plats = Array.from(form.querySelectorAll('input[name="platforms"]:checked')).map(x => x.value);
         plats.forEach(p => fd.append('platforms', p));
+        if (rdSentEl) fd.append('reddit_sentences', rdSentEl.value);
         fetch('/api/draft/news', { method: 'POST', body: fd });
     }, 400);
 }
@@ -259,6 +279,11 @@ const dzN = document.getElementById('drop_zone_normal');
 const inN = document.getElementById('media_input_normal');
 const prevN = document.getElementById('preview_normal');
 const hiddenN = document.getElementById('media_normal_hidden');
+
+const dzG = document.getElementById('drop_zone_gallery');
+const inG = document.getElementById('media_input_gallery');
+const galleryWrap = document.getElementById('gallery_wrap');
+const galleryOrderHidden = document.getElementById('gallery_order_hidden');
 
 const dzV = document.getElementById('drop_zone_vertical');
 const inV = document.getElementById('media_input_vertical');
@@ -277,6 +302,8 @@ const vkPrevMedia = document.getElementById('vk_preview_media');
 const xCounter = document.getElementById('x_counter');
 const wordCounter = document.getElementById('word_counter');
 const clearBtn = document.getElementById('clear_draft_btn');
+const xSplitEl = document.getElementById('x_split');
+const rdSentEl = document.getElementById('rd_sentences');
 
 function setPreview(target, file) {
     target.innerHTML = '';
@@ -334,75 +361,207 @@ function bindDrop(dz, input, target, slot, hiddenField) {
 bindDrop(dzN, inN, prevN, 'normal', hiddenN);
 bindDrop(dzV, inV, prevV, 'vertical', hiddenV);
 
+// Gallery helpers
+function renderGallery(items) {
+  galleryWrap.innerHTML = '';
+  items.forEach((rel, idx) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.padding = '8px';
+    card.style.display = 'flex';
+    card.style.flexDirection = 'column';
+    card.style.gap = '6px';
+    const img = document.createElement('img');
+    img.src = '/media/' + rel.split('/').pop();
+    img.style.maxWidth = '100%';
+    img.style.maxHeight = '160px';
+    img.draggable = true;
+    img.dataset.rel = rel;
+    const ctrls = document.createElement('div');
+    ctrls.className = 'row';
+    const up = document.createElement('button'); up.type = 'button'; up.className = 'btn'; up.textContent = '↑';
+    const down = document.createElement('button'); down.type = 'button'; down.className = 'btn'; down.textContent = '↓';
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'btn btn-danger'; del.textContent = 'Удалить';
+    up.addEventListener('click', () => {
+      if (idx <= 0) return; const tmp = items[idx-1]; items[idx-1] = items[idx]; items[idx] = tmp; syncGallery(items);
+    });
+    down.addEventListener('click', () => {
+      if (idx >= items.length-1) return; const tmp = items[idx+1]; items[idx+1] = items[idx]; items[idx] = tmp; syncGallery(items);
+    });
+    del.addEventListener('click', async () => {
+      items.splice(idx, 1); syncGallery(items);
+      const fd = new FormData(); fd.append('item', rel); await fetch('/api/gallery/remove', { method: 'POST', body: fd });
+    });
+    ctrls.appendChild(up); ctrls.appendChild(down); ctrls.appendChild(del);
+    card.appendChild(img); card.appendChild(ctrls);
+    galleryWrap.appendChild(card);
+  });
+  galleryOrderHidden.value = items.join(',');
+  updatePreviewsFromGallery(items);
+}
+
+function syncGallery(items) {
+  renderGallery(items);
+  const fd = new FormData(); fd.append('order', items.join(',')); fetch('/api/gallery/reorder', { method: 'POST', body: fd });
+}
+
+function addToGallery(files) {
+  const list = (galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : []);
+  const queue = Array.from(files);
+  (async () => {
+    for (const f of queue) {
+      const fd = new FormData(); fd.append('media', f); fd.append('slot', 'gallery');
+      try {
+        const r = await fetch('/api/uploads/draft_media', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (j.media_path) list.push(j.media_path);
+      } catch (e) {}
+    }
+    renderGallery(list);
+  })();
+}
+
+// Bind gallery drop/click
+dzG.addEventListener('click', () => inG.click());
+dzG.addEventListener('dragover', (e) => { e.preventDefault(); dzG.style.borderColor = '#333'; });
+dzG.addEventListener('dragleave', () => { dzG.style.borderColor = '#94a3b8'; });
+dzG.addEventListener('drop', (e) => {
+  e.preventDefault(); dzG.style.borderColor = '#94a3b8';
+  if (e.dataTransfer.files && e.dataTransfer.files.length) addToGallery(e.dataTransfer.files);
+});
+inG.addEventListener('change', () => { if (inG.files && inG.files.length) addToGallery(inG.files); });
+
+function updatePreviewsFromGallery(items) {
+  // Update X/VK previews with first image in gallery if no normal media selected
+  const first = items && items.length ? items[0] : null;
+  if (first && !hiddenN.value) {
+    const url = '/media/' + first.split('/').pop();
+    const img = document.createElement('img'); img.src = url; img.style.maxWidth='320px'; img.style.maxHeight='180px';
+    prevN.innerHTML=''; prevN.appendChild(img);
+  }
+  // Render gallery thumbnails into platform previews
+  try {
+    xPrevMedia.innerHTML = '';
+    vkPrevMedia.innerHTML = '';
+    const rdMediaEl = document.getElementById('rd_media');
+    const maxX = 4; // X supports up to 4 images
+    const showX = items.slice(0, maxX);
+    showX.forEach(rel => {
+      const img = document.createElement('img');
+      img.src = '/media/' + rel.split('/').pop();
+      img.style.maxWidth = '72px'; img.style.maxHeight='72px'; img.style.borderRadius='6px'; img.style.marginRight='4px';
+      xPrevMedia.appendChild(img);
+    });
+    const showVK = items.slice(0, 10);
+    showVK.forEach(rel => {
+      const img = document.createElement('img');
+      img.src = '/media/' + rel.split('/').pop();
+      img.style.maxWidth = '72px'; img.style.maxHeight='72px'; img.style.borderRadius='6px'; img.style.marginRight='4px';
+      vkPrevMedia.appendChild(img);
+    });
+    if (rdMediaEl) rdMediaEl.textContent = items.length ? 'Media: image will be attached' : 'Media: none';
+  } catch (e) {}
+}
+
 function updateTextPreviews() {
   const ru = document.getElementById('text_ru').value;
   const en = document.getElementById('text_en').value;
   const tagsVal = (document.getElementById('tags_input')?.value || '').trim();
   const tagsSuffix = tagsVal ? ('\n' + tagsVal) : '';
-  const full = en + tagsSuffix;
-  // split into ~260 char chunks for thread preview
-  const chunks = [];
-  let rest = full;
-  while (rest.length > 0) {
-    let part = rest.slice(0, 260);
-    const idx = part.lastIndexOf(' ');
-    if (rest.length > 260 && idx > 80) part = part.slice(0, idx);
-    chunks.push(part);
-    rest = rest.slice(part.length).trimStart();
-    if (chunks.length > 4) break; // limit preview to 5 tweets
+  const xSplit = !!(xSplitEl && xSplitEl.checked);
+
+  // Helper: split into sentences by punctuation . ! ? and keep punctuation
+  function splitSentences(s) {
+    const sentences = [];
+    const re = /[^.!?]+[.!?]+|[^.!?]+$/g;
+    const m = s.match(re);
+    if (m) m.forEach(t => sentences.push(t.trim()));
+    return sentences;
   }
-  // Ensure hashtags stay in first tweet; trim body first
+  // Pack sentences into a string up to maxLen
+  function pack(sentences, maxLen) {
+    let out = '';
+    let used = 0;
+    let idx = 0;
+    while (idx < sentences.length) {
+      const s = sentences[idx];
+      if (!s) { idx++; continue; }
+      if ((used + (used ? 1 : 0) + s.length) <= maxLen) {
+        out += (used ? ' ' : '') + s;
+        used = out.length;
+        idx++;
+      } else {
+        break;
+      }
+    }
+    return { text: out, nextIndex: idx };
+  }
+
   const bodyOnly = en.trim();
   const hashOnly = tagsVal ? ('\n' + tagsVal) : '';
   let first = '';
   let remainder = '';
   if (!hashOnly) {
-    first = full.slice(0, 280);
-    remainder = full.slice(first.length).trimStart();
-  } else {
-    const budget = 280 - hashOnly.length;
-    if (budget <= 0) {
-      first = hashOnly.slice(0, 280);
-      remainder = bodyOnly;
-    } else if (bodyOnly.length <= budget) {
-      first = bodyOnly + hashOnly;
+    if (!xSplit) {
+      // No split preview: show full (may exceed 280)
+      first = (bodyOnly);
       remainder = '';
     } else {
-      let head = bodyOnly.slice(0, budget);
-      const cut = head.lastIndexOf(' ');
-      if (cut > 40) head = head.slice(0, cut);
-      first = head + hashOnly;
-      remainder = bodyOnly.slice(head.length).trimStart();
+      const sent = splitSentences(bodyOnly);
+      const head = pack(sent, 280);
+      first = head.text;
+      // join remaining sentences
+      remainder = sent.slice(head.nextIndex).join(' ').trim();
+    }
+  } else {
+    const budget = 280 - hashOnly.length;
+    if (!xSplit) {
+      // No split preview: show full with hashtags appended
+      const base = bodyOnly + hashOnly;
+      first = base;
+      remainder = '';
+    } else if (budget <= 0) {
+      first = hashOnly.slice(0, 280);
+      remainder = bodyOnly;
+    } else {
+      const sent = splitSentences(bodyOnly);
+      const head = pack(sent, budget);
+      first = (head.text + hashOnly).trim();
+      remainder = sent.slice(head.nextIndex).join(' ').trim();
     }
   }
   xPrevText.textContent = first;
   xThreadContainer.innerHTML = '';
-  // Re-split remainder into ~260-char chunks for replies
-  let rest2 = remainder;
-  while (rest2.length > 0) {
-    let part = rest2.slice(0, 260);
-    const idx = part.lastIndexOf(' ');
-    if (rest2.length > 260 && idx > 80) part = part.slice(0, idx);
-    const d = document.createElement('div');
-    d.style.marginTop = '2px';
-    d.style.paddingLeft = '8px';
-    d.style.borderLeft = '2px solid #e5e7eb';
-    d.style.color = '#555';
-    d.textContent = part;
-    xThreadContainer.appendChild(d);
-    rest2 = rest2.slice(part.length).trimStart();
-    if (xThreadContainer.childElementCount > 5) break;
+  if (xSplit && remainder) {
+    // Build replies packing by sentence to ~260 each
+    const restSent = splitSentences(remainder);
+    let i = 0;
+    while (i < restSent.length && xThreadContainer.childElementCount <= 5) {
+      const { text, nextIndex } = pack(restSent.slice(i), 260);
+      const d = document.createElement('div');
+      d.style.marginTop = '2px';
+      d.style.paddingLeft = '8px';
+      d.style.borderLeft = '2px solid #e5e7eb';
+      d.style.color = '#555';
+      d.textContent = text;
+      xThreadContainer.appendChild(d);
+      if (!text) break;
+      i += nextIndex;
+    }
   }
   vkPrevText.textContent = ru + (tagsVal ? ('\n' + tagsVal) : '');
   ytPrevDesc.textContent = (en || ru) + tagsSuffix;
-  // Reddit preview: title = first paragraph, comment = remainder
+  // Reddit preview: title = first N sentences, remainder as first comment
   const rdTitleEl = document.getElementById('rd_title');
   const rdMediaEl = document.getElementById('rd_media');
   const rdCommentEl = document.getElementById('rd_comment');
   if (rdTitleEl && rdCommentEl) {
-    const firstParSplit = (en || ru).split(/\n\n/);
-    rdTitleEl.textContent = (firstParSplit[0] || '').slice(0, 290);
-    rdCommentEl.textContent = (firstParSplit.slice(1).join('\n\n') || '').slice(0, 2000);
+    const sCount = Math.max(1, Math.min(10, parseInt(rdSentEl?.value || '2')));
+    const sentences = splitSentences((en || ru));
+    const titleTxt = sentences.slice(0, sCount).join(' ').slice(0, 290);
+    const restTxt = sentences.slice(sCount).join(' ').slice(0, 10000);
+    rdTitleEl.textContent = titleTxt;
+    rdCommentEl.textContent = restTxt;
     const hasImg = !!hiddenN.value;
     rdMediaEl.textContent = hasImg ? 'Media: will attach image/video if available' : 'Media: none';
   }
@@ -420,13 +579,20 @@ function updateXCounter() {
   wordCounter.textContent = `Words: ${words}`;
 }
 
-document.getElementById('text_ru').addEventListener('input', () => { updateTextPreviews(); });
-document.getElementById('text_en').addEventListener('input', () => { updateTextPreviews(); updateXCounter(); });
+['text_ru','text_en','tags_input','yt_title'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', () => { updateTextPreviews(); updateXCounter(); });
+});
+// Reflect split checkbox in preview
+document.getElementById('x_split').addEventListener('change', () => { updateTextPreviews(); updateXCounter(); });
+rdSentEl.addEventListener('input', () => { updateTextPreviews(); queueSave(); });
 document.getElementById('yt_title').addEventListener('input', () => { /* title only, keep for future validation */ });
 
 // Vertical render helper
 const rvVideo = document.getElementById('rv_video');
 const rvMusic = document.getElementById('rv_music');
+const rvPickMusic = document.getElementById('rv_pick_music');
+const rvMusicList = document.getElementById('rv_music_list');
 const rvX = document.getElementById('rv_x');
 const rvY = document.getElementById('rv_y');
 const rvOff = document.getElementById('rv_off');
@@ -462,12 +628,14 @@ const rvMusicOffset = document.getElementById('rv_music_offset');
 const rvMusicFadeIn = document.getElementById('rv_music_fade_in');
 const rvMusicFadeOut = document.getElementById('rv_music_fade_out');
 const rvMusicInfo = document.getElementById('rv_music_info');
+const rvMusicWave = document.getElementById('rv_music_wave');
 
 let videoLoaded = false;
 let videoWidth = 0;
 let videoHeight = 0;
 let videoDuration = 0;
 let musicDuration = 0;
+let waveformSamples = [];
 // Logical crop zoom (1.0 means crop is full 1080x1920 relative to scaled 1920 height)
 let cropZoom = 1.0; // >1 zooms in (smaller box)
 
@@ -599,6 +767,27 @@ function updateMusicTimeline() {
     rvMusicFadeOut.style.width = fadeOutWidth + 'px';
     
     rvMusicInfo.textContent = `Offset: ${musicOffset.toFixed(1)}s | Fade in: ${rvFi.value}s | Fade out: ${rvFo.value}s`;
+    // Draw waveform
+    try {
+      if (rvMusicWave && waveformSamples && waveformSamples.length) {
+        const ctx = rvMusicWave.getContext('2d');
+        const w = rvMusicWave.width = rvMusicTrack.clientWidth;
+        const h = rvMusicWave.height = rvMusicTrack.clientHeight;
+        ctx.clearRect(0,0,w,h);
+        ctx.fillStyle = '#cbd5e1';
+        const n = waveformSamples.length;
+        for (let i=0; i<n; i++) {
+          const x = Math.floor(i * (w / n));
+          const v = waveformSamples[i];
+          const barH = Math.max(1, Math.floor(v * (h-6)));
+          const y = Math.floor((h - barH) / 2);
+          ctx.fillRect(x, y, 2, barH);
+        }
+        // Draw current offset marker
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(offsetPos, 0, 2, h);
+      }
+    } catch (e) {}
   }
 }
 
@@ -651,6 +840,35 @@ rvMusic.addEventListener('change', (e) => {
       updateMusicTimeline();
     });
   }
+});
+
+// Load music list from server and fill select
+rvPickMusic.addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/music/list');
+    const j = await r.json();
+    rvMusicList.innerHTML = '';
+    const opt0 = document.createElement('option'); opt0.value=''; opt0.textContent='Select track...'; rvMusicList.appendChild(opt0);
+    (j.tracks || []).forEach(t => {
+      const o = document.createElement('option'); o.value = t.path; o.textContent = t.name; rvMusicList.appendChild(o);
+    });
+  } catch (e) {}
+});
+rvMusicList.addEventListener('change', async () => {
+  const path = rvMusicList.value;
+  if (!path) return;
+  try {
+    const u = new URL('/api/music/waveform', window.location.origin);
+    u.searchParams.set('path', path);
+    const r = await fetch(u.toString());
+    const j = await r.json();
+    if (j.ok) {
+      musicDuration = (j.duration_ms || 0) / 1000;
+      waveformSamples = j.samples || [];
+      rvMusicTimeline.style.display = 'block';
+      updateMusicTimeline();
+    }
+  } catch (e) {}
 });
 
 // Update preview when sliders change
@@ -1079,6 +1297,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   updateTextPreviews();
   updateXCounter();
+  // Hydrate gallery from draft
+  try {
+    const raw = '{{ (draft.gallery_normal | join(",")) if draft and draft.gallery_normal else "" }}';
+    const items = raw ? raw.split(',').filter(Boolean) : [];
+    if (items.length) renderGallery(items);
+  } catch (e) {}
   // Disable platforms if not configured or missing media
   const platInputs = document.querySelectorAll('input.pf[name="platforms"]');
   platInputs.forEach(inp => {

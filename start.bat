@@ -24,6 +24,8 @@ if exist .env (
   )
 )
 
-REM Run foreground debug server so logs are visible
-call start_debug.bat
+REM Launch server in a visible window
+start "IndiePulse Server" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT%"
+REM Launch worker in a visible window
+start "IndiePulse Worker" cmd /k ".venv\Scripts\python.exe -m app.worker"
 endlocal

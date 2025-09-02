@@ -26,6 +26,7 @@ DEFAULTS: Dict[str, Any] = {
     "x_refresh_token": "",
     "x_token_type": "",
     "x_expires_at": 0,
+    "x_expires_at_ts": 0,
     "x_code_verifier": "",
     "x_api_key": "",
     "x_api_secret": "",
@@ -48,11 +49,16 @@ DEFAULTS: Dict[str, Any] = {
     "reddit_password": "",
     "reddit_subreddit_ru": "",
     "reddit_subreddit_en": "",
+    # Telegram
+    "tg_bot_token": "",
+    "tg_chat_id_ru": "",
     # TikTok (placeholder for export-based workflow)
     "tiktok_export_dir": "render",
     # OpenAI (optional for translation)
     "openai_api_key": "",
     "openai_model": "gpt-4o-mini",
+    # Local music directory (Windows default path)
+    "music_dir": "E:\\SynthSocial\\Music",
 }
 
 

@@ -43,6 +43,9 @@ if exist .env (
 
 if not exist logs mkdir logs
 
+REM Ensure the port is free (kill any process listening on %PORT%)
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort %PORT% -State Listen | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force } } catch { }"
+
 REM Start server in background and save PID (hidden window), logs redirected
 powershell -NoProfile -Command "$argv = @('-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%'); if (Test-Path '.autoreload') { $argv += @('--reload','--reload-dir','app','--reload-dir','app/templates','--reload-dir','app/static') }; $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $argv -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/server.out.log' -RedirectStandardError 'logs/server.err.log' -PassThru; [IO.File]::WriteAllText('.server.pid', $p.Id)"
 

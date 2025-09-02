@@ -10,7 +10,7 @@ from app.services.discord_client import DiscordClient
 from app.services.settings import load_settings, save_settings
 import httpx
 from urllib.parse import quote_plus
-from app.services.draft_store import save_draft
+from app.services.draft_store import save_draft, load_draft
 from fastapi import UploadFile, File
 from typing import Optional, List
 from loguru import logger
@@ -21,7 +21,9 @@ import io, zipfile
 from app.services.video_editor import render_vertical_with_music
 from app.services.video_editor import _ffmpeg_path, install_ffmpeg_win
 from app.core.config import STEAM_APP_ID
+from app.services.facebook_client import FacebookClient
 from fastapi.templating import Jinja2Templates
+from fastapi import Query
 
 router = APIRouter(prefix="/api")
 templates_api = Jinja2Templates(directory='app/templates')
@@ -30,10 +32,16 @@ templates_api = Jinja2Templates(directory='app/templates')
 def _render_autoreload_button_html(enabled: bool) -> str:
     cls = "icon-btn" + (" active" if enabled else "")
     title = "Автообновление включено" if enabled else "Включить автообновление"
-    # Render a button that updates the content of the fixed wrapper span (#nav_ar_btn)
+    # Render two controls inside the fixed wrapper span (#nav_ar_btn):
+    # 1) Autoreload toggle button
+    # 2) Restart button that triggers full app restart
     return (
+        f"<div class=\"row\" style=\"gap:6px;flex-wrap:nowrap;\">"
         f"<button class=\"{cls}\" title=\"{title}\" "
         f"hx-post=\"/api/system/toggle_autoreload\" hx-target=\"#nav_ar_btn\" hx-swap=\"innerHTML\">↻</button>"
+        f"<button class=\"icon-btn\" title=\"Перезапустить приложение\" "
+        f"hx-post=\"/api/system/restart\" hx-target=\"#nav_ar_btn\" hx-swap=\"innerHTML\">⟲</button>"
+        f"</div>"
     )
 
 class TranslateReq(BaseModel):
@@ -214,6 +222,7 @@ def save_news_draft(
     tags: Optional[str] = Form(None),
     scheduled_at: Optional[str] = Form(None),
     platforms: Optional[List[str]] = Form(None),
+    reddit_sentences: Optional[int] = Form(None),
 ):
     payload = {}
     if text_ru is not None:
@@ -226,6 +235,12 @@ def save_news_draft(
         payload["scheduled_at"] = scheduled_at
     if platforms is not None:
         payload["platforms"] = platforms
+    if reddit_sentences is not None:
+        try:
+            n = max(1, min(10, int(reddit_sentences)))
+            payload["reddit_sentences"] = n
+        except Exception:
+            pass
     if payload:
         save_draft(payload)
     return HTMLResponse("<span style='color:green'>Черновик сохранён</span>")
@@ -250,14 +265,38 @@ def upload_draft_media(media: UploadFile = File(...), slot: Optional[str] = Form
     rel = media_path.replace('\\', '/')
     rel = rel.split('media/')[-1]
     url = f"/media/{rel}"
-    # Persist in draft under appropriate key
-    slot_key = 'media_path'
-    if slot == 'vertical':
-        slot_key = 'media_vertical_path'
-    elif slot == 'normal':
-        slot_key = 'media_normal_path'
-    save_draft({slot_key: rel})
-    return {"media_url": url, "media_path": rel, "slot": slot}
+    # Persist in draft; support gallery append for slot == 'gallery'
+    if slot == 'gallery':
+        state = load_draft()
+        gallery = list(state.get('gallery_normal') or [])
+        gallery.append(rel)
+        save_draft({"gallery_normal": gallery})
+        return {"media_url": url, "media_path": rel, "slot": slot, "index": len(gallery) - 1}
+    else:
+        slot_key = 'media_path'
+        if slot == 'vertical':
+            slot_key = 'media_vertical_path'
+        elif slot == 'normal':
+            slot_key = 'media_normal_path'
+        save_draft({slot_key: rel})
+        return {"media_url": url, "media_path": rel, "slot": slot}
+
+
+@router.post("/gallery/reorder")
+def gallery_reorder(order: str = Form("")):
+    # order: comma-separated list of rel paths
+    items = [x.strip() for x in (order or '').split(',') if x.strip()]
+    save_draft({"gallery_normal": items})
+    return HTMLResponse("<span style='color:green'>Галерея обновлена</span>")
+
+
+@router.post("/gallery/remove")
+def gallery_remove(item: str = Form("")):
+    state = load_draft()
+    cur = list(state.get('gallery_normal') or [])
+    new_list = [x for x in cur if x != (item or '').strip()]
+    save_draft({"gallery_normal": new_list})
+    return {"ok": True, "count": len(new_list)}
 
 @router.post("/briefs", response_model=BriefOut)
 def create_brief(data: BriefIn, session: Session = Depends(get_session)):
@@ -363,6 +402,84 @@ def remove_post(request: Request, id: Optional[int] = Form(None), id_q: Optional
     return templates_api.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data})
 
 
+@router.post("/posts/update_schedule")
+def update_post_schedule(request: Request, id: Optional[int] = Form(None), scheduled_at: Optional[str] = Form(None), session: Session = Depends(get_session)):
+    from app.models.models import Post, Job, JobKindEnum, JobStatusEnum, PostStatusEnum
+    import json as _json
+    if not id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    post = session.get(Post, id)
+    if not post:
+        return HTMLResponse("<span style='color:red'>post_not_found</span>", status_code=404)
+    # Parse input (datetime-local sends e.g. 2025-08-31T14:30)
+    new_dt = None
+    s = (scheduled_at or '').strip()
+    if s:
+        try:
+            from datetime import datetime as _dt
+            new_dt = _dt.fromisoformat(s)
+        except Exception:
+            return HTMLResponse("<span style='color:red'>bad_datetime_format</span>", status_code=400)
+    post.scheduled_at = new_dt
+    session.add(post)
+    session.commit()
+    # If post is queued, enqueue a new publish job at the new time (or immediately if None/past)
+    try:
+        from datetime import datetime as _dt
+        if post.status == PostStatusEnum.queued:
+            payload = {"post_id": post.id}
+            job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+            from app.jobs.tasks import publish_news_post
+            delay_s = 0
+            if new_dt is not None:
+                target = new_dt
+                if getattr(target, 'tzinfo', None) is not None:
+                    try:
+                        target = target.replace(tzinfo=None)
+                    except Exception:
+                        pass
+                delay_s = int(max(0, (target - _dt.now()).total_seconds()))
+            publish_news_post.schedule(args=(job.id, post.id), delay=delay_s)
+    except Exception:
+        pass
+    # Return refreshed posts table
+    from sqlmodel import select as _select
+    rows = session.exec(_select(Post).order_by(Post.created_at.desc()).limit(50)).all()
+    # Enrich like above
+    data = []
+    import json as _json2
+    for p2 in rows:
+        metrics = {}
+        try:
+            if getattr(p2, 'metrics_json', None):
+                metrics = _json2.loads(p2.metrics_json) or {}
+        except Exception:
+            metrics = {}
+        def pick(*keys):
+            for k in keys:
+                if metrics.get(k) is not None:
+                    return metrics.get(k)
+            return None
+        data.append({
+            'id': p2.id,
+            'platform_text': (p2.platform.value if hasattr(p2.platform, 'value') else str(p2.platform)),
+            'status_text': (p2.status.value if hasattr(p2.status, 'value') else str(p2.status)),
+            'brief_id': getattr(p2, 'brief_id', None),
+            'scheduled_at': getattr(p2, 'scheduled_at', None),
+            'published_at': getattr(p2, 'published_at', None),
+            'platform_url': getattr(p2, 'platform_url', None),
+            'm_like': pick('like', 'likes'),
+            'm_repost': pick('retweet', 'reposts'),
+            'm_reply': pick('reply', 'comments'),
+            'm_quote': pick('quote', 'views'),
+            'tags': getattr(p2, 'brief', None) and getattr(p2.brief, 'tags_json', None),
+        })
+    return templates_api.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data})
+
+
 @router.post("/posts/refresh_metrics")
 def refresh_post_metrics(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
     pid = id or id_q
@@ -428,7 +545,11 @@ def system_restart():
         except Exception:
             pass
         subprocess.Popen(cmd, creationflags=creationflags)
-        return HTMLResponse("<span style='color:orange'>Restarting... (logs in logs/server.* and logs/worker.*)</span>")
+        # Ask htmx to refresh the page so the UI reconnects after the restart
+        return HTMLResponse(
+            "<span style='color:orange'>Restarting... (logs in logs/server.* and logs/worker.*)</span>",
+            headers={"HX-Refresh": "true"}
+        )
     except Exception as exc:
         return HTMLResponse(f"<span style='color:red'>Restart failed: {str(exc)}</span>", status_code=500)
 
@@ -458,6 +579,52 @@ def system_autoreload_status():
     import os
     enabled = os.path.exists('.autoreload')
     return HTMLResponse(_render_autoreload_button_html(enabled))
+
+
+@router.post("/telegram/test")
+def telegram_test(message: str = Form("Test from IndiePulse")):
+    try:
+        cfg = load_settings()
+        token = (cfg.get("tg_bot_token") or "").strip()
+        chat_id = (cfg.get("tg_chat_id_ru") or "").strip()
+        if not token or not chat_id:
+            return HTMLResponse("<span style='color:orange'>Telegram не настроен</span>")
+        import httpx
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        data = {"chat_id": chat_id, "text": message}
+        with httpx.Client(timeout=15) as client:
+            r = client.post(url, data=data)
+            jd = r.json()
+        if r.status_code >= 400 or not jd.get("ok"):
+            return HTMLResponse(f"<span style='color:red'>Ошибка Telegram: {jd}</span>")
+        mid = ((jd.get("result") or {}).get("message_id"))
+        return HTMLResponse(f"<span style='color:green'>Отправлено (message_id={mid})</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>Ошибка: {str(exc)}</span>", status_code=500)
+
+
+@router.post("/telegram/check")
+def telegram_check():
+    try:
+        cfg = load_settings()
+        token = (cfg.get("tg_bot_token") or "").strip()
+        chat_id = (cfg.get("tg_chat_id_ru") or "").strip()
+        if not token:
+            return HTMLResponse("<span style='color:orange'>Нет Bot Token</span>")
+        import httpx
+        with httpx.Client(timeout=10) as client:
+            me = client.get(f"https://api.telegram.org/bot{token}/getMe")
+            mjs = me.json()
+            if not mjs.get("ok"):
+                return HTMLResponse(f"<span style='color:red'>getMe: {mjs}</span>")
+            chat_status = ""
+            if chat_id:
+                ch = client.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat_id})
+                cjs = ch.json()
+                chat_status = " ok" if cjs.get("ok") else f" error: {cjs}"
+        return HTMLResponse(f"<span style='color:green'>Bot OK.{chat_status}</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>Ошибка: {str(exc)}</span>")
 
 @router.post("/discord/webhook")
 def save_discord_webhook(url: str = Form(...)):
@@ -495,94 +662,101 @@ def discord_send_test():
 
 @router.post("/settings/save")
 def save_settings_endpoint(
-    vk_client_id: str = Form(""),
-    vk_client_secret: str = Form(""),
-    vk_group_id: str = Form(""),
-    vk_redirect_uri: str = Form(""),
-    vk_access_token: str = Form(""),
-    x_client_id: str = Form(""),
-    x_client_secret: str = Form(""),
-    x_redirect_uri: str = Form(""),
-    x_api_key: str = Form(""),
-    x_api_secret: str = Form(""),
-    x_oauth_token: str = Form(""),
-    x_oauth_token_secret: str = Form(""),
-    yt_client_id: str = Form(""),
-    yt_client_secret: str = Form(""),
-    yt_access_token: str = Form(""),
-    yt_refresh_token: str = Form(""),
-    fb_ru_page_id: str = Form(""),
-    fb_en_page_id: str = Form(""),
-    fb_ru_page_access_token: str = Form(""),
-    fb_en_page_access_token: str = Form(""),
-    reddit_client_id: str = Form(""),
-    reddit_client_secret: str = Form(""),
-    reddit_username: str = Form(""),
-    reddit_password: str = Form(""),
-    reddit_subreddit_en: str = Form(""),
-    # OpenAI
-    openai_api_key: str = Form(""),
-    openai_model: str = Form(""),
+	vk_client_id: str = Form(""),
+	vk_client_secret: str = Form(""),
+	vk_group_id: str = Form(""),
+	vk_redirect_uri: str = Form(""),
+	vk_access_token: str = Form(""),
+	x_client_id: str = Form(""),
+	x_client_secret: str = Form(""),
+	x_redirect_uri: str = Form(""),
+	x_api_key: str = Form(""),
+	x_api_secret: str = Form(""),
+	x_oauth_token: str = Form(""),
+	x_oauth_token_secret: str = Form(""),
+	yt_client_id: str = Form(""),
+	yt_client_secret: str = Form(""),
+	yt_access_token: str = Form(""),
+	yt_refresh_token: str = Form(""),
+	fb_ru_page_id: str = Form(""),
+	fb_en_page_id: str = Form(""),
+	fb_ru_page_access_token: str = Form(""),
+	fb_en_page_access_token: str = Form(""),
+	reddit_client_id: str = Form(""),
+	reddit_client_secret: str = Form(""),
+	reddit_username: str = Form(""),
+	reddit_password: str = Form(""),
+	reddit_subreddit_en: str = Form(""),
+	# OpenAI
+	openai_api_key: str = Form(""),
+	openai_model: str = Form(""),
+	# Telegram
+	tg_bot_token: str = Form(""),
+	tg_chat_id_ru: str = Form(""),
 ):
-    # Only update keys that are non-empty to avoid wiping other settings
-    updates = {}
-    if vk_client_id.strip():
-        updates["vk_client_id"] = vk_client_id.strip()
-    if vk_client_secret.strip():
-        updates["vk_client_secret"] = vk_client_secret.strip()
-    if vk_group_id.strip():
-        updates["vk_group_id"] = vk_group_id.strip()
-    if vk_redirect_uri.strip():
-        updates["vk_redirect_uri"] = vk_redirect_uri.strip()
-    if vk_access_token.strip():
-        updates["vk_access_token"] = vk_access_token.strip()
-    if x_client_id.strip():
-        updates["x_client_id"] = x_client_id.strip()
-    if x_client_secret.strip():
-        updates["x_client_secret"] = x_client_secret.strip()
-    if x_redirect_uri.strip():
-        updates["x_redirect_uri"] = x_redirect_uri.strip()
-    if x_api_key.strip():
-        updates["x_api_key"] = x_api_key.strip()
-    if x_api_secret.strip():
-        updates["x_api_secret"] = x_api_secret.strip()
-    if x_oauth_token.strip():
-        updates["x_oauth_token"] = x_oauth_token.strip()
-    if x_oauth_token_secret.strip():
-        updates["x_oauth_token_secret"] = x_oauth_token_secret.strip()
-    if yt_client_id.strip():
-        updates["yt_client_id"] = yt_client_id.strip()
-    if yt_client_secret.strip():
-        updates["yt_client_secret"] = yt_client_secret.strip()
-    if yt_access_token.strip():
-        updates["yt_access_token"] = yt_access_token.strip()
-    if yt_refresh_token.strip():
-        updates["yt_refresh_token"] = yt_refresh_token.strip()
-    if fb_ru_page_id.strip():
-        updates["fb_ru_page_id"] = fb_ru_page_id.strip()
-    if fb_en_page_id.strip():
-        updates["fb_en_page_id"] = fb_en_page_id.strip()
-    if fb_ru_page_access_token.strip():
-        updates["fb_ru_page_access_token"] = fb_ru_page_access_token.strip()
-    if fb_en_page_access_token.strip():
-        updates["fb_en_page_access_token"] = fb_en_page_access_token.strip()
-    if reddit_client_id.strip():
-        updates["reddit_client_id"] = reddit_client_id.strip()
-    if reddit_client_secret.strip():
-        updates["reddit_client_secret"] = reddit_client_secret.strip()
-    if reddit_username.strip():
-        updates["reddit_username"] = reddit_username.strip()
-    if reddit_password.strip():
-        updates["reddit_password"] = reddit_password.strip()
-    if reddit_subreddit_en.strip():
-        updates["reddit_subreddit_en"] = reddit_subreddit_en.strip()
-    if openai_api_key.strip():
-        updates["openai_api_key"] = openai_api_key.strip()
-    if openai_model.strip():
-        updates["openai_model"] = openai_model.strip()
-    save_settings(updates)
-    # Ask htmx to reload the page so new values are visible
-    return Response(content="", headers={"HX-Redirect": "/accounts"})
+	# Only update keys that are non-empty to avoid wiping other settings
+	updates = {}
+	if vk_client_id.strip():
+		updates["vk_client_id"] = vk_client_id.strip()
+	if vk_client_secret.strip():
+		updates["vk_client_secret"] = vk_client_secret.strip()
+	if vk_group_id.strip():
+		updates["vk_group_id"] = vk_group_id.strip()
+	if vk_redirect_uri.strip():
+		updates["vk_redirect_uri"] = vk_redirect_uri.strip()
+	if vk_access_token.strip():
+		updates["vk_access_token"] = vk_access_token.strip()
+	if x_client_id.strip():
+		updates["x_client_id"] = x_client_id.strip()
+	if x_client_secret.strip():
+		updates["x_client_secret"] = x_client_secret.strip()
+	if x_redirect_uri.strip():
+		updates["x_redirect_uri"] = x_redirect_uri.strip()
+	if x_api_key.strip():
+		updates["x_api_key"] = x_api_key.strip()
+	if x_api_secret.strip():
+		updates["x_api_secret"] = x_api_secret.strip()
+	if x_oauth_token.strip():
+		updates["x_oauth_token"] = x_oauth_token.strip()
+	if x_oauth_token_secret.strip():
+		updates["x_oauth_token_secret"] = x_oauth_token_secret.strip()
+	if yt_client_id.strip():
+		updates["yt_client_id"] = yt_client_id.strip()
+	if yt_client_secret.strip():
+		updates["yt_client_secret"] = yt_client_secret.strip()
+	if yt_access_token.strip():
+		updates["yt_access_token"] = yt_access_token.strip()
+	if yt_refresh_token.strip():
+		updates["yt_refresh_token"] = yt_refresh_token.strip()
+	if fb_ru_page_id.strip():
+		updates["fb_ru_page_id"] = fb_ru_page_id.strip()
+	if fb_en_page_id.strip():
+		updates["fb_en_page_id"] = fb_en_page_id.strip()
+	if fb_ru_page_access_token.strip():
+		updates["fb_ru_page_access_token"] = fb_ru_page_access_token.strip()
+	if fb_en_page_access_token.strip():
+		updates["fb_en_page_access_token"] = fb_en_page_access_token.strip()
+	if reddit_client_id.strip():
+		updates["reddit_client_id"] = reddit_client_id.strip()
+	if reddit_client_secret.strip():
+		updates["reddit_client_secret"] = reddit_client_secret.strip()
+	if reddit_username.strip():
+		updates["reddit_username"] = reddit_username.strip()
+	if reddit_password.strip():
+		updates["reddit_password"] = reddit_password.strip()
+	if reddit_subreddit_en.strip():
+		updates["reddit_subreddit_en"] = reddit_subreddit_en.strip()
+	if openai_api_key.strip():
+		updates["openai_api_key"] = openai_api_key.strip()
+	if openai_model.strip():
+		updates["openai_model"] = openai_model.strip()
+	if tg_bot_token.strip():
+		updates["tg_bot_token"] = tg_bot_token.strip()
+	if tg_chat_id_ru.strip():
+		updates["tg_chat_id_ru"] = tg_chat_id_ru.strip()
+	save_settings(updates)
+	# Ask htmx to reload the page so new values are visible
+	return Response(content="", headers={"HX-Redirect": "/accounts"})
 
 
 # VK OAuth: start and callback
@@ -722,19 +896,67 @@ def x_callback(code: str):
         data = r.json()
     if "error" in data:
         return HTMLResponse(f"<span style='color:red'>X OAuth error: {data}</span>")
+    from time import time as _now
     save_settings({
         "x_access_token": data.get("access_token", ""),
         "x_refresh_token": data.get("refresh_token", ""),
         "x_token_type": data.get("token_type", ""),
         "x_expires_at": int(data.get("expires_in", 0)),
+        "x_expires_at_ts": int(_now()) + int(data.get("expires_in", 0)),
     })
     return HTMLResponse("<span style='color:green'>X подключён</span>")
 
 
-@router.post("/x/test_tweet")
-def x_test_tweet(text: str = Form("Hello from IndiePulse")):
+def _x_ensure_token() -> str:
+    """Return a valid X access token, refreshing if needed. Raises on failure."""
+    from time import time as _now
     cfg = load_settings()
     token = (cfg.get("x_access_token") or "").strip()
+    refresh = (cfg.get("x_refresh_token") or "").strip()
+    client_id = (cfg.get("x_client_id") or "").strip()
+    client_secret = (cfg.get("x_client_secret") or "").strip()
+    exp_ts = int(cfg.get("x_expires_at_ts") or 0)
+    # If token missing or expiring within 60s, refresh
+    if not token or (exp_ts and exp_ts - int(_now()) < 60):
+        if not (refresh and client_id and client_secret):
+            raise RuntimeError("x_refresh_unavailable")
+        token_url = "https://api.twitter.com/2/oauth2/token"
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh,
+            "client_id": client_id,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        import base64 as _b64
+        basic = _b64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {basic}"
+        with httpx.Client(timeout=15) as client:
+            r = client.post(token_url, data=data, headers=headers)
+            jd = r.json()
+        if r.status_code >= 400:
+            raise RuntimeError(f"x_refresh_failed: {jd}")
+        new_token = jd.get("access_token", "")
+        new_refresh = jd.get("refresh_token", refresh)
+        expires_in = int(jd.get("expires_in", 0))
+        from time import time as _now2
+        save_settings({
+            "x_access_token": new_token,
+            "x_refresh_token": new_refresh,
+            "x_token_type": jd.get("token_type", cfg.get("x_token_type")),
+            "x_expires_at": expires_in,
+            "x_expires_at_ts": int(_now2()) + expires_in,
+        })
+        token = new_token
+    return token
+
+
+@router.post("/x/test_tweet")
+def x_test_tweet(text: str = Form("Hello from IndiePulse")):
+    # Ensure valid token
+    try:
+        token = _x_ensure_token()
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>X token error: {str(exc)}</span>")
     if not token:
         return HTMLResponse("<span style='color:orange'>X не подключён</span>")
     # Validate token scopes and status
@@ -797,6 +1019,71 @@ def vk_check_token(token: str = Form("")):
         err = data.get("error", {})
         return HTMLResponse(f"<span style='color:red'>Ошибка VK [{err.get('error_code')}]: {err.get('error_msg')}</span>")
     return HTMLResponse("<span style='color:green'>Токен валиден</span>")
+
+
+@router.post("/facebook/test")
+def facebook_test():
+    try:
+        cfg = load_settings()
+        try:
+            logger.info("fb.test start")
+        except Exception:
+            pass
+        blocks = []
+        for key_id, key_tok, label in (("fb_ru_page_id", "fb_ru_page_access_token", "RU"), ("fb_en_page_id", "fb_en_page_access_token", "EN")):
+            page_id = (cfg.get(key_id) or "").strip()
+            page_token = (cfg.get(key_tok) or "").strip()
+            logs = []
+            if page_id and page_token:
+                try:
+                    logs.append(f"label={label} page_id={page_id} token_len={len(page_token)}")
+                    # Quick page info probe
+                    import httpx as _hx
+                    probe_url = f"https://graph.facebook.com/v19.0/{page_id}"
+                    with _hx.Client(timeout=10) as c:
+                        pr = c.get(probe_url, params={"fields": "id,name", "access_token": page_token})
+                        logs.append(f"probe status={pr.status_code} body={pr.text[:300]}")
+                    fb = FacebookClient(page_token)
+                    msg = f"Test from IndiePulse ({label})"
+                    logs.append(f"posting feed msg_len={len(msg)}")
+                    resp = fb.create_post(page_id, msg)
+                    pid = str(resp.get("id") or resp.get("post_id") or "")
+                    logs.append(f"post resp id={pid} raw={str(resp)[:300]}")
+                    link = ""
+                    try:
+                        if pid:
+                            link = fb.get_permalink(pid)
+                            logs.append(f"permalink={link}")
+                    except Exception as _exc:
+                        logs.append(f"permalink error: {_exc}")
+                        link = ""
+                    blocks.append(f"<div><b>{label}:</b> OK {pid} {('<a href=\'" + link + "\' target=\'_blank\'>link</a>') if link else ''}<br/><pre>" + ("\n".join(logs)) + "</pre></div>")
+                except Exception as exc:
+                    try:
+                        logger.exception(f"fb.test error label={label}: {exc}")
+                    except Exception:
+                        pass
+                    err_str = str(exc)
+                    # Friendly hint for expired tokens (OAuthException code 190, subcode 463)
+                    low = err_str.replace(" ", "")
+                    if ('"code":190' in low) or ('"error_subcode":463' in low) or ('Error validating access token' in err_str):
+                        logs.append("hint: Page Access Token expired. Generate a new Page token and update settings.")
+                    logs.append(f"error: {err_str}")
+                    blocks.append(f"<div><b>{label}:</b> ERROR<br/><pre>" + ("\n".join(logs)) + "</pre></div>")
+            else:
+                blocks.append(f"<div><b>{label}:</b> not configured</div>")
+        html = "".join(blocks)
+        return HTMLResponse(f"<div>{html}</div>")
+    except Exception as exc:
+        try:
+            logger.exception(f"fb.test outer error: {exc}")
+        except Exception:
+            pass
+        return HTMLResponse(f"<span style='color:red'>FB test failed: {str(exc)}</span>")
+
+@router.get("/facebook/test")
+def facebook_test_get():
+    return facebook_test()
 
 
 # YouTube OAuth (installed app style flow via user-provided tokens)
@@ -1117,6 +1404,57 @@ def video_install_ffmpeg():
         return {"ok": True, "path": path}
     except Exception as exc:
         return HTMLResponse(f"<span style='color:red'>FFmpeg install failed: {str(exc)}</span>", status_code=500)
+
+
+@router.get("/music/list")
+def music_list():
+    try:
+        cfg = load_settings()
+        base = (cfg.get("music_dir") or "").strip()
+        if not base:
+            return {"ok": True, "tracks": []}
+        import os
+        if not os.path.isdir(base):
+            return {"ok": True, "tracks": []}
+        exts = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma'}
+        items = []
+        for name in sorted(os.listdir(base)):
+            p = os.path.join(base, name)
+            if not os.path.isfile(p):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext in exts:
+                items.append({"name": name, "path": p})
+        return {"ok": True, "tracks": items}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/music/waveform")
+def music_waveform(path: str = Query("")):
+    try:
+        import os, base64
+        from pydub import AudioSegment
+        p = path
+        if not p:
+            return HTMLResponse("<span style='color:red'>missing path</span>", status_code=400)
+        if not os.path.isfile(p):
+            return HTMLResponse("<span style='color:red'>not a file</span>", status_code=404)
+        # Load audio and compute naive RMS over buckets (fast)
+        seg = AudioSegment.from_file(p)
+        duration_ms = len(seg)
+        buckets = 400  # number of samples for display
+        step = max(1, duration_ms // buckets)
+        samples = []
+        for i in range(0, duration_ms, step):
+            chunk = seg[i:i+step]
+            samples.append(int(chunk.rms))
+        # Normalize 0..1
+        m = max(1, max(samples) if samples else 1)
+        norm = [round(s / m, 4) for s in samples]
+        return {"ok": True, "duration_ms": duration_ms, "samples": norm}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @router.post("/steam/translate_text")
