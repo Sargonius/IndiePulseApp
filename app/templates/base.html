@@ -1,5 +1,5 @@
 ﻿<!doctype html>
-<html lang="ru">
+<html lang="{{ ui_language or 'en' }}">
 <head>
   <meta charset="utf-8">
   <title>IndiePulse</title>
@@ -14,12 +14,12 @@
 		<div class="inner">
 			<h1>IndiePulse</h1>
 			<nav>
-				<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Главная</a>
-				<a href="/news" class="{% if request.url.path.startswith('/news') %}active{% endif %}">Новость</a>
-				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Публикации</a>
-				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Задачи</a>
+				<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a>
+				<a href="/news" class="{% if request.url.path.startswith('/news') %}active{% endif %}">News</a>
+				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
+				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
 				<a href="/steam" class="{% if request.url.path.startswith('/steam') %}active{% endif %}">Steam Export</a>
-				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">Аккаунты</a>
+				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">Accounts</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
 			</nav>
 		</div>

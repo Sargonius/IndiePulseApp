@@ -44,24 +44,17 @@ if exist .env (
 if not exist logs mkdir logs
 
 REM Ensure the port is free (kill any process listening on %PORT%)
-powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort %PORT% -State Listen | Select-Object -ExpandProperty OwningProcess | ForEach-Object { Stop-Process -Id $_ -Force } } catch { }"
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }"
 
-REM Start server in background and save PID (hidden window), logs redirected
-powershell -NoProfile -Command "$argv = @('-m','uvicorn','app.main:app','--host','%HOST%','--port','%PORT%'); if (Test-Path '.autoreload') { $argv += @('--reload','--reload-dir','app','--reload-dir','app/templates','--reload-dir','app/static') }; $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $argv -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/server.out.log' -RedirectStandardError 'logs/server.err.log' -PassThru; [IO.File]::WriteAllText('.server.pid', $p.Id)"
+REM Optional autoreload args
+set RELOAD_ARGS=
+if exist .autoreload set RELOAD_ARGS=--reload --reload-dir app --reload-dir app\templates --reload-dir app\static
 
-REM Give the server a moment to bind the port, then probe /health
->nul timeout /t 2 /nobreak
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://%HOST%:%PORT%/health; if ($r.StatusCode -lt 400) { exit 0 } else { exit 1 } } catch { exit 1 }"
-if errorlevel 1 (
-  echo Server probe failed. Tail of logs/server.err.log:
-  powershell -NoProfile -Command "if (Test-Path 'logs/server.err.log') { Get-Content 'logs/server.err.log' -Tail 50 } else { Write-Host 'no server.err.log yet' }"
-  echo Falling back to foreground start for diagnostics...
-  call start_debug.bat
-  goto :eof
-)
+REM Start server in a visible window; closing the window will stop the server and free the port
+start "IndiePulse Server" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% %RELOAD_ARGS%"
 
-REM Start worker in background and save PID (hidden window), logs redirected
-powershell -NoProfile -Command "$args = @('-m','app.worker'); $p = Start-Process -FilePath '.\.venv\Scripts\python.exe' -ArgumentList $args -WorkingDirectory '.' -WindowStyle Hidden -RedirectStandardOutput 'logs/worker.out.log' -RedirectStandardError 'logs/worker.err.log' -PassThru; [IO.File]::WriteAllText('.worker.pid', $p.Id)"
+REM Start worker in a visible window
+start "IndiePulse Worker" cmd /k ".venv\Scripts\python.exe -m app.worker"
 
-echo Restart complete. Server logs: logs\server.out.log / logs\server.err.log. Worker logs: logs\worker.out.log / logs\worker.err.log
+echo Restart complete. Server and worker started in visible windows.
 endlocal

@@ -693,6 +693,8 @@ def save_settings_endpoint(
 	# Telegram
 	tg_bot_token: str = Form(""),
 	tg_chat_id_ru: str = Form(""),
+	# UI
+	ui_language: str = Form(""),
 ):
 	# Only update keys that are non-empty to avoid wiping other settings
 	updates = {}
@@ -754,6 +756,11 @@ def save_settings_endpoint(
 		updates["tg_bot_token"] = tg_bot_token.strip()
 	if tg_chat_id_ru.strip():
 		updates["tg_chat_id_ru"] = tg_chat_id_ru.strip()
+	# UI language
+	if ui_language.strip():
+		lang = ui_language.strip().lower()
+		if lang in ("en", "ru"):
+			updates["ui_language"] = lang
 	save_settings(updates)
 	# Ask htmx to reload the page so new values are visible
 	return Response(content="", headers={"HX-Redirect": "/accounts"})

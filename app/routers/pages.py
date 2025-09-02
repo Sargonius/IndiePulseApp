@@ -19,6 +19,9 @@ templates = Jinja2Templates(directory='app/templates')
 
 def _enrich_posts(posts):
     import json as _json
+    from sqlmodel import Session as _Session
+    from app.db.session import engine as _engine
+    from app.models.models import Brief as _Brief
     enriched = []
     for p in posts:
         metrics = {}
@@ -32,6 +35,18 @@ def _enrich_posts(posts):
                 if metrics.get(k) is not None:
                     return metrics.get(k)
             return None
+        # Build preview and tags from brief
+        preview = ''
+        tags_val = None
+        try:
+            with _Session(_engine) as _s:
+                b = _s.get(_Brief, getattr(p, 'brief_id', None))
+                if b is not None:
+                    base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                    preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                    tags_val = getattr(b, 'tags_json', None)
+        except Exception:
+            preview = ''
         row = {
             'id': p.id,
             'platform_text': (p.platform.value if hasattr(p.platform, 'value') else str(p.platform)),
@@ -44,14 +59,16 @@ def _enrich_posts(posts):
             'm_repost': pick('retweet', 'reposts'),
             'm_reply': pick('reply', 'comments'),
             'm_quote': pick('quote', 'views'),
-            'tags': getattr(p, 'brief', None) and getattr(p.brief, 'tags_json', None),
+            'tags': tags_val,
+            'preview': preview,
         }
         enriched.append(row)
     return enriched
 
 @router.get('/', response_class=HTMLResponse)
 def index(request: Request):
-    return templates.TemplateResponse('index.html', {'request': request, 'body_class': 'page-index'})
+    cfg = load_settings()
+    return templates.TemplateResponse('index.html', {'request': request, 'body_class': 'page-index', 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/news', response_class=HTMLResponse)
 def news_form(request: Request):
@@ -68,12 +85,13 @@ def news_form(request: Request):
         'tg': bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip())),
         'tiktok': True,
     }
-    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready})
+    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/steam', response_class=HTMLResponse)
 def steam_export_page(request: Request):
     draft = load_draft()
-    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft})
+    cfg = load_settings()
+    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
@@ -84,6 +102,7 @@ def accounts(request: Request):
         'accounts.html',
         {
             'request': request,
+            'ui_language': cfg.get('ui_language', 'en'),
             'discord_webhook': cfg.get('discord_webhook_url', ''),
             'vk_client_id': cfg.get('vk_client_id', ''),
             'vk_client_secret': cfg.get('vk_client_secret', ''),
@@ -118,27 +137,31 @@ def accounts(request: Request):
 def jobs_list(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Job).order_by(Job.created_at.desc()).limit(50)).all()
-    return templates.TemplateResponse('jobs.html', {'request': request, 'jobs': rows})
+    cfg = load_settings()
+    return templates.TemplateResponse('jobs.html', {'request': request, 'jobs': rows, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/jobs/partial', response_class=HTMLResponse)
 def jobs_table_partial(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Job).order_by(Job.created_at.desc()).limit(50)).all()
-    return templates.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+    cfg = load_settings()
+    return templates.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/posts', response_class=HTMLResponse)
 def posts_list(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Post).order_by(Post.created_at.desc()).limit(50)).all()
     data = _enrich_posts(rows)
-    return templates.TemplateResponse('posts.html', {'request': request, 'posts': data})
+    cfg = load_settings()
+    return templates.TemplateResponse('posts.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/posts/partial', response_class=HTMLResponse)
 def posts_table_partial(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Post).order_by(Post.created_at.desc()).limit(50)).all()
     data = _enrich_posts(rows)
-    return templates.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data})
+    cfg = load_settings()
+    return templates.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.post('/news')
 def submit_news(
@@ -217,6 +240,28 @@ def submit_news(
     session.refresh(brief)
 
     created_posts: List[Post] = []
+    skipped: List[str] = []
+    cfg = load_settings()
+    def is_ready(plat: str) -> bool:
+        if plat == 'discord':
+            return bool(((cfg.get('discord_webhook_ru') or cfg.get('discord_webhook_en') or cfg.get('discord_webhook_url') or '').strip()))
+        if plat == 'x':
+            return bool((cfg.get('x_access_token') or '').strip())
+        if plat == 'vk':
+            return bool(((cfg.get('vk_access_token') or '').strip()) and ((cfg.get('vk_group_id') or '').strip()))
+        if plat == 'yt':
+            return bool(((cfg.get('yt_access_token') or '').strip()) and ((cfg.get('yt_refresh_token') or '').strip()))
+        if plat == 'fb_ru':
+            return bool(((cfg.get('fb_ru_page_id') or '').strip()) and ((cfg.get('fb_ru_page_access_token') or '').strip()))
+        if plat == 'fb_en':
+            return bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip()))
+        if plat == 'reddit':
+            return bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip()))
+        if plat == 'tg':
+            return bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip()))
+        if plat == 'tiktok':
+            return True
+        return False
     if platforms:
         when_dt: Optional[datetime] = None
         if scheduled_at:
@@ -229,6 +274,10 @@ def submit_news(
             try:
                 enum_val = PlatformEnum(p)
             except ValueError:
+                continue
+            # Skip unconfigured platforms and record the info
+            if not is_ready(p):
+                skipped.append(p)
                 continue
             # Failsafe: skip platforms lacking required media
             if p in ('yt', 'tiktok'):
@@ -309,4 +358,5 @@ def submit_news(
         'request': request,
         'brief_id': brief.id,
         'num_posts': len(created_posts),
+        'skipped': skipped,
     })

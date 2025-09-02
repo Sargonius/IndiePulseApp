@@ -13,6 +13,8 @@ DEFAULTS: Dict[str, Any] = {
 	"discord_webhook_url": "",
 	"discord_webhook_ru": "",
 	"discord_webhook_en": "",
+	# UI
+	"ui_language": "en",
 	"vk_client_id": "",
 	"vk_client_secret": "",
 	"vk_group_id": "",

@@ -24,8 +24,15 @@ if exist .env (
   )
 )
 
-REM Launch server in a visible window
-start "IndiePulse Server" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT%"
+REM Free the server port if something is listening
+powershell -NoProfile -Command "try { Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue } } catch { }"
+
+REM Optional autoreload
+set RELOAD_ARGS=
+if exist .autoreload set RELOAD_ARGS=--reload --reload-dir app --reload-dir app\templates --reload-dir app\static
+
+REM Launch server in a visible window; closing it frees the port
+start "IndiePulse Server" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host %HOST% --port %PORT% %RELOAD_ARGS%"
 REM Launch worker in a visible window
 start "IndiePulse Worker" cmd /k ".venv\Scripts\python.exe -m app.worker"
 endlocal

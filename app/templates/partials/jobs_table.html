@@ -1,34 +1,39 @@
 <table id="jobs_table" class="table">
 	<tr>
 		<th>ID</th>
-		<th>Вид</th>
-		<th>Статус</th>
-		<th>Попытка</th>
-		<th>Последняя ошибка</th>
-		<th>Создано</th>
-		<th>Обновлено</th>
-		<th>Действия</th>
+		<th>Kind</th>
+		<th>Status</th>
+		<th>Attempt</th>
+		<th>Last error</th>
+		<th>Created</th>
+		<th>Updated</th>
+		<th>Platform</th>
+		<th>Preview</th>
+		<th>Actions</th>
 	</tr>
-	{% for j in jobs %}
+	{% for item in jobs %}
 	<tr>
-		<td>{{ j.id }}</td>
-		<td>{{ j.kind }}</td>
+		<td>{{ (item.job or item).id }}</td>
+		<td>{{ (item.job or item).kind }}</td>
 		<td>
-			{% if j.status == 'done' %}<span class="badge success">done</span>
-			{% elif j.status == 'error' %}<span class="badge error">error</span>
-			{% elif j.status == 'running' %}<span class="badge running">running</span>
-			{% else %}<span class="badge default">{{ j.status }}</span>{% endif %}
+			{% set s = (item.job or item).status %}
+			{% if s == 'done' %}<span class="badge success">done</span>
+			{% elif s == 'error' %}<span class="badge error">error</span>
+			{% elif s == 'running' %}<span class="badge running">running</span>
+			{% else %}<span class="badge default">{{ s }}</span>{% endif %}
 		</td>
-		<td>{{ j.attempt }}</td>
-		<td>{{ j.last_error or '' }}</td>
-		<td>{{ j.created_at }}</td>
-		<td>{{ j.updated_at }}</td>
+		<td>{{ (item.job or item).attempt }}</td>
+		<td>{{ (item.job or item).last_error or '' }}</td>
+		<td>{{ (item.job or item).created_at }}</td>
+		<td>{{ (item.job or item).updated_at }}</td>
+		<td>{{ item.platform or '' }}</td>
+		<td class="muted" style="max-width:360px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ item.preview or '' }}</td>
 		<td>
 			<div class="row" style="gap:6px; align-items:center; flex-wrap:nowrap;">
-				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/jobs/refresh_metrics" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">⟳</button>
-				<button class="btn btn-icon btn-blue" title="Stop" hx-post="/api/jobs/kill" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">■</button>
-				<button class="btn btn-icon btn-orange" title="Retry" hx-post="/api/jobs/retry" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">↺</button>
-				<button class="btn btn-icon btn-red" title="Remove" hx-post="/api/jobs/remove" hx-vals='{"id": {{ j.id }} }' hx-target="#jobs_table" hx-swap="outerHTML">✖</button>
+				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/jobs/refresh_metrics" hx-vals='{"id": {{ (item.job or item).id }} }' hx-target="#jobs_table" hx-swap="outerHTML">⟳</button>
+				<button class="btn btn-icon btn-blue" title="Stop" hx-post="/api/jobs/kill" hx-vals='{"id": {{ (item.job or item).id }} }' hx-target="#jobs_table" hx-swap="outerHTML">■</button>
+				<button class="btn btn-icon btn-orange" title="Retry" hx-post="/api/jobs/retry" hx-vals='{"id": {{ (item.job or item).id }} }' hx-target="#jobs_table" hx-swap="outerHTML">↺</button>
+				<button class="btn btn-icon btn-red" title="Remove" hx-post="/api/jobs/remove" hx-vals='{"id": {{ (item.job or item).id }} }' hx-target="#jobs_table" hx-swap="outerHTML">✖</button>
 			</div>
 		</td>
 	</tr>

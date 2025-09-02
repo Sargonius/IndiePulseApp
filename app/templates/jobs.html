@@ -1,13 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Журнал задач</h2>
+<h2>Jobs</h2>
 <div class="toolbar">
-	<button class="btn" hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML">Обновить</button>
+	<button class="btn" hx-get="/jobs/partial" hx-target="#jobs_table" hx-swap="outerHTML">Refresh</button>
 	<label class="row" style="gap:6px;">
-		<input type="checkbox" id="jobs_auto_refresh" /> Автообновление (5с)
+		<input type="checkbox" id="jobs_auto_refresh" /> Auto-refresh (5s)
 	</label>
 </div>
 <div id="jobs_table" hx-get="/jobs/partial" hx-trigger="load" hx-swap="outerHTML"></div>
+<div class="muted" style="margin-top:6px; font-size:12px;">
+  Note: Platform and preview are inferred from the linked post.
+  If a platform is not configured, the publish job will be skipped with an error.
+  Use Accounts page to configure connections.
+</div>
 <script>
 const jobsToggle = document.getElementById('jobs_auto_refresh');
 const jobsDiv = document.getElementById('jobs_table');

@@ -1,57 +1,57 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Новость</h2>
+<h2>News</h2>
 <form method="post" action="/news" enctype="multipart/form-data" id="news_form">
 	<div style="display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;">
 		<div>
-			<label>Видео (обычное, VK/X/Discord)</label><br/>
+			<label>Video (normal, VK/X/Discord)</label><br/>
 			<div id="drop_zone_normal">
-				Перетащите файл сюда или кликните (normal)
+				Drag & drop here or click (normal)
 			</div>
 			<input type="file" id="media_input_normal" accept="video/*,image/*" style="display:none;" />
             <div id="preview_normal" style="margin-top:8px;"></div>
             <input type="hidden" name="media_normal" id="media_normal_hidden" value="{{ draft.media_normal_path if draft else '' }}" />
 
 			<div style="height:12px;"></div>
-			<label>Галерея изображений (multi)</label><br/>
+			<label>Image gallery (multi)</label><br/>
 			<div id="drop_zone_gallery" style="width:320px;min-height:80px;border:2px dashed #94a3b8;color:#64748b;display:flex;align-items:center;justify-content:center;border-radius:8px;background:#f8fafc;cursor:pointer;">
-				Перетащите несколько изображений сюда или кликните
+				Drag & drop multiple images here or click
 			</div>
 			<input type="file" id="media_input_gallery" accept="image/*" multiple style="display:none;" />
 			<div id="gallery_wrap" class="grid cols-2" style="margin-top:8px;"></div>
 			<input type="hidden" name="gallery_order" id="gallery_order_hidden" value="{{ (draft.gallery_normal | join(',')) if draft and draft.gallery_normal else '' }}" />
 
 			<div style="height:12px;"></div>
-			<label>Видео (вертикальное 9:16, Shorts/TikTok)</label><br/>
+			<label>Video (vertical 9:16, Shorts/TikTok)</label><br/>
 			<div id="drop_zone_vertical">
-				Перетащите файл сюда или кликните (vertical)
+				Drag & drop here or click (vertical)
 			</div>
 			<input type="file" id="media_input_vertical" accept="video/*,image/*" style="display:none;" />
             <div id="preview_vertical" style="margin-top:8px;"></div>
             <input type="hidden" name="media_vertical" id="media_vertical_hidden" value="{{ draft.media_vertical_path if draft else '' }}" />
 		</div>
 		<div style="min-width:520px;">
-			<label>Текст (RU)</label><br/>
+			<label>Text (RU)</label><br/>
             <textarea name="text_ru" id="text_ru" rows="6" cols="80" required>{{ draft.text_ru if draft else '' }}</textarea>
 			<div style="margin:6px 0;">
-                <button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Обновить перевод</button>
-                <span id="tr_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Перевод...</span>
+                <button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Update translation</button>
+                <span id="tr_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Translating...</span>
 			</div>
-            <label>Перевод (EN)</label><br/>
+            <label>Translation (EN)</label><br/>
             <textarea id="text_en" name="text_en" rows="6" cols="80">{{ draft.text_en if draft else '' }}</textarea>
             <div id="x_counter" style="font-size:12px;color:#666;margin-top:4px;">X: 0/280</div>
             <div id="word_counter" style="font-size:12px;color:#666;margin-top:2px;">Words: 0</div>
 			<div style="margin-top:6px;">
-				<label>Хэштеги (через пробел)</label><br/>
+				<label>Hashtags (space-separated)</label><br/>
                 <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie" style="width: 520px;" />
-                <button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Подсказать хэштеги</button>
-                <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Генерация...</span>
+                <button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Suggest hashtags</button>
+                <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Generating...</span>
                 <div id="tags_target" style="display:none;"></div>
 			</div>
 		</div>
 	</div>
     <div style="margin-top:10px;">
-        <label>Платформы</label> <button type="button" class="btn" id="toggle_all_btn" style="margin-left:8px;">Выбрать все</button><br/>
+        <label>Platforms</label> <button type="button" class="btn" id="toggle_all_btn" style="margin-left:8px;">Select all</button><br/>
         <label><input class="pf" type="checkbox" name="platforms" value="vk" checked data-ready="{{ 1 if platforms_ready.vk else 0 }}" /> VK</label>
         <label><input class="pf" type="checkbox" name="platforms" value="x" checked data-ready="{{ 1 if platforms_ready.x else 0 }}" /> X/Twitter</label>
         <label><input class="pf" type="checkbox" name="platforms" value="discord" checked data-ready="{{ 1 if platforms_ready.discord else 0 }}" /> Discord</label>
@@ -63,31 +63,33 @@
         <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked data-ready="{{ 1 if platforms_ready.tiktok else 0 }}" /> TikTok</label>
     </div>
     <div style="margin-top:6px;">
-      <label><input type="checkbox" name="x_split" id="x_split" /> Разбивать длинные X посты на тред (опция)</label>
+      <label><input type="checkbox" name="x_split" id="x_split" /> Split long X posts into thread (optional)</label>
     </div>
     <div style="margin-top:6px;">
-      <label>Reddit: предложений в основном посте</label>
+      <label>Reddit: sentences in main post</label>
       <input type="number" id="rd_sentences" name="reddit_sentences" value="{{ draft.reddit_sentences if draft and draft.reddit_sentences else 2 }}" min="1" max="10" style="width:80px;" />
     </div>
 	<div>
-		<label>Дата/время (опционально)</label><br/>
+		<label>Date/time (optional)</label><br/>
 		<div class="row" style="gap:8px; align-items:center;">
 			<input type="datetime-local" name="scheduled_at" id="scheduled_at" />
-			<button type="button" class="btn" id="pick_now">Сейчас</button>
-			<button type="button" class="btn" id="pick_next_morning">Завтра утром (9:00)</button>
-			<button type="button" class="btn" id="pick_next_day">Завтра (13:00)</button>
-			<button type="button" class="btn" id="pick_next_evening">Сегодня вечером (20:00)</button>
+			<button type="button" class="btn" id="pick_now">Now</button>
+			<button type="button" class="btn" id="pick_plus_8h">In 8 hours</button>
+			<button type="button" class="btn" id="pick_next_evening">Evening (today, 20:00)</button>
+			<button type="button" class="btn" id="pick_next_morning">Morning (tomorrow, 9:00)</button>
+			<button type="button" class="btn" id="pick_next_day">Day (tomorrow, 13:00)</button>
+			<button type="button" class="btn" id="pick_next_evening_tmr">Evening (tomorrow, 20:00)</button>
 		</div>
 	</div>
 	<div style="margin-top:12px;">
-    <button type="submit" class="btn btn-primary">Сохранить и поставить в очередь</button>
-    <button type="button" id="clear_draft_btn" class="btn" style="margin-left:8px;">Очистить черновик</button>
+    <button type="submit" class="btn btn-primary">Save and queue</button>
+    <button type="button" id="clear_draft_btn" class="btn" style="margin-left:8px;">Clear draft</button>
 	</div>
 </form>
 
 <div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;">
   <div class="card" style="min-width:320px;max-width:480px;">
-    <div style="font-weight:600;margin-bottom:8px;">X / Twitter (превью)</div>
+    <div style="font-weight:600;margin-bottom:8px;">X / Twitter (preview)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:36px;height:36px;border-radius:50%;background:#ccc;"></div>
       <div style="flex:1;">
@@ -99,7 +101,7 @@
     </div>
   </div>
   <div class="card" style="min-width:320px;max-width:480px;">
-    <div style="font-weight:600;margin-bottom:8px;">Reddit (EN превью)</div>
+    <div style="font-weight:600;margin-bottom:8px;">Reddit (EN preview)</div>
     <div>
       <div style="font-weight:600;">Title</div>
       <div id="rd_title" style="white-space:pre-wrap; margin-bottom:6px;"></div>
@@ -109,22 +111,22 @@
     </div>
   </div>
   <div class="card" style="min-width:320px;max-width:480px;">
-    <div style="font-weight:600;margin-bottom:8px;">VK (превью)</div>
+    <div style="font-weight:600;margin-bottom:8px;">VK (preview)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:40px;height:40px;border-radius:4px;background:#4a76a8;"></div>
       <div style="flex:1;">
-        <div style="font-weight:600;">Ваша группа</div>
+        <div style="font-weight:600;">Your group</div>
         <div id="vk_preview_text" style="white-space:pre-wrap;"></div>
         <div id="vk_preview_media" style="margin-top:8px;"></div>
       </div>
     </div>
   </div>
   <div class="card" style="min-width:320px;max-width:480px;">
-    <div style="font-weight:600;margin-bottom:8px;">YouTube Shorts (превью)</div>
+    <div style="font-weight:600;margin-bottom:8px;">YouTube Shorts (preview)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:40px;height:40px;border-radius:4px;background:#ff0000;"></div>
       <div style="flex:1;">
-        <input id="yt_title" name="yt_title" type="text" placeholder="Заголовок видео" style="width:100%;margin-bottom:6px;" />
+        <input id="yt_title" name="yt_title" type="text" placeholder="Video title" style="width:100%;margin-bottom:6px;" />
         <div id="yt_preview_desc" style="white-space:pre-wrap;"></div>
       </div>
     </div>
@@ -323,7 +325,7 @@ function setPreview(target, file) {
         video.style.maxHeight = '180px';
         target.appendChild(video);
     } else {
-        target.textContent = 'Выбранный файл не является изображением или видео.';
+        target.textContent = 'Selected file is not an image or video.';
     }
 }
 
@@ -1171,7 +1173,7 @@ rvCropOverlay.addEventListener('dblclick', (e) => {
 });
 
 rvRun.addEventListener('click', async () => {
-  if (!rvVideo.files[0]) { rvStatus.textContent = 'Выберите видео'; return; }
+  if (!rvVideo.files[0]) { rvStatus.textContent = 'Pick a video'; return; }
   
   // Debug timeline values
   const startTime = (timelineStart * videoDuration).toFixed(2);
@@ -1182,7 +1184,7 @@ rvRun.addEventListener('click', async () => {
     isFullVideo: timelineStart === 0 && timelineEnd === 1 
   });
   
-  rvStatus.textContent = 'Рендер...';
+  rvStatus.textContent = 'Rendering...';
   const fd = new FormData();
   fd.append('video', rvVideo.files[0]);
   if (rvMusic.files[0]) fd.append('music', rvMusic.files[0]);
@@ -1198,7 +1200,7 @@ rvRun.addEventListener('click', async () => {
     const r = await fetch('/api/video/render_vertical', { method: 'POST', body: fd });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
-    rvStatus.textContent = 'Готово';
+    rvStatus.textContent = 'Done';
     // Show preview and update vertical media hidden field
     rvPrev.innerHTML = '';
     const v = document.createElement('video');
@@ -1207,21 +1209,21 @@ rvRun.addEventListener('click', async () => {
     hiddenV.value = j.output_rel; // set as vertical media for submit
     updateTextPreviews();
   } catch (e) {
-    rvStatus.textContent = 'Ошибка рендера: ' + e.message + ' — возможно, не установлен FFmpeg. Нажмите "Install FFmpeg".';
+    rvStatus.textContent = 'Render error: ' + e.message + ' — FFmpeg might be missing. Click "Install FFmpeg".';
   }
 });
 
 // Install FFmpeg on Windows (auto-download into vendor/ffmpeg)
 document.getElementById('rv_install').addEventListener('click', async () => {
   const btn = document.getElementById('rv_install');
-  btn.disabled = true; rvStatus.textContent = 'Установка FFmpeg...';
+  btn.disabled = true; rvStatus.textContent = 'Installing FFmpeg...';
   try {
     const r = await fetch('/api/video/install_ffmpeg', { method: 'POST' });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
-    rvStatus.textContent = 'FFmpeg готов: ' + (j.path || 'installed');
+    rvStatus.textContent = 'FFmpeg ready: ' + (j.path || 'installed');
   } catch (e) {
-    rvStatus.textContent = 'Не удалось установить FFmpeg: ' + e.message;
+    rvStatus.textContent = 'Failed to install FFmpeg: ' + e.message;
   } finally {
     btn.disabled = false;
   }
@@ -1342,6 +1344,18 @@ document.getElementById('pick_next_evening')?.addEventListener('click', () => {
   const now = new Date();
   let t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0, 0);
   if (t <= now) t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 20, 0, 0);
+  setLocal(t);
+});
+// +8 hours from now
+document.getElementById('pick_plus_8h')?.addEventListener('click', () => {
+  const now = new Date();
+  const t = new Date(now.getTime() + 8*60*60*1000);
+  setLocal(t);
+});
+// Tomorrow evening (20:00)
+document.getElementById('pick_next_evening_tmr')?.addEventListener('click', () => {
+  const now = new Date();
+  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 20, 0, 0);
   setLocal(t);
 });
 </script>
