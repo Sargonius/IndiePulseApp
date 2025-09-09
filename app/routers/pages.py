@@ -38,6 +38,7 @@ def _enrich_posts(posts):
         # Build preview and tags from brief
         preview = ''
         tags_val = None
+        thumb_url = None
         try:
             with _Session(_engine) as _s:
                 b = _s.get(_Brief, getattr(p, 'brief_id', None))
@@ -45,6 +46,10 @@ def _enrich_posts(posts):
                     base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
                     preview = (base[:140] + ('…' if len(base) > 140 else ''))
                     tags_val = getattr(b, 'tags_json', None)
+                    media_rel = getattr(b, 'media_path', None)
+                    if media_rel:
+                        name = str(media_rel).replace('\\','/').split('/')[-1]
+                        thumb_url = f"/media/{name}"
         except Exception:
             preview = ''
         row = {
@@ -61,6 +66,7 @@ def _enrich_posts(posts):
             'm_quote': pick('quote', 'views'),
             'tags': tags_val,
             'preview': preview,
+            'thumb_url': thumb_url,
         }
         enriched.append(row)
     return enriched
@@ -109,6 +115,7 @@ def accounts(request: Request):
             'vk_group_id': cfg.get('vk_group_id', ''),
             'vk_redirect_uri': cfg.get('vk_redirect_uri', ''),
             'vk_token_hint': token_hint,
+            'vk_user_token_hint': (('•••' + (cfg.get('vk_user_access_token') or '')[-4:]) if (cfg.get('vk_user_access_token') or '') else ''),
             'x_client_id': cfg.get('x_client_id', ''),
             'x_client_secret': cfg.get('x_client_secret', ''),
             'x_redirect_uri': cfg.get('x_redirect_uri', ''),
@@ -137,15 +144,88 @@ def accounts(request: Request):
 def jobs_list(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Job).order_by(Job.created_at.desc()).limit(50)).all()
+    # Enrich backend: flatten job fields and attach platform/preview/thumb
+    from app.models.models import Post as _Post, Brief as _Brief
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
     cfg = load_settings()
-    return templates.TemplateResponse('jobs.html', {'request': request, 'jobs': rows, 'ui_language': cfg.get('ui_language', 'en')})
+    return templates.TemplateResponse('jobs.html', {'request': request, 'jobs': enriched, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/jobs/partial', response_class=HTMLResponse)
 def jobs_table_partial(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
     rows = session.exec(select(Job).order_by(Job.created_at.desc()).limit(50)).all()
+    from app.models.models import Post as _Post, Brief as _Brief
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p, 'platform') and hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
     cfg = load_settings()
-    return templates.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows, 'ui_language': cfg.get('ui_language', 'en')})
+    return templates.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/posts', response_class=HTMLResponse)
 def posts_list(request: Request, session: Session = Depends(get_session)):
@@ -154,6 +234,14 @@ def posts_list(request: Request, session: Session = Depends(get_session)):
     data = _enrich_posts(rows)
     cfg = load_settings()
     return templates.TemplateResponse('posts.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
+
+@router.get('/analytics', response_class=HTMLResponse)
+def analytics_list(request: Request, session: Session = Depends(get_session)):
+    from sqlmodel import select
+    rows = session.exec(select(Post).order_by(Post.created_at.desc()).limit(100)).all()
+    data = _enrich_posts(rows)
+    cfg = load_settings()
+    return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/posts/partial', response_class=HTMLResponse)
 def posts_table_partial(request: Request, session: Session = Depends(get_session)):
@@ -263,6 +351,34 @@ def submit_news(
             return True
         return False
     if platforms:
+        # Detect if input media is a video (normal or vertical)
+        has_video: bool = False
+        has_vertical_video: bool = False
+        has_normal_video: bool = False
+        try:
+            import mimetypes as _m
+            import os as _os
+            cand_vert = (media_vertical or '').strip() or None
+            cand_norm = (media_normal or '').strip() or None
+            # If uploaded directly this request, media_path has absolute/relative path under media/
+            if (media_path or '').strip() and not cand_norm:
+                cand_norm = (media_path.replace('media/', '') if media_path.startswith('media/') else media_path)
+            def _ctype(candidate: str | None) -> str:
+                if not candidate:
+                    return ''
+                name = candidate
+                if not (name.startswith('media/') or _os.path.isabs(name)):
+                    name = f"media/{name}"
+                return _m.guess_type(name)[0] or ''
+            ctv = _ctype(cand_vert)
+            ctn = _ctype(cand_norm)
+            has_vertical_video = bool(ctv.startswith('video/'))
+            has_normal_video = bool(ctn.startswith('video/'))
+            has_video = bool(ctv.startswith('video/') or ctn.startswith('video/'))
+        except Exception:
+            has_video = False
+            has_vertical_video = False
+            has_normal_video = False
         when_dt: Optional[datetime] = None
         if scheduled_at:
             try:
@@ -280,9 +396,12 @@ def submit_news(
                 skipped.append(p)
                 continue
             # Failsafe: skip platforms lacking required media
-            if p in ('yt', 'tiktok'):
-                has_vertical = bool((media_vertical or '').strip()) or bool((media_path or '').strip())
-                if not has_vertical:
+            if p == 'tiktok':
+                if not has_vertical_video:
+                    continue
+            if p == 'yt':
+                # Only allow if there is a non-vertical (normal) video present
+                if not has_normal_video:
                     continue
             post = Post(
                 user_id=1,
@@ -301,7 +420,8 @@ def submit_news(
         media_rel = None
         try:
             if str(post.platform) in (str(PlatformEnum.yt), 'yt'):
-                media_rel = (media_vertical or '').strip() or None
+                # For YouTube, prefer normal (non-vertical) video only
+                media_rel = (media_normal or '').strip() or None
             else:
                 media_rel = (media_normal or '').strip() or None
         except Exception:

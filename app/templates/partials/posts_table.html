@@ -1,23 +1,26 @@
 <table id="posts_table" class="table" hx-get="/posts/partial" hx-trigger="refresh" hx-swap="outerHTML">
 	<tr>
 		<th>ID</th>
+		<th>Media</th>
 		<th>Platform</th>
 		<th>Status</th>
 		<th>Brief</th>
 		<th>Scheduled</th>
 		<th>Published</th>
 		<th>URL</th>
-		<th>Likes</th>
-		<th>Retweets/Reposts</th>
-		<th>Replies/Comments</th>
-		<th>Quotes/Views</th>
-		<th>Hashtags</th>
 		<th>Preview</th>
 		<th>Actions</th>
 	</tr>
 	{% for p in posts %}
 	<tr>
 		<td>{{ p.id }}</td>
+		<td>
+			{% if p.thumb_url %}
+				<img src="{{ p.thumb_url }}" alt="thumb" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
+			{% else %}
+				—
+			{% endif %}
+		</td>
 		<td>{{ p.platform_text }}</td>
 		<td>
 			{% set s = p.status_text %}
@@ -41,12 +44,7 @@
 		</td>
 		<td>{{ p.published_at or '' }}</td>
 		<td>{% if p.platform_url %}<a href="{{ p.platform_url }}" target="_blank">link</a>{% else %}—{% endif %}</td>
-		<td>{{ p.m_like if p.m_like is not none else '—' }}</td>
-		<td>{{ p.m_repost if p.m_repost is not none else '—' }}</td>
-		<td>{{ p.m_reply if p.m_reply is not none else '—' }}</td>
-		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
-		<td class="muted" style="max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ p.tags or '' }}</td>
-		<td class="muted" style="max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview or '' }}</td>
+		<td class="muted" style="max-width:420px; white-space:pre-wrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview or '' }}</td>
 		<td>
 			<div class="row" style="gap:6px; align-items:center; flex-wrap:nowrap;">
 				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-vals='{"id": {{ p.id }} }' hx-target="#posts_table" hx-swap="outerHTML">⟳</button>

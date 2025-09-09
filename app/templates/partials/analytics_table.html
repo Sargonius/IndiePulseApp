@@ -1,0 +1,39 @@
+<table class="table" id="analytics_table">
+	<tr>
+		<th>ID</th>
+		<th>Media</th>
+		<th>Platform</th>
+		<th>Status</th>
+		<th>Published</th>
+		<th>URL</th>
+		<th>Preview</th>
+		<th>Likes</th>
+		<th>Retweets/Reposts</th>
+		<th>Replies/Comments</th>
+		<th>Quotes/Views</th>
+	</tr>
+	{% for p in posts %}
+	<tr>
+		<td>{{ p.id }}</td>
+		<td>
+			{% if p.thumb_url %}
+				<img src="{{ p.thumb_url }}" alt="thumb" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
+			{% else %}
+				—
+			{% endif %}
+		</td>
+		<td>{{ p.platform_text }}</td>
+		<td>{{ p.status_text }}</td>
+		<td>{{ p.published_at or '' }}</td>
+		<td>{% if p.platform_url %}<a href="{{ p.platform_url }}" target="_blank">link</a>{% else %}—{% endif %}</td>
+		<td class="muted" style="max-width:420px; white-space:pre-wrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview or '' }}</td>
+		<td>{{ p.m_like if p.m_like is not none else '—' }}</td>
+		<td>{{ p.m_repost if p.m_repost is not none else '—' }}</td>
+		<td>{{ p.m_reply if p.m_reply is not none else '—' }}</td>
+		<td>{{ p.m_quote if p.m_quote is not none else '—' }}</td>
+	</tr>
+	{% endfor %}
+</table>
+
+
+

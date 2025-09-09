@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Analytics</h2>
+<div class="toolbar">
+	<button class="btn" id="refresh_all_btn" hx-post="/api/analytics/refresh" hx-target="#analytics_table" hx-swap="outerHTML">Update metrics</button>
+	<button class="btn" id="reload_table_btn" hx-get="/api/analytics/table" hx-target="#analytics_table" hx-swap="outerHTML">Reload</button>
+	<span id="refresh_all_status" class="muted"></span>
+</div>
+<div id="analytics_table" hx-get="/api/analytics/table" hx-trigger="load" hx-swap="outerHTML">
+	<tr>
+		<th>ID</th>
+		<th>Media</th>
+		<th>Platform</th>
+		<th>Status</th>
+		<th>Published</th>
+		<th>URL</th>
+		<th>Preview</th>
+		<th>Likes</th>
+		<th>Retweets/Reposts</th>
+		<th>Replies/Comments</th>
+		<th>Quotes/Views</th>
+	</tr>
+	Loading...
+</div>
+{% endblock %}
+
+

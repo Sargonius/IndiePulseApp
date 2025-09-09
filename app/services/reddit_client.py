@@ -51,6 +51,15 @@ class RedditClient:
             logger.error(f"Reddit video submission failed: {e}")
             raise RuntimeError(f"Reddit video submission failed: {e}")
 
+    def submit_link(self, subreddit_name: str, title: str, url: str) -> Tuple[str, str]:
+        try:
+            subreddit = self.reddit.subreddit(subreddit_name)
+            submission = subreddit.submit(title=title, url=url)
+            return submission.id, submission.url
+        except Exception as e:
+            logger.error(f"Reddit link submission failed: {e}")
+            raise RuntimeError(f"Reddit link submission failed: {e}")
+
     def comment(self, submission_id: str, text: str) -> None:
         try:
             subm = self.reddit.submission(id=submission_id)

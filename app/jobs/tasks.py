@@ -29,7 +29,9 @@ def publish_news_post(job_id: int, post_id: int) -> str:
         # Respect schedule edits: if scheduled_at is in the future, reschedule and exit
         try:
             if getattr(post, 'scheduled_at', None) is not None:
-                now = datetime.utcnow()
+                # Compare using local naive time, because scheduled_at comes from the browser in local time
+                from datetime import datetime as _dt
+                now = _dt.now()
                 target = post.scheduled_at
                 if getattr(target, 'tzinfo', None) is not None:
                     try:
@@ -66,6 +68,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             text_en = (brief.text_en or '').strip() if brief else ''
             # Build gallery list for Discord; prefer payload.gallery, else single media
             gallery_files: list[str] = []
+            primary_media: Optional[str] = None
             try:
                 import json as _json
                 override = None
@@ -80,6 +83,11 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     media_rel = override or (getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None) if brief else None)
                     if media_rel:
                         gallery_files = [media_rel]
+                # Track first item as primary for video handling
+                try:
+                    primary_media = (gallery_files[0] if gallery_files else None)
+                except Exception:
+                    primary_media = None
             except Exception:
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
                 if media_rel:
@@ -94,6 +102,14 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         p = f"media/{p}"
                     _abs_files.append(_os.path.abspath(p))
                 gallery_files = _abs_files
+                try:
+                    if primary_media:
+                        pm = primary_media.replace('\\','/')
+                        if not pm.startswith('media/'):
+                            pm = f"media/{pm}"
+                        primary_media = _os.path.abspath(pm)
+                except Exception:
+                    primary_media = None
 
             targets = []
             if text_ru and settings.get('discord_webhook_ru'):
@@ -109,11 +125,28 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             for wh_url, content in targets:
                 try:
                     client = DiscordClient(wh_url)
-                    # Send all images in one message if available
-                    if gallery_files:
-                        _, murl = client.send_message(content, file_paths=gallery_files)
-                    else:
-                        _, murl = client.send_message(content)
+                    # Prefer single primary video if available; else send images/generic
+                    sent_url = None
+                    try:
+                        import mimetypes as _m
+                        # If there is any video in gallery, prefer the first video file
+                        chosen_video = None
+                        if primary_media and (_m.guess_type(primary_media)[0] or '').startswith('video/'):
+                            chosen_video = primary_media
+                        else:
+                            for fp in gallery_files:
+                                if (_m.guess_type(fp)[0] or '').startswith('video/'):
+                                    chosen_video = fp
+                                    break
+                        if chosen_video:
+                            _, sent_url = client.send_message(content, file_path=chosen_video)
+                        elif gallery_files:
+                            _, sent_url = client.send_message(content, file_paths=gallery_files)
+                        else:
+                            _, sent_url = client.send_message(content)
+                    except Exception:
+                        _, sent_url = client.send_message(content)
+                    murl = sent_url
                     last_url = murl or last_url
                 except Exception as exc:
                     # continue to next target but record error on post/job
@@ -451,9 +484,11 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             if media_rel_vk or gallery_list:
                 try:
                     import os as _os, mimetypes as _m
+                    from loguru import logger as _logger
                     vk = VKClient(token)
                     attachments: list[str] = []
                     candidates: list[str] = []
+                    had_video = False
                     if gallery_list:
                         candidates = [str(x) for x in gallery_list if isinstance(x, str)]
                     if media_rel_vk and not candidates:
@@ -464,23 +499,57 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                             path = f"media/{path}"
                         path = _os.path.abspath(path)
                         ctype = _m.guess_type(path)[0] or ''
+                        _logger.info(f"vk.attach candidate path={path} ctype={ctype}")
                         if ctype.startswith('image/'):
                             try:
                                 att = vk.upload_photo_to_wall(s, path)
                                 if att: attachments.append(att)
                             except Exception as _exc:
-                                pass
+                                _logger.warning(f"vk.photo upload failed: {_exc}")
                         elif ctype.startswith('video/'):
-                            # Fallback: no wall video upload yet
-                            if job is not None:
-                                job.last_error = (job.last_error or '') + ' vk_video_upload_not_implemented'
-                                session.add(job)
-                                session.commit()
+                            had_video = True
+                            try:
+                                # Use user access token for video.save (group tokens disallow it)
+                                from app.services.settings import load_settings as _ls
+                                _cfg = _ls()
+                                user_tok = (_cfg.get('vk_user_access_token') or '').strip() or token
+                                meta = vk.get_video_upload_server(s, name=_os.path.basename(path), token_override=user_tok)
+                                _logger.info(f"vk.video.save meta keys={list((meta or {}).keys())} owner={meta.get('owner_id')} video_id={meta.get('video_id')}")
+                                up_url = meta.get('upload_url')
+                                up_resp = vk.upload_video(up_url, path) if up_url else {}
+                                _logger.info(f"vk.video.upload resp keys={list((up_resp or {}).keys())}")
+                                owner = meta.get('owner_id')
+                                # video.save returns video_id; some SDKs use 'video_id' or 'id'
+                                video_id = meta.get('video_id') or meta.get('id')
+                                access_key = meta.get('access_key')
+                                if not owner:
+                                    # fall back to negative group id
+                                    try:
+                                        owner = f"-{int(s)}"
+                                    except Exception:
+                                        owner = f"-{s}"
+                                if video_id:
+                                    attach = f"video{owner}_{video_id}"
+                                    if access_key:
+                                        attach = f"{attach}_{access_key}"
+                                    attachments.append(attach)
+                                    _logger.info(f"vk.video attachment built: {attach}")
+                                else:
+                                    _logger.error(f"vk.video attach missing video_id owner={owner}")
+                            except Exception as _exc:
+                                _logger.error(f"vk.video upload failed: {_exc}")
+                                if job is not None:
+                                    job.last_error = (job.last_error or '') + f" vk_video_upload_failed: {_exc}"
+                                    session.add(job)
+                                    session.commit()
                     attachment = ','.join(attachments) if attachments else None
+                    # If we intended to post a video but have no attachments, treat as error to avoid text-only fallback
+                    if (attachment is None or not attachment.strip()) and had_video:
+                        raise RuntimeError('vk_video_upload_failed_no_attachment')
                 except Exception as exc:
                     attachment = None
                     if job is not None:
-                        job.last_error = f"vk_photo_upload_failed: {exc}"
+                        job.last_error = f"vk_attach_failed: {exc}"
                         session.add(job)
                         session.commit()
             try:
@@ -525,7 +594,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.commit()
                 return 'error'
         elif str(post.platform) == 'PlatformEnum.yt' or str(post.platform) == 'yt':
-            # YouTube Shorts upload using vertical media if present
+            # YouTube upload for non-vertical video; add to playlist if configured
             from app.services.youtube_client import YouTubeClient
             from app.services.settings import load_settings
             cfg = load_settings()
@@ -539,7 +608,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         override = (_json.loads(job.payload_json) or {}).get('media_rel')
                     except Exception:
                         override = None
-                media_rel = override or getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
+                # Prefer normal media for regular YouTube
+                media_rel = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             except Exception:
                 media_rel = getattr(brief, 'media_path', None)
             if not media_rel:
@@ -660,7 +730,17 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                                 pass
                         sid, url = rc.submit_image(sub, title=title, image_path=path)
                     elif ctype.startswith('video/'):
-                        sid, url = rc.submit_video(sub, title=title, video_path=path)
+                        # Direct video upload to Reddit; transcode to safe settings and add thumbnail
+                        try:
+                            from app.services.reddit_media import prepare_video_for_reddit as _prep
+                            safe_path, thumb = _prep(path)
+                        except Exception:
+                            safe_path, thumb = path, None
+                        try:
+                            sid, url = rc.submit_video(sub, title=title, video_path=safe_path, thumbnail_path=thumb)
+                        except Exception:
+                            # Fallback: try without thumbnail
+                            sid, url = rc.submit_video(sub, title=title, video_path=safe_path)
                 if not sid:
                     sid, url = rc.submit_text(sub, title=title, text=head or body)
                 post.platform_post_id = sid
@@ -764,8 +844,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     pass
                 if not title:
                     title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
-                # For YouTube, include hashtags in description as well
-                desc = 'Uploaded via IndiePulse'
+                # For YouTube, include English description and hashtags
+                desc = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'Uploaded via IndiePulse')
                 if brief and getattr(brief, 'tags_json', None):
                     try:
                         desc = (desc + '\n' + brief.tags_json).strip()
@@ -778,9 +858,19 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     client_secret=(cfg.get('yt_client_secret') or '').strip(),
                 )
                 try:
-                    vid, url = yt.upload_short(path, title=title, description=desc)
+                    vid, url = yt.upload_video(path, title=title, description=desc)
                     post.platform_post_id = vid
                     post.platform_url = url
+                    # Playlist handling
+                    playlist_id = (cfg.get('yt_playlist_id') or '').strip()
+                    if not playlist_id:
+                        pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
+                        playlist_id = yt.ensure_playlist(pname) or ''
+                    if playlist_id and vid:
+                        try:
+                            yt.add_to_playlist(playlist_id, vid)
+                        except Exception:
+                            pass
                 except Exception as exc:
                     post.status = PostStatusEnum.error
                     post.error_text = str(exc)
@@ -918,6 +1008,7 @@ def enqueue_due_posts() -> str:
     from datetime import datetime as _dt
     import json as _json
     with Session(engine) as session:
+        # Use local naive time to match UI scheduling input
         now = _dt.now()
         rows = session.exec(
             select(Post).where(
@@ -948,7 +1039,7 @@ def enqueue_due_posts() -> str:
         return f"scheduled={scheduled}"
 @huey.task()
 def refresh_metrics_for_post(post_id: int) -> str:
-    from app.models.models import Post
+    from app.models.models import Post, PostStatusEnum
     from app.services.settings import load_settings
     import json
     import httpx
@@ -997,10 +1088,68 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     comments = ((item.get("comments") or {}).get("count"))
                     views = ((item.get("views") or {}).get("count"))
                     metrics = {"likes": likes, "reposts": reposts, "comments": comments, "views": views}
+            elif platform.endswith('facebook') or platform in ('fb_ru', 'fb_en'):
+                # Facebook Page post insights: use summary counts for reactions and comments; shares via 'shares' field
+                cfg = load_settings()
+                is_ru = platform.endswith('fb_ru') or platform == 'fb_ru'
+                page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+                if not (post.platform_post_id and page_token):
+                    metrics = {"error": "fb_not_configured"}
+                else:
+                    with httpx.Client(timeout=20) as client:
+                        fields = "reactions.summary(true),comments.summary(true),shares"
+                        r = client.get(f"https://graph.facebook.com/v19.0/{post.platform_post_id}", params={"fields": fields, "access_token": page_token})
+                        d = r.json()
+                    likes = (((d.get('reactions') or {}).get('summary') or {}).get('total_count'))
+                    comments = (((d.get('comments') or {}).get('summary') or {}).get('total_count'))
+                    shares = ((d.get('shares') or {}).get('count'))
+                    metrics = {"likes": likes, "comments": comments, "reposts": shares}
+            elif platform.endswith('reddit') and post.platform_post_id:
+                # Basic Reddit stats via public JSON endpoint to avoid heavy dependencies if PRAW not configured
+                try:
+                    with httpx.Client(timeout=15, headers={"User-Agent": "IndiePulse/1.0"}) as client:
+                        r = client.get(f"https://www.reddit.com/comments/{post.platform_post_id.split('_')[-1]}.json")
+                        arr = r.json()
+                    item = (arr[0].get('data', {}).get('children', [{}])[0].get('data', {})) if isinstance(arr, list) else {}
+                    score = item.get('score')
+                    num_comments = item.get('num_comments')
+                    metrics = {"like": score, "comments": num_comments}
+                except Exception:
+                    # Fallback: try PRAW if configured in environment
+                    metrics = metrics or {"error": "reddit_fetch_failed"}
+            elif platform.endswith('yt') and post.platform_post_id:
+                # YouTube stats: requires access token
+                cfg = load_settings()
+                access = (cfg.get('yt_access_token') or '').strip()
+                if not access:
+                    metrics = {"error": "yt_not_connected"}
+                else:
+                    with httpx.Client(timeout=15) as client:
+                        r = client.get("https://www.googleapis.com/youtube/v3/videos", params={
+                            "part": "statistics",
+                            "id": post.platform_post_id,
+                        }, headers={"Authorization": f"Bearer {access}"})
+                        data = r.json()
+                    stats = ((data.get('items') or [{}])[0].get('statistics') or {})
+                    likes = stats.get('likeCount')
+                    comments = stats.get('commentCount')
+                    views = stats.get('viewCount')
+                    metrics = {"likes": int(likes) if likes is not None else None,
+                               "comments": int(comments) if comments is not None else None,
+                               "views": int(views) if views is not None else None}
+            elif platform.endswith('tg') and post.platform_post_id:
+                # Telegram Bot API has limited stats; we won't have reliable view counts unless it's a channel post
+                metrics = {"status": "sent"}
             elif platform.endswith('discord'):
                 metrics = {"status": "sent"}
         except Exception as exc:
             metrics = {"error": str(exc)}
+        # Backstop: if a platform post id or url exists but status is still running, mark it done
+        try:
+            if post.status == PostStatusEnum.running and (post.platform_post_id or post.platform_url):
+                post.status = PostStatusEnum.done
+        except Exception:
+            pass
         post.metrics_json = json.dumps(metrics, ensure_ascii=False)
         session.add(post)
         session.commit()

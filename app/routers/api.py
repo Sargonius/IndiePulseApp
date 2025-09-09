@@ -27,6 +27,38 @@ from fastapi import Query
 
 router = APIRouter(prefix="/api")
 templates_api = Jinja2Templates(directory='app/templates')
+@router.get("/analytics/table", response_class=HTMLResponse)
+def analytics_table(request: Request, session: Session = Depends(get_session)):
+    from sqlmodel import select
+    from app.models.models import Post as _Post
+    rows = session.exec(select(_Post).order_by(_Post.created_at.desc()).limit(100)).all()
+    # Reuse pages enrichment to attach preview/thumb and mapped metrics
+    try:
+        from app.routers.pages import _enrich_posts as _ep
+        data = _ep(rows)
+    except Exception:
+        data = []
+    return templates_api.TemplateResponse('partials/analytics_table.html', {'request': request, 'posts': data})
+
+
+@router.post("/analytics/refresh", response_class=HTMLResponse)
+def analytics_refresh(request: Request, session: Session = Depends(get_session)):
+    from sqlmodel import select
+    from app.models.models import Post as _Post
+    rows = session.exec(select(_Post).order_by(_Post.created_at.desc()).limit(100)).all()
+    ids = [p.id for p in rows]
+    # Run metrics refresh synchronously
+    try:
+        from app.jobs.tasks import refresh_metrics_for_post as _refresh
+        for pid in ids:
+            try:
+                _refresh.call_local(pid)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Return fresh table
+    return analytics_table(request, session)
 
 
 def _render_autoreload_button_html(enabled: bool) -> str:
@@ -667,6 +699,7 @@ def save_settings_endpoint(
 	vk_group_id: str = Form(""),
 	vk_redirect_uri: str = Form(""),
 	vk_access_token: str = Form(""),
+	vk_user_access_token: str = Form(""),
 	x_client_id: str = Form(""),
 	x_client_secret: str = Form(""),
 	x_redirect_uri: str = Form(""),
@@ -708,6 +741,8 @@ def save_settings_endpoint(
 		updates["vk_redirect_uri"] = vk_redirect_uri.strip()
 	if vk_access_token.strip():
 		updates["vk_access_token"] = vk_access_token.strip()
+	if vk_user_access_token.strip():
+		updates["vk_user_access_token"] = vk_user_access_token.strip()
 	if x_client_id.strip():
 		updates["x_client_id"] = x_client_id.strip()
 	if x_client_secret.strip():
@@ -774,7 +809,7 @@ def vk_connect_start():
     redirect_uri = (cfg.get("vk_redirect_uri") or "").strip()
     if not client_id or not redirect_uri:
         return HTMLResponse("<span style='color:orange'>Заполните Client ID и Redirect URI, затем сохраните настройки</span>", status_code=400)
-    scope = "wall,offline,groups"
+    scope = "wall,offline,groups,video"
     auth_url = (
         "https://oauth.vk.com/authorize?"
         f"client_id={quote_plus(client_id)}&display=page&redirect_uri={quote_plus(redirect_uri)}"
@@ -995,7 +1030,7 @@ def vk_implicit_url():
         return HTMLResponse("<span style='color:orange'>Укажите VK Client ID и сохраните настройки</span>", status_code=400)
     # Use VK's blank.html so the token is visible in the URL fragment for copy-paste
     redirect_uri = "https://oauth.vk.com/blank.html"
-    scope = "wall,groups,offline"
+    scope = "wall,groups,offline,video"
     url = (
         "https://oauth.vk.com/authorize?"
         f"client_id={quote_plus(client_id)}&display=page&redirect_uri={quote_plus(redirect_uri)}"
@@ -1682,9 +1717,45 @@ def jobs_kill(request: Request, id: Optional[int] = Form(None), id_q: Optional[i
     session.add(job)
     session.commit()
     # return refreshed jobs table
-    from app.models.models import Job as _Job
+    from app.models.models import Job as _Job, Post as _Post, Brief as _Brief
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
-    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+    # Enrich jobs for previews/platform/thumbs
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched})
 
 
 @router.post("/jobs/remove")
@@ -1709,9 +1780,44 @@ def jobs_remove(request: Request, id: Optional[int] = Form(None), id_q: Optional
             session.add(post)
     session.delete(job)
     session.commit()
-    from app.models.models import Job as _Job
+    from app.models.models import Job as _Job, Post as _Post, Brief as _Brief
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
-    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched})
 
 
 @router.post("/jobs/refresh_metrics")
@@ -1732,9 +1838,44 @@ def jobs_refresh_metrics(request: Request, id: Optional[int] = Form(None), id_q:
         from app.jobs.tasks import refresh_metrics_for_post
         refresh_metrics_for_post.schedule(args=(post_id,), delay=0)
     # return refreshed table (status may update shortly after)
-    from app.models.models import Job as _Job
+    from app.models.models import Job as _Job, Post as _Post, Brief as _Brief
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
-    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched})
 
 
 @router.post("/jobs/retry")
@@ -1766,6 +1907,41 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
     from app.jobs.tasks import publish_news_post
     publish_news_post.schedule(args=(nj.id, post_id), delay=0)
     # refresh table
-    from app.models.models import Job as _Job
+    from app.models.models import Job as _Job, Post as _Post, Brief as _Brief
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
-    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': rows})
+    import json as _json
+    enriched = []
+    for j in rows:
+        plat = ''
+        preview = ''
+        thumb_url = None
+        try:
+            payload = _json.loads(j.payload_json or '{}') if j.payload_json else {}
+            pid = payload.get('post_id')
+            if pid:
+                p = session.get(_Post, pid)
+                if p:
+                    plat = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+                    b = session.get(_Brief, getattr(p, 'brief_id', None))
+                    if b:
+                        base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                        preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                        media_rel = getattr(b, 'media_path', None)
+                        if media_rel:
+                            name = str(media_rel).replace('\\','/').split('/')[-1]
+                            thumb_url = f"/media/{name}"
+        except Exception:
+            pass
+        enriched.append({
+            'id': j.id,
+            'kind': getattr(j, 'kind', None),
+            'status': getattr(j, 'status', None),
+            'attempt': getattr(j, 'attempt', 0),
+            'last_error': getattr(j, 'last_error', None) or '',
+            'created_at': getattr(j, 'created_at', None),
+            'updated_at': getattr(j, 'updated_at', None),
+            'platform': plat,
+            'preview': preview,
+            'thumb_url': thumb_url,
+        })
+    return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched})

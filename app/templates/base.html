@@ -19,6 +19,7 @@
 				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
 				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
 				<a href="/steam" class="{% if request.url.path.startswith('/steam') %}active{% endif %}">Steam Export</a>
+				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>
 				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">Accounts</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
 			</nav>

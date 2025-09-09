@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -16,7 +16,11 @@ class YouTubeClient:
             token_uri="https://oauth2.googleapis.com/token",
             client_id=client_id,
             client_secret=client_secret,
-            scopes=["https://www.googleapis.com/auth/youtube.upload"],
+            # Include broader scope to allow playlist management in addition to upload
+            scopes=[
+                "https://www.googleapis.com/auth/youtube.upload",
+                "https://www.googleapis.com/auth/youtube",
+            ],
         )
         self.youtube = build("youtube", "v3", credentials=self.creds)
 
@@ -42,5 +46,45 @@ class YouTubeClient:
         vid = response.get("id") if isinstance(response, dict) else None
         url = f"https://www.youtube.com/watch?v={vid}" if vid else None
         return vid, url
+
+    # Generic upload (alias to upload_short for now)
+    def upload_video(self, file_path: str, title: str, description: str = "", tags: Optional[list[str]] = None, privacy_status: str = "public") -> Tuple[Optional[str], Optional[str]]:
+        return self.upload_short(file_path, title=title, description=description, tags=tags, privacy_status=privacy_status)
+
+    def ensure_playlist(self, title: str) -> Optional[str]:
+        """Return playlist ID for given title, creating it if necessary.
+        Requires youtube scope; if not permitted, returns None.
+        """
+        try:
+            # Try to find existing playlist by title
+            req = self.youtube.playlists().list(part="snippet", mine=True, maxResults=50)
+            while req is not None:
+                resp = req.execute()
+                for item in (resp.get("items") or []):
+                    if ((item.get("snippet") or {}).get("title") or "") == title:
+                        return item.get("id")
+                req = self.youtube.playlists().list_next(req, resp)
+            # Create if not found
+            body = {
+                "snippet": {"title": title[:150], "description": "Auto playlist"},
+                "status": {"privacyStatus": "public"},
+            }
+            created = self.youtube.playlists().insert(part=",".join(body.keys()), body=body).execute()
+            return created.get("id")
+        except Exception:
+            return None
+
+    def add_to_playlist(self, playlist_id: str, video_id: str) -> bool:
+        try:
+            body = {
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                }
+            }
+            self.youtube.playlistItems().insert(part="snippet", body=body).execute()
+            return True
+        except Exception:
+            return False
 
 

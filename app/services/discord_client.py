@@ -8,6 +8,7 @@ import mimetypes
 import httpx
 import requests
 from loguru import logger
+from app.services.settings import load_settings
 
 
 class DiscordClient:
@@ -26,7 +27,7 @@ class DiscordClient:
         async with httpx.AsyncClient(timeout=30) as client:
             if (file_paths and any(os.path.exists(p) for p in file_paths)) or (file_path and os.path.exists(file_path)):
                 try:
-                    # Build files list (support multiple). Discord limit ~25MB per file
+                    # Build files list (support multiple). Discord typical limit ~8MB per file (non-boosted)
                     payload = {"content": content[:2000]}
                     file_handles = []
                     try:
@@ -34,20 +35,29 @@ class DiscordClient:
                         sources = (file_paths or [])
                         if not sources and file_path:
                             sources = [file_path]
+                        # Determine per-file size limit from settings
+                        try:
+                            cfg = load_settings()
+                            max_mb = int(cfg.get("discord_max_upload_mb") or 8)
+                        except Exception:
+                            max_mb = 8
+                        max_bytes = max_mb * 1024 * 1024
                         for p in sources:
                             if not (p and os.path.exists(p)): continue
                             size = os.path.getsize(p)
-                            if size > 24 * 1024 * 1024:
+                            if size > max_bytes:
                                 continue
                             filename = os.path.basename(p)
                             ctype = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
                             fh = open(p, 'rb')
                             file_handles.append(fh)
                             files_multi.append(('file', (filename, fh, ctype)))
-                        # Embed only first image if any
+                        # Embed preview only if first file is an image
                         if files_multi:
                             first_name = files_multi[0][1][0]
-                            payload["embeds"] = [{"image": {"url": f"attachment://{first_name}"}}]
+                            first_ctype = mimetypes.guess_type(first_name)[0] or 'application/octet-stream'
+                            if first_ctype.startswith('image/'):
+                                payload["embeds"] = [{"image": {"url": f"attachment://{first_name}"}}]
                         if files_multi:
                             resp = await client.post(url, data={"payload_json": json.dumps(payload)}, files=files_multi)
                         else:
@@ -90,11 +100,17 @@ class DiscordClient:
                 files_multi = []
                 file_handles = []
                 try:
+                    try:
+                        cfg = load_settings()
+                        max_mb = int(cfg.get("discord_max_upload_mb") or 8)
+                    except Exception:
+                        max_mb = 8
+                    max_bytes = max_mb * 1024 * 1024
                     for p in sources:
                         if not (p and os.path.exists(p)):
                             continue
                         size = os.path.getsize(p)
-                        if size > 24 * 1024 * 1024:
+                        if size > max_bytes:
                             continue
                         filename = os.path.basename(p)
                         ctype = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
@@ -103,7 +119,9 @@ class DiscordClient:
                         files_multi.append(('file', (filename, fh, ctype)))
                     if files_multi:
                         first_name = files_multi[0][1][0]
-                        payload["embeds"] = [{"image": {"url": f"attachment://{first_name}"}}]
+                        first_ctype = mimetypes.guess_type(first_name)[0] or 'application/octet-stream'
+                        if first_ctype.startswith('image/'):
+                            payload["embeds"] = [{"image": {"url": f"attachment://{first_name}"}}]
                         resp = requests.post(url, data={"payload_json": json.dumps(payload)}, files=files_multi, timeout=60)
                     else:
                         resp = requests.post(url, json=payload, timeout=15)

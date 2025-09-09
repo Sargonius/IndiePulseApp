@@ -13,6 +13,8 @@ DEFAULTS: Dict[str, Any] = {
 	"discord_webhook_url": "",
 	"discord_webhook_ru": "",
 	"discord_webhook_en": "",
+	# Discord upload settings
+	"discord_max_upload_mb": 50,
 	# UI
 	"ui_language": "en",
 	"vk_client_id": "",
@@ -20,6 +22,7 @@ DEFAULTS: Dict[str, Any] = {
 	"vk_group_id": "",
 	"vk_redirect_uri": "http://127.0.0.1:8000/api/accounts/callback/vk",
     "vk_access_token": "",
+    "vk_user_access_token": "",
     "vk_user_id": "",
     "x_client_id": "",
     "x_client_secret": "",
@@ -39,6 +42,9 @@ DEFAULTS: Dict[str, Any] = {
     "yt_client_secret": "",
     "yt_access_token": "",
     "yt_refresh_token": "",
+    # YouTube playlist preferences
+    "yt_playlist_id": "",
+    "yt_playlist_title": "Synthetica",
     # Facebook (two groups)
     "fb_ru_page_access_token": "",
     "fb_en_page_access_token": "",
