@@ -51,16 +51,28 @@
 		</div>
 	</div>
     <div style="margin-top:10px;">
-        <label>Platforms</label> <button type="button" class="btn" id="toggle_all_btn" style="margin-left:8px;">Select all</button><br/>
-        <label><input class="pf" type="checkbox" name="platforms" value="vk" checked data-ready="{{ 1 if platforms_ready.vk else 0 }}" /> VK</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="x" checked data-ready="{{ 1 if platforms_ready.x else 0 }}" /> X/Twitter</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="discord" checked data-ready="{{ 1 if platforms_ready.discord else 0 }}" /> Discord</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="yt" checked data-ready="{{ 1 if platforms_ready.yt else 0 }}" /> YouTube Shorts</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="reddit" checked data-ready="{{ 1 if platforms_ready.reddit else 0 }}" /> Reddit (EN)</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="tg" checked data-ready="{{ 1 if platforms_ready.tg else 0 }}" /> Telegram (RU)</label>
-        <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked data-ready="{{ 1 if platforms_ready.tiktok else 0 }}" /> TikTok</label>
+        <label>Platforms</label> <button type="button" class="btn" id="toggle_all_btn" style="margin-left:8px;">Select all</button>
+        <div class="row" style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-top:8px;">
+            <div class="card" style="padding:8px; min-width:280px;">
+                <div style="font-weight:600; margin-bottom:6px;">Posts</div>
+                <div class="row" style="gap:8px; flex-wrap:wrap;">
+                    <label><input class="pf" type="checkbox" name="platforms" value="vk" checked data-ready="{{ 1 if platforms_ready.vk else 0 }}" /> VK</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="x" checked data-ready="{{ 1 if platforms_ready.x else 0 }}" /> X/Twitter</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="discord" checked data-ready="{{ 1 if platforms_ready.discord else 0 }}" /> Discord</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="reddit" checked data-ready="{{ 1 if platforms_ready.reddit else 0 }}" /> Reddit (EN)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="tg" checked data-ready="{{ 1 if platforms_ready.tg else 0 }}" /> Telegram (RU)</label>
+                </div>
+            </div>
+            <div class="card" style="padding:8px; min-width:280px;">
+                <div style="font-weight:600; margin-bottom:6px;">Video</div>
+                <div class="row" style="gap:8px; flex-wrap:wrap;">
+                    <label><input class="pf" type="checkbox" name="platforms" value="yt" checked data-ready="{{ 1 if platforms_ready.yt else 0 }}" /> YouTube</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="tiktok" checked data-ready="{{ 1 if platforms_ready.tiktok else 0 }}" /> TikTok</label>
+                </div>
+            </div>
+        </div>
     </div>
     <div style="margin-top:6px;">
       <label><input type="checkbox" name="x_split" id="x_split" /> Split long X posts into thread (optional)</label>
@@ -122,11 +134,11 @@
     </div>
   </div>
   <div class="card" style="min-width:320px;max-width:480px;">
-    <div style="font-weight:600;margin-bottom:8px;">YouTube Shorts (preview)</div>
+    <div style="font-weight:600;margin-bottom:8px;">Video Header / YouTube title (preview)</div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
       <div style="width:40px;height:40px;border-radius:4px;background:#ff0000;"></div>
       <div style="flex:1;">
-        <input id="yt_title" name="yt_title" type="text" placeholder="Video title" style="width:100%;margin-bottom:6px;" />
+        <input id="yt_title" name="yt_title" type="text" placeholder="Video header/title (used for YouTube/TikTok)" style="width:100%;margin-bottom:6px;" value="{{ draft.yt_title if draft and draft.yt_title else '' }}" />
         <div id="yt_preview_desc" style="white-space:pre-wrap;"></div>
       </div>
     </div>

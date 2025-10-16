@@ -419,6 +419,21 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 if media_ids and tid:
                     post.platform_post_id = tid
             except Exception as exc:
+                # Treat common Reddit websocket ingest errors as soft-success if a submission is created
+                # We'll poll later to mark done
+                try:
+                    if 'Websocket error' in str(exc):
+                        from app.jobs.tasks import refresh_metrics_for_post as _refresh
+                        # best-effort: schedule an immediate refresh; status will flip if URL/ID present
+                        _refresh.schedule(args=(post.id,), delay=5)
+                        # keep running status but do not hard error
+                        job.last_error = (job.last_error or '') + ' reddit_ws_softfail'
+                        if job is not None:
+                            session.add(job)
+                        session.commit()
+                        return 'ok'
+                except Exception:
+                    pass
                 post.status = PostStatusEnum.error
                 post.error_text = str(exc)
                 if job is not None:
@@ -489,6 +504,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     attachments: list[str] = []
                     candidates: list[str] = []
                     had_video = False
+                    had_image = False
                     if gallery_list:
                         candidates = [str(x) for x in gallery_list if isinstance(x, str)]
                     if media_rel_vk and not candidates:
@@ -501,11 +517,16 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         ctype = _m.guess_type(path)[0] or ''
                         _logger.info(f"vk.attach candidate path={path} ctype={ctype}")
                         if ctype.startswith('image/'):
+                            had_image = True
                             try:
-                                att = vk.upload_photo_to_wall(s, path)
+                                from app.services.settings import load_settings as _ls
+                                _cfg = _ls()
+                                user_tok = (_cfg.get('vk_user_access_token') or '').strip() or token
+                                att = vk.upload_photo_to_wall(s, path, token_override=user_tok)
                                 if att: attachments.append(att)
                             except Exception as _exc:
-                                _logger.warning(f"vk.photo upload failed: {_exc}")
+                                _logger.error(f"vk.photo upload failed: {_exc}", exc_info=True)
+                                raise  # Прокинуть исключение дальше, чтобы сработала проверка had_image
                         elif ctype.startswith('video/'):
                             had_video = True
                             try:
@@ -543,15 +564,28 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                                     session.add(job)
                                     session.commit()
                     attachment = ','.join(attachments) if attachments else None
-                    # If we intended to post a video but have no attachments, treat as error to avoid text-only fallback
-                    if (attachment is None or not attachment.strip()) and had_video:
-                        raise RuntimeError('vk_video_upload_failed_no_attachment')
+                    # If we intended to post media (image or video) but have no attachments, treat as error to avoid text-only fallback
+                    if (attachment is None or not attachment.strip()) and (had_video or had_image):
+                        raise RuntimeError('vk_media_upload_failed_no_attachment')
                 except Exception as exc:
                     attachment = None
                     if job is not None:
                         job.last_error = f"vk_attach_failed: {exc}"
                         session.add(job)
                         session.commit()
+                    # КРИТИЧНО: Если должно было быть медиа, но загрузка не удалась - прерываем весь процесс
+                    if had_image or had_video:
+                        post.status = PostStatusEnum.error
+                        post.error_text = f"VK media upload failed: {exc}"
+                        if job is not None:
+                            job.status = JobStatusEnum.error
+                            job.last_error = f"vk_media_upload_failed: {exc}"
+                        session.add(post)
+                        if job is not None:
+                            session.add(job)
+                        session.commit()
+                        return 'error'
+            # Продолжаем только если медиа не требовалось ИЛИ загрузилось успешно
             try:
                 vk = VKClient(token)
                 if attachment:
@@ -594,9 +628,10 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.commit()
                 return 'error'
         elif str(post.platform) == 'PlatformEnum.yt' or str(post.platform) == 'yt':
-            # YouTube upload for non-vertical video; add to playlist if configured
+            # YouTube upload for non-vertical video; add to playlist if configured, with logging
             from app.services.youtube_client import YouTubeClient
             from app.services.settings import load_settings
+            from loguru import logger as _logger
             cfg = load_settings()
             brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
             media_rel = None
@@ -858,6 +893,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     client_secret=(cfg.get('yt_client_secret') or '').strip(),
                 )
                 try:
+                    _logger.info(f"yt.upload start path={path} title_len={len(title or '')} desc_len={len(desc or '')}")
                     vid, url = yt.upload_video(path, title=title, description=desc)
                     post.platform_post_id = vid
                     post.platform_url = url
@@ -869,9 +905,11 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     if playlist_id and vid:
                         try:
                             yt.add_to_playlist(playlist_id, vid)
+                            _logger.info(f"yt.add_to_playlist ok playlist_id={playlist_id} video_id={vid}")
                         except Exception:
                             pass
                 except Exception as exc:
+                    _logger.error(f"yt.upload error: {exc}")
                     post.status = PostStatusEnum.error
                     post.error_text = str(exc)
                     if job is not None:

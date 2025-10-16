@@ -6,21 +6,24 @@
 
 	<section class="card">
 		<h3>Discord</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте Discord, выберите нужный сервер и текстовый канал</li>
+				<li><b>Шаг 2:</b> Настройки канала → Интеграции → Вебхуки → Создать вебхук</li>
+				<li><b>Шаг 3:</b> Скопируйте <b>URL вебхука</b> (формат: <code>https://discord.com/api/webhooks/...</code>)</li>
+				<li><b>Шаг 4:</b> Вставьте URL в поле ниже и нажмите "Save"</li>
+				<li><b>Шаг 5:</b> Проверьте кнопкой <b>"Send test"</b></li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/discord/webhook" hx-target="#discord_status" hx-swap="innerHTML">
 			<input type="text" name="url" value="{{ discord_webhook }}" placeholder="https://discord.com/api/webhooks/..." style="width:100%;" />
 			<button type="submit" class="btn btn-primary">Save</button>
 			<button type="button" class="btn" hx-post="/api/discord/test" hx-target="#discord_status" hx-swap="innerHTML">Send test</button>
 		</form>
 		<div id="discord_status"></div>
-
-		<details style="margin-top:8px;">
-			<summary>How to get a Discord Webhook URL?</summary>
-			<ol>
-				<li>In Discord, open the target text channel.</li>
-				<li>Channel Settings → Integrations → Webhooks → New webhook.</li>
-				<li>Copy the webhook URL and paste it above.</li>
-			</ol>
-		</details>
 	</section>
 
 	<section class="card">
@@ -72,13 +75,33 @@
 
 	<section class="card">
 		<h3>X / Twitter</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank">Twitter Developer Portal</a> → Projects & Apps → Создайте приложение</li>
+				<li><b>Шаг 2:</b> Включите <b>OAuth 2.0</b> (с PKCE) в настройках приложения. Скопируйте <b>Client ID</b> и <b>Client Secret</b></li>
+				<li><b>Шаг 3:</b> Redirect URI: <code>http://127.0.0.1:8000/api/accounts/callback/x</code> (для локальной разработки)</li>
+				<li><b>Шаг 4:</b> Настройте права (scopes): <code>tweet.read, tweet.write, users.read, offline.access</code></li>
+				<li><b>Шаг 5:</b> <span style="color:#d32f2f; font-weight:600;">Для загрузки медиа (фото/видео):</span> Получите OAuth 1.0a ключи:
+					<ul style="margin-top:4px;">
+						<li>Keys & tokens → API Key/Secret (Consumer Key/Secret)</li>
+						<li>Access Token & Secret (OAuth 1.0a)</li>
+					</ul>
+				</li>
+				<li><b>Шаг 6:</b> Заполните все поля ниже и нажмите "Save X settings"</li>
+				<li><b>Шаг 7:</b> Используйте кнопку <b>"Get X authorization link"</b> для OAuth 2.0 авторизации</li>
+				<li><b>Шаг 8:</b> Проверьте кнопкой <b>"Tweet (test)"</b></li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
 			<div>
-				<label>Client ID</label><br/>
+				<label>Client ID (OAuth 2.0)</label><br/>
 				<input type="text" name="x_client_id" value="{{ x_client_id }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>Client Secret</label><br/>
+				<label>Client Secret (OAuth 2.0)</label><br/>
 				<input type="text" name="x_client_secret" value="{{ x_client_secret }}" style="width:100%;" />
 			</div>
 			<div>
@@ -86,34 +109,25 @@
 				<input type="text" name="x_redirect_uri" value="{{ x_redirect_uri }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>API Key (Consumer Key)</label><br/>
+				<label>API Key / Consumer Key (OAuth 1.0a, for media upload)</label><br/>
 				<input type="text" name="x_api_key" value="{{ x_api_key }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>API Secret (Consumer Secret)</label><br/>
+				<label>API Secret / Consumer Secret (OAuth 1.0a, for media upload)</label><br/>
 				<input type="text" name="x_api_secret" value="{{ x_api_secret }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>OAuth1 Access Token</label><br/>
+				<label>OAuth1 Access Token (for media upload)</label><br/>
 				<input type="text" name="x_oauth_token" value="{{ x_oauth_token }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>OAuth1 Access Token Secret</label><br/>
+				<label>OAuth1 Access Token Secret (for media upload)</label><br/>
 				<input type="text" name="x_oauth_token_secret" value="{{ x_oauth_token_secret }}" style="width:100%;" />
 			</div>
 			<button type="submit" class="btn btn-primary">Save X settings</button>
 		</form>
 		<div id="x_status"></div>
-
-		<details style="margin-top:8px;">
-			<summary>Where to get X Client ID/Secret?</summary>
-			<ol>
-				<li>Open <a href="https://developer.twitter.com" target="_blank">Twitter Developer Portal</a> → Project → App → Keys & tokens.</li>
-				<li>Redirect URI: use http://127.0.0.1:8000/api/accounts/callback/x for local dev (or a public redirect if needed).</li>
-				<li>Enable OAuth 2.0 (with PKCE). Required scopes: tweet.read, tweet.write, users.read, offline.access.</li>
-				<li>Media upload (images/videos): you also need Consumer API Key/Secret and OAuth1 Access Token/Secret (Keys & tokens → User authentication settings → OAuth 1.0a).</li>
-			</ol>
-		</details>
+		
 		<div style="margin-top:6px;">
 			<a class="btn" href="#" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Get X authorization link</a>
 			<div id="x_auth"></div>
@@ -127,6 +141,19 @@
 
 	<section class="card">
 		<h3>YouTube Shorts</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> → Создайте проект</li>
+				<li><b>Шаг 2:</b> Включите <b>YouTube Data API v3</b> (APIs & Services → Library)</li>
+				<li><b>Шаг 3:</b> Создайте OAuth 2.0 Client (Credentials → Create Credentials → OAuth client ID → Desktop app)</li>
+				<li><b>Шаг 4:</b> Скопируйте <b>Client ID</b> и <b>Client Secret</b></li>
+				<li><b>Шаг 5:</b> Получите Access Token и Refresh Token (через локальное приложение или скрипт авторизации)</li>
+				<li><b>Шаг 6:</b> Вставьте все 4 значения в поля ниже и нажмите "Save YouTube"</li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
 			<div>
 				<label>Client ID</label><br/>
@@ -147,19 +174,30 @@
 			<button type="submit" class="btn btn-primary">Save YouTube</button>
 		</form>
 		<div id="yt_status"></div>
-
-		<details style="margin-top:8px;">
-		  <summary>How to set up YouTube API?</summary>
-		  <ol>
-				<li>Open Google Cloud Console → Create a project → Enable YouTube Data API v3.</li>
-				<li>Create an OAuth client (Desktop App) → get Client ID/Secret.</li>
-				<li>Obtain Access/Refresh tokens (via any local app/script). Paste them here.</li>
-		  </ol>
-		</details>
 	</section>
 
 	<section class="card">
 		<h3>VK</h3>
+		
+		<details open style="margin-bottom:12px; padding:12px; background:#fff3cd; border-left:4px solid #ff9800; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600; color:#856404;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.8;">
+				<li><b>Шаг 1:</b> Откройте <a href="https://dev.vk.com/apps" target="_blank">VK для разработчиков</a> → Мои приложения → Создать приложение</li>
+				<li><b>Шаг 2:</b> Скопируйте <b>Client ID</b> (ID приложения) и <b>Client Secret</b> (Защищенный ключ) в соответствующие поля ниже, нажмите "Save VK settings"</li>
+				<li><b>Шаг 3:</b> Найдите <b>Group ID</b>: откройте вашу группу ВКонтакте, в адресной строке будет <code>vk.com/club123456</code> или <code>vk.com/public123456</code> — число это ID группы</li>
+				<li style="background:#fff; padding:8px; border-radius:4px; margin:8px 0;">
+					<b>Шаг 4 (КРИТИЧНО):</b> Нажмите кнопку <b>"Get link to obtain Access Token (Implicit)"</b> ниже<br/>
+					<span style="color:#d32f2f; font-weight:600;">⚠️ ВНИМАНИЕ:</span> Токен ДОЛЖЕН иметь права: 
+					<code style="background:#f5f5f5; padding:2px 4px; border-radius:3px;">photos, wall, groups, offline, video</code><br/>
+					<span style="font-size:12px; color:#666;">Без прав <code>photos</code> и <code>video</code> загрузка медиа НЕ БУДЕТ РАБОТАТЬ!</span>
+				</li>
+				<li><b>Шаг 5:</b> После авторизации скопируйте <b>access_token</b> из адресной строки (после #access_token=...)</li>
+				<li><b>Шаг 6:</b> Вставьте токен в ОБА поля: <b>"Access Token"</b> И <b>"User Access Token"</b> (оба обязательны!)</li>
+				<li><b>Шаг 7:</b> Нажмите "Save VK settings", затем используйте кнопку <b>"Check token"</b> чтобы убедиться что токен имеет все права</li>
+				<li><b>Шаг 8:</b> Проверьте кнопкой <b>"Post to group (test)"</b></li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/settings/save" hx-target="#vk_status" hx-swap="innerHTML">
 			<div>
 				<label>Client ID</label><br/>
@@ -178,11 +216,11 @@
 				<input type="text" name="vk_redirect_uri" value="{{ vk_redirect_uri }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>Access Token (manual)</label><br/>
+				<label>Access Token (manual) <span style="color:#d32f2f;">*</span></label><br/>
 	      <input type="password" name="vk_access_token" value="" placeholder="{{ vk_token_hint }}" style="width:100%;" />
 			</div>
 			<div>
-				<label>User Access Token (manual, used for video.save)</label><br/>
+				<label>User Access Token (manual, used for photos/video upload) <span style="color:#d32f2f;">*</span></label><br/>
 	      <input type="password" name="vk_user_access_token" value="" placeholder="{{ vk_user_token_hint }}" style="width:100%;" />
 			</div>
 			<button type="submit">Save VK settings</button>
@@ -206,20 +244,31 @@
 			</form>
 			<div id="vk_token_status"></div>
 		</div>
-
-		<details style="margin-top:8px;">
-			<summary>Where to get VK Client ID/Secret and Group ID?</summary>
-			<ol>
-				<li>Open <a href="https://dev.vk.com" target="_blank">VK for Developers</a> → My apps → Create.</li>
-				<li>Copy <b>Client ID</b> and <b>Client Secret</b> from app settings.</li>
-				<li>Group ID: open your group page; URL like <code>club123456</code> — the number is the ID.</li>
-				<li>Redirect URI: you may skip and provide <b>Access Token</b> manually below if localhost fails validation.</li>
-			</ol>
-		</details>
 	</section>
 
 	<section class="card">
 		<h3>Facebook</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте <a href="https://developers.facebook.com/" target="_blank">Meta for Developers</a> → Мои приложения → Создать приложение</li>
+				<li><b>Шаг 2:</b> Выберите тип "Business" или "Other" → заполните данные приложения</li>
+				<li><b>Шаг 3:</b> Добавьте продукт "Facebook Login" в настройках приложения</li>
+				<li><b>Шаг 4:</b> Получите <b>Page Access Token</b>:
+					<ul style="margin-top:4px;">
+						<li>Tools → Graph API Explorer</li>
+						<li>Выберите вашу страницу Facebook</li>
+						<li>Добавьте права: <code>pages_manage_posts, pages_read_engagement</code></li>
+						<li>Generate Access Token → скопируйте токен</li>
+					</ul>
+				</li>
+				<li><b>Шаг 5:</b> Найдите <b>Page ID</b>: Settings вашей страницы → внизу страницы Page ID</li>
+				<li><b>Шаг 6:</b> <span style="color:#d32f2f; font-weight:600;">Важно:</span> Используйте Page Access Token (не User Token). Для загрузки медиа нужна роль админа страницы</li>
+				<li><b>Шаг 7:</b> Вставьте данные в поля ниже, нажмите "Save Facebook", затем "Test post"</li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/settings/save" hx-target="#fb_status" hx-swap="innerHTML">
 		  <div>
 				<label>RU Page ID</label><br/>
@@ -238,7 +287,6 @@
 				<input type="text" name="fb_en_page_access_token" value="{{ fb_en_page_access_token or '' }}" style="width:100%;" />
 		  </div>
 		  <button type="submit" class="btn btn-primary">Save Facebook</button>
-		  <div style="font-size:12px;color:#666;margin-top:6px;">Use a Page Access Token (with publish_pages). For media on a page you need proper role/permissions.</div>
 		</form>
 		<div id="fb_status"></div>
 		<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
@@ -250,6 +298,21 @@
 
 	<section class="card">
 		<h3>Reddit</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте <a href="https://www.reddit.com/prefs/apps" target="_blank">Reddit App Preferences</a></li>
+				<li><b>Шаг 2:</b> Нажмите "create another app..." → Выберите тип <b>"script"</b></li>
+				<li><b>Шаг 3:</b> Заполните название, redirect uri: <code>http://localhost:8080</code></li>
+				<li><b>Шаг 4:</b> Скопируйте <b>Client ID</b> (под названием приложения) и <b>Client Secret</b></li>
+				<li><b>Шаг 5:</b> Укажите ваш Reddit <b>Username</b> и <b>Password</b></li>
+				<li><b>Шаг 6:</b> Укажите название <b>Subreddit</b> (без r/, например: <code>gamedev</code>)</li>
+				<li><b>Шаг 7:</b> Убедитесь что у вас есть права на постинг в указанном subreddit</li>
+				<li><b>Шаг 8:</b> Нажмите "Save Reddit"</li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/settings/save" hx-target="#rd_status" hx-swap="innerHTML">
 		  <div>
 				<label>Client ID</label><br/>
@@ -268,17 +331,34 @@
 				<input type="password" name="reddit_password" value="" placeholder="••••" style="width:100%;" />
 		  </div>
 		  <div>
-				<label>Subreddit (EN)</label><br/>
-				<input type="text" name="reddit_subreddit_en" value="{{ reddit_subreddit_en or '' }}" style="width:100%;" />
+				<label>Subreddit (EN, без r/)</label><br/>
+				<input type="text" name="reddit_subreddit_en" value="{{ reddit_subreddit_en or '' }}" placeholder="gamedev" style="width:100%;" />
 		  </div>
 		  <button type="submit" class="btn btn-primary">Save Reddit</button>
-		  <div style="font-size:12px;color:#666;margin-top:6px;">Requires a Reddit Script App (installed app). Ensure subreddits allow posting.</div>
 		</form>
 		<div id="rd_status"></div>
 	</section>
 
 	<section class="card">
 		<h3>Telegram</h3>
+		
+		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
+			<ol style="margin-top:8px; line-height:1.6;">
+				<li><b>Шаг 1:</b> Откройте Telegram, найдите бота <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
+				<li><b>Шаг 2:</b> Отправьте команду <code>/newbot</code> и следуйте инструкциям</li>
+				<li><b>Шаг 3:</b> Скопируйте <b>Bot Token</b> (формат: <code>123456789:ABCdefGHIjklMNOpqrsTUVwxyz</code>)</li>
+				<li><b>Шаг 4:</b> Добавьте бота в вашу группу/канал и дайте права на отправку сообщений</li>
+				<li><b>Шаг 5:</b> Получите Chat ID:
+					<ul style="margin-top:4px;">
+						<li>Добавьте <a href="https://t.me/RawDataBot" target="_blank">@RawDataBot</a> в группу → он покажет chat_id</li>
+						<li>Или используйте метод getUpdates API</li>
+					</ul>
+				</li>
+				<li><b>Шаг 6:</b> Вставьте Bot Token и Chat ID в поля ниже, нажмите "Save Telegram"</li>
+			</ol>
+		</details>
+		
 		<form hx-post="/api/settings/save" hx-target="#tg_status" hx-swap="innerHTML">
 		  <div>
 				<label>Bot Token</label><br/>
@@ -291,14 +371,6 @@
 		  <button type="submit" class="btn btn-primary">Save Telegram</button>
 		</form>
 		<div id="tg_status"></div>
-		<details style="margin-top:8px;">
-		  <summary>How to get Bot Token and Chat ID?</summary>
-		  <ol>
-				<li>Create a bot via @BotFather → get the token.</li>
-				<li>Add the bot to a group/channel and grant posting permission.</li>
-				<li>Find chat_id: add @RawDataBot or use getUpdates API after sending a message.</li>
-		  </ol>
-		</details>
 	</section>
 
 </div>

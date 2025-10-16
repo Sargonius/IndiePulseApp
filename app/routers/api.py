@@ -255,6 +255,7 @@ def save_news_draft(
     scheduled_at: Optional[str] = Form(None),
     platforms: Optional[List[str]] = Form(None),
     reddit_sentences: Optional[int] = Form(None),
+    yt_title: Optional[str] = Form(None),
 ):
     payload = {}
     if text_ru is not None:
@@ -273,6 +274,8 @@ def save_news_draft(
             payload["reddit_sentences"] = n
         except Exception:
             pass
+    if yt_title is not None:
+        payload["yt_title"] = yt_title
     if payload:
         save_draft(payload)
     return HTMLResponse("<span style='color:green'>Черновик сохранён</span>")
@@ -809,7 +812,7 @@ def vk_connect_start():
     redirect_uri = (cfg.get("vk_redirect_uri") or "").strip()
     if not client_id or not redirect_uri:
         return HTMLResponse("<span style='color:orange'>Заполните Client ID и Redirect URI, затем сохраните настройки</span>", status_code=400)
-    scope = "wall,offline,groups,video"
+    scope = "wall,offline,groups,photos,video"
     auth_url = (
         "https://oauth.vk.com/authorize?"
         f"client_id={quote_plus(client_id)}&display=page&redirect_uri={quote_plus(redirect_uri)}"
@@ -1030,16 +1033,18 @@ def vk_implicit_url():
         return HTMLResponse("<span style='color:orange'>Укажите VK Client ID и сохраните настройки</span>", status_code=400)
     # Use VK's blank.html so the token is visible in the URL fragment for copy-paste
     redirect_uri = "https://oauth.vk.com/blank.html"
-    scope = "wall,groups,offline,video"
+    scope = "wall,groups,offline,photos,video"
     url = (
         "https://oauth.vk.com/authorize?"
         f"client_id={quote_plus(client_id)}&display=page&redirect_uri={quote_plus(redirect_uri)}"
         f"&response_type=token&v=5.199&scope={quote_plus(scope)}"
     )
     html = (
-        f"<div>\n"
-        f"<a href='{url}' target='_blank'>Открыть ссылку для получения Access Token (Implicit Flow)</a><br/>\n"
-        f"После авторизации скопируйте значение access_token из адресной строки (после #access_token=...). Вставьте его в поле Access Token и сохраните.\n"
+        f"<div style='padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px;'>\n"
+        f"<p style='margin:0 0 8px 0; font-weight:600; color:#856404;'>⚠️ ВАЖНО: Токен должен иметь права</p>\n"
+        f"<p style='margin:0 0 12px 0; font-family:monospace; background:#fff; padding:6px; border-radius:3px;'>{scope}</p>\n"
+        f"<a class='btn btn-primary' href='{url}' target='_blank' style='display:inline-block; margin-bottom:8px;'>Открыть ссылку для получения Access Token</a><br/>\n"
+        f"<p style='margin:8px 0 0 0; font-size:13px; color:#666;'>После авторизации скопируйте значение <b>access_token</b> из адресной строки (после #access_token=...). Вставьте его в поле <b>Access Token</b> и <b>User Access Token</b> (оба поля!) и сохраните.</p>\n"
         f"</div>"
     )
     return HTMLResponse(html)
@@ -1053,14 +1058,41 @@ def vk_check_token(token: str = Form("")):
         return HTMLResponse("<span style='color:orange'>Токен не задан</span>")
     try:
         with httpx.Client(timeout=10) as client:
+            # Проверяем валидность токена и получаем информацию о правах
             r = client.get("https://api.vk.com/method/users.get", params={"access_token": tok, "v": "5.199"})
             data = r.json()
+            
+            if isinstance(data, dict) and "error" in data:
+                err = data.get("error", {})
+                return HTMLResponse(f"<span style='color:red'>Ошибка VK [{err.get('error_code')}]: {err.get('error_msg')}</span>")
+            
+            # Проверяем права токена через apps.getScopes
+            r2 = client.get("https://api.vk.com/method/apps.getScopes", params={
+                "access_token": tok,
+                "type": "user",
+                "v": "5.199"
+            })
+            scopes_data = r2.json()
+            
+            scopes_info = ""
+            if isinstance(scopes_data, dict) and "response" in scopes_data:
+                items = scopes_data.get("response", {}).get("items", [])
+                scope_names = [item.get("name") for item in items if item.get("name")]
+                
+                required = {"photos", "wall", "groups", "video", "offline"}
+                has_scopes = set(scope_names)
+                missing = required - has_scopes
+                
+                if missing:
+                    scopes_info = f"<br/><span style='color:#ff9800;'>⚠️ Отсутствуют права: {', '.join(missing)}</span>"
+                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Текущие права: {', '.join(scope_names) if scope_names else 'нет данных'}</span>"
+                else:
+                    scopes_info = f"<br/><span style='color:#4caf50;'>✓ Все необходимые права присутствуют</span>"
+                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Права: {', '.join(scope_names)}</span>"
+            
+            return HTMLResponse(f"<span style='color:green'>Токен валиден</span>{scopes_info}")
     except Exception as exc:
         return HTMLResponse(f"<span style='color:red'>Сетевой сбой: {str(exc)}</span>")
-    if isinstance(data, dict) and "error" in data:
-        err = data.get("error", {})
-        return HTMLResponse(f"<span style='color:red'>Ошибка VK [{err.get('error_code')}]: {err.get('error_msg')}</span>")
-    return HTMLResponse("<span style='color:green'>Токен валиден</span>")
 
 
 @router.post("/facebook/test")

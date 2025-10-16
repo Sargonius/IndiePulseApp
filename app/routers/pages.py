@@ -313,6 +313,12 @@ def submit_news(
         save_draft({"reddit_sentences": n})
     except Exception:
         pass
+    # Persist YouTube header/title in draft
+    try:
+        if (yt_title or '').strip():
+            save_draft({"yt_title": (yt_title or '').strip()})
+    except Exception:
+        pass
 
     brief = Brief(
         user_id=1,
