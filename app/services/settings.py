@@ -62,6 +62,11 @@ DEFAULTS: Dict[str, Any] = {
     "tg_chat_id_ru": "",
     # TikTok (placeholder for export-based workflow)
     "tiktok_export_dir": "render",
+    "tiktok_client_key": "",
+    "tiktok_client_secret": "",
+    "tiktok_access_token": "",
+    "tiktok_refresh_token": "",
+    "tiktok_token_expires_at": 0,
     # OpenAI (optional for translation)
     "openai_api_key": "",
     "openai_model": "gpt-4o-mini",

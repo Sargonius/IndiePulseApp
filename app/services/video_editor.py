@@ -212,6 +212,370 @@ def install_ffmpeg_win() -> str:
     return ffmpeg_dest
 
 
+def _probe_video_info(video_path: str) -> dict:
+    """Probe video file and return info (duration, bitrate, resolution)."""
+    try:
+        import subprocess, json, os as _os
+        ffmpeg = _ffmpeg_path()
+        if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
+            base_dir = _os.path.dirname(ffmpeg)
+            exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
+            ffprobe = _os.path.join(base_dir, exe)
+        else:
+            ffprobe = "ffprobe"
+        
+        args = [
+            ffprobe,
+            "-v", "error",
+            "-show_entries", "format=duration,bit_rate:stream=width,height,codec_type",
+            "-of", "json",
+            video_path,
+        ]
+        out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True)
+        data = json.loads(out)
+        
+        # Extract info
+        format_info = data.get("format", {})
+        duration = float(format_info.get("duration", 0))
+        bitrate = int(format_info.get("bit_rate", 0))
+        
+        # Find video stream
+        width, height = 0, 0
+        for stream in data.get("streams", []):
+            if stream.get("codec_type") == "video":
+                width = int(stream.get("width", 0))
+                height = int(stream.get("height", 0))
+                break
+        
+        return {
+            "duration": duration,
+            "bitrate": bitrate,
+            "width": width,
+            "height": height,
+        }
+    except Exception:
+        return {"duration": 0, "bitrate": 0, "width": 0, "height": 0}
+
+
+def compress_video_to_size(
+    input_path: str,
+    output_path: str,
+    max_size_mb: int,
+    resolution_fallback: bool = True
+) -> bool:
+    """
+    Compress video to fit within max_size_mb.
+    Strategy: reduce bitrate first, then resolution if still too large.
+    Returns True if successful, False if failed to compress below limit.
+    """
+    ffmpeg = _ffmpeg_path()
+    
+    # Check current size
+    current_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+    if current_size_mb <= max_size_mb:
+        # Already small enough, just copy
+        import shutil
+        shutil.copy2(input_path, output_path)
+        return True
+    
+    # Probe video info
+    info = _probe_video_info(input_path)
+    duration = info["duration"]
+    if duration <= 0:
+        return False
+    
+    # Calculate target bitrate (90% of theoretical max to leave room for overhead)
+    target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.9)
+    
+    # Try 1: Reduce bitrate, keep resolution
+    try:
+        cmd = [
+            ffmpeg, "-y", "-i", input_path,
+            "-c:v", "libx264",
+            "-b:v", f"{target_bitrate_kbps}k",
+            "-maxrate", f"{target_bitrate_kbps}k",
+            "-bufsize", f"{target_bitrate_kbps * 2}k",
+            "-preset", "veryfast",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            output_path,
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode == 0:
+            output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+            if output_size_mb <= max_size_mb:
+                return True
+    except Exception:
+        pass
+    
+    # Try 2: Reduce to 720p if resolution_fallback enabled
+    if resolution_fallback and info["height"] > 720:
+        try:
+            # Re-calculate bitrate for 720p
+            target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.85)
+            cmd = [
+                ffmpeg, "-y", "-i", input_path,
+                "-vf", "scale=-2:720",
+                "-c:v", "libx264",
+                "-b:v", f"{target_bitrate_kbps}k",
+                "-maxrate", f"{target_bitrate_kbps}k",
+                "-bufsize", f"{target_bitrate_kbps * 2}k",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-c:a", "aac",
+                "-b:a", "96k",
+                output_path,
+            ]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0:
+                output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                if output_size_mb <= max_size_mb:
+                    return True
+        except Exception:
+            pass
+    
+    # Try 3: Reduce to 480p as last resort
+    if resolution_fallback and info["height"] > 480:
+        try:
+            target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.80)
+            cmd = [
+                ffmpeg, "-y", "-i", input_path,
+                "-vf", "scale=-2:480",
+                "-c:v", "libx264",
+                "-b:v", f"{target_bitrate_kbps}k",
+                "-maxrate", f"{target_bitrate_kbps}k",
+                "-bufsize", f"{target_bitrate_kbps * 2}k",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-c:a", "aac",
+                "-b:a", "64k",
+                output_path,
+            ]
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if proc.returncode == 0:
+                output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                if output_size_mb <= max_size_mb:
+                    return True
+        except Exception:
+            pass
+    
+    return False
+
+
+def ensure_video_size_limit(
+    video_path: str,
+    platform: str,
+    settings: dict
+) -> str:
+    """
+    Ensure video fits platform size limits. Compresses if needed.
+    Returns path to video (original or compressed).
+    """
+    # Platform size limits in MB
+    limits = {
+        'discord': int(settings.get('discord_max_upload_mb', 50)),
+        'telegram': 50,
+        'tg': 50,
+        'vk': 200,
+        'x': 512,
+        'reddit': 1024,
+        'tiktok': 287,
+        'yt': 256,  # For Shorts
+        'fb_ru': 1024,
+        'fb_en': 1024,
+    }
+    
+    max_size_mb = limits.get(platform, 100)
+    current_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+    
+    if current_size_mb <= max_size_mb:
+        return video_path
+    
+    # Need to compress
+    base_name = os.path.basename(video_path)
+    name_no_ext = os.path.splitext(base_name)[0]
+    ext = os.path.splitext(base_name)[1]
+    compressed_path = os.path.join(
+        os.path.dirname(video_path),
+        f"{name_no_ext}_compressed{ext}"
+    )
+    
+    success = compress_video_to_size(video_path, compressed_path, max_size_mb, resolution_fallback=True)
+    
+    if success and os.path.exists(compressed_path):
+        return compressed_path
+    else:
+        # Compression failed, return original and let caller handle error
+        return video_path
+
+
+def render_horizontal_with_music(
+    input_video: str,
+    output_video: str,
+    resolution: str = "1080p",
+    crop_x_pct: float = 0.5,
+    crop_y_pct: float = 0.5,
+    music_path: Optional[str] = None,
+    music_offset_s: float = 0.0,
+    fade_in_s: float = 1.0,
+    fade_out_s: float = 1.0,
+    start_time: float = 0.0,
+    end_time: float = 0.0,
+    zoom: float = 1.0,
+) -> None:
+    """
+    Render a horizontal 16:9 video from any source.
+    Resolution: "1080p" (1920x1080) or "720p" (1280x720).
+    Steps: scale to target height, crop to 16:9 using provided offsets, optional music mix with fades.
+    """
+    ffmpeg = _ffmpeg_path()
+    
+    # Determine target resolution
+    if resolution == "720p":
+        target_w, target_h = 1280, 720
+    else:  # default to 1080p
+        target_w, target_h = 1920, 1080
+    
+    def _probe_duration_seconds(path: str) -> float:
+        """Return media duration in seconds using ffprobe; 0.0 on failure."""
+        try:
+            import subprocess, json, os as _os
+            if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
+                base_dir = _os.path.dirname(ffmpeg)
+                exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
+                ffprobe = _os.path.join(base_dir, exe)
+            else:
+                ffprobe = "ffprobe"
+            args = [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "format=duration",
+                "-of", "default=nk=1:nw=1",
+                path,
+            ]
+            out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True).strip()
+            return float(out)
+        except Exception:
+            return 0.0
+
+    def _probe_has_audio(path: str) -> bool:
+        """Return True if input has at least one audio stream."""
+        try:
+            import subprocess, os as _os
+            if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
+                base_dir = _os.path.dirname(ffmpeg)
+                exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
+                ffprobe = _os.path.join(base_dir, exe)
+            else:
+                ffprobe = "ffprobe"
+            args = [
+                ffprobe,
+                "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=index",
+                "-of", "csv=p=0",
+                path,
+            ]
+            out = subprocess.check_output(args, stderr=subprocess.STDOUT, text=True).strip()
+            return bool(out)
+        except Exception:
+            return False
+
+    # Build filtergraph: scale and crop to 16:9
+    try:
+        z = max(1.0, min(float(zoom), 8.0))
+    except Exception:
+        z = 1.0
+    
+    # Scale height to target*zoom, then crop to target_w x target_h
+    scaled_h = int(target_h * z)
+    scale = f"scale=-2:{scaled_h}"
+    crop = f"crop={target_w}:{target_h}:((in_w-{target_w})*{max(0.0, min(1.0, crop_x_pct))}):((in_h-{target_h})*{max(0.0, min(1.0, crop_y_pct))})"
+    
+    vf = f"{scale},{crop}"
+
+    # Add input trimming if start/end times are specified
+    input_args = ["-y"]
+    if start_time > 0 or end_time > 0:
+        if end_time > 0:
+            duration = end_time - start_time
+            input_args.extend(["-ss", str(start_time), "-t", str(duration), "-i", input_video])
+        else:
+            input_args.extend(["-ss", str(start_time), "-i", input_video])
+    else:
+        input_args.extend(["-i", input_video])
+    
+    cmd = [ffmpeg] + input_args
+    
+    # Determine render duration for correct fade-out timing
+    if end_time and end_time > start_time:
+        render_duration = max(0.0, float(end_time - start_time))
+    else:
+        render_duration = _probe_duration_seconds(input_video)
+
+    has_audio = _probe_has_audio(input_video)
+
+    if music_path and os.path.exists(music_path):
+        # Audio filter with music
+        delay_ms = max(0, int(music_offset_s * 1000))
+        music_chain = f"[1:a]adelay={delay_ms}|{delay_ms}[am]"
+        fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
+
+        post_fades = []
+        if fade_in_s and float(fade_in_s) > 0:
+            post_fades.append(f"afade=t=in:st=0:d={float(fade_in_s)}")
+        if fade_out_s and float(fade_out_s) > 0:
+            post_fades.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
+        post_chain = ",".join(post_fades) if post_fades else "anull"
+
+        if has_audio:
+            fc = (
+                f"[0:v]{vf}[v];"
+                f"{music_chain};"
+                f"[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a0];"
+                f"[a0]{post_chain}[a]"
+            )
+            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        else:
+            fc = (
+                f"[0:v]{vf}[v];"
+                f"{music_chain};"
+                f"[am]{post_chain}[a]"
+            )
+            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+    else:
+        # No external music
+        if has_audio and ((fade_in_s and fade_in_s > 0) or (fade_out_s and fade_out_s > 0)):
+            fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
+            parts = []
+            if fade_in_s and float(fade_in_s) > 0:
+                parts.append(f"afade=t=in:st=0:d={float(fade_in_s)}")
+            if fade_out_s and float(fade_out_s) > 0:
+                parts.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
+            post_chain = ",".join(parts) if parts else "anull"
+            fc = f"[0:v]{vf}[v];[0:a]{post_chain}[a]"
+            cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        else:
+            cmd += ["-vf", vf]
+
+    # Output settings
+    cmd += [
+        "-c:v", "libx264", "-profile:v", "high", "-level", "4.2", "-pix_fmt", "yuv420p",
+        "-preset", "veryfast", "-crf", "22",
+        "-movflags", "+faststart",
+        output_video,
+    ]
+
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed: {proc.stderr[-1000:]}")
+
+
 def render_vertical_with_music(
     input_video: str,
     output_video: str,

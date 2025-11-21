@@ -1025,6 +1025,120 @@ def x_test_tweet(text: str = Form("Hello from IndiePulse")):
     return HTMLResponse(f"<span style='color:green'>Опубликовано: <a href='{url}' target='_blank'>ссылка</a></span>")
 
 
+# TikTok OAuth 2.0
+@router.get("/accounts/connect/tiktok")
+def tiktok_connect_start():
+    """Start TikTok OAuth flow."""
+    cfg = load_settings()
+    client_key = (cfg.get("tiktok_client_key") or "").strip()
+    if not client_key:
+        return HTMLResponse("<span style='color:orange'>Configure TikTok Client Key in settings</span>")
+    
+    # TikTok OAuth URL (adjust redirect_uri as needed)
+    redirect_uri = "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    scope = "user.info.basic,video.publish,video.upload"
+    state = "tiktok_oauth_state"  # In production, use random state and store it
+    
+    # Save state for verification
+    save_settings({"tiktok_oauth_state": state})
+    
+    auth_url = (
+        f"https://www.tiktok.com/v2/auth/authorize?"
+        f"client_key={quote_plus(client_key)}&"
+        f"response_type=code&"
+        f"scope={quote_plus(scope)}&"
+        f"redirect_uri={quote_plus(redirect_uri)}&"
+        f"state={state}"
+    )
+    
+    return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Open TikTok Authorization</a>")
+
+
+@router.get("/accounts/callback/tiktok")
+def tiktok_callback(code: str, state: str = ""):
+    """Handle TikTok OAuth callback."""
+    cfg = load_settings()
+    client_key = cfg.get("tiktok_client_key", "")
+    client_secret = cfg.get("tiktok_client_secret", "")
+    
+    if not client_key or not client_secret:
+        return HTMLResponse("<span style='color:red'>TikTok credentials not configured</span>", status_code=400)
+    
+    # Verify state (basic check)
+    saved_state = cfg.get("tiktok_oauth_state", "")
+    if state != saved_state:
+        return HTMLResponse("<span style='color:red'>Invalid OAuth state</span>", status_code=400)
+    
+    # Exchange code for access token
+    token_url = "https://open.tiktokapis.com/v2/oauth/token/"
+    redirect_uri = "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    
+    payload = {
+        "client_key": client_key,
+        "client_secret": client_secret,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+    }
+    
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    
+    try:
+        with httpx.Client(timeout=20) as client:
+            r = client.post(token_url, data=payload, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        
+        # TikTok returns access_token, refresh_token, expires_in
+        access_token = data.get("access_token", "")
+        refresh_token = data.get("refresh_token", "")
+        expires_in = int(data.get("expires_in", 0))
+        
+        if not access_token:
+            return HTMLResponse(f"<span style='color:red'>No access token: {data}</span>", status_code=400)
+        
+        from time import time as _now
+        save_settings({
+            "tiktok_access_token": access_token,
+            "tiktok_refresh_token": refresh_token,
+            "tiktok_token_expires_at": int(_now()) + expires_in,
+        })
+        
+        return HTMLResponse("<span style='color:green'>TikTok connected successfully!</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>TikTok OAuth error: {str(exc)}</span>", status_code=500)
+
+
+@router.post("/tiktok/test")
+def tiktok_test():
+    """Test TikTok API connection (check token validity)."""
+    cfg = load_settings()
+    access_token = (cfg.get("tiktok_access_token") or "").strip()
+    
+    if not access_token:
+        return HTMLResponse("<span style='color:orange'>TikTok not connected</span>")
+    
+    # Test API call - get user info
+    try:
+        url = "https://open.tiktokapis.com/v2/user/info/"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        
+        with httpx.Client(timeout=15) as client:
+            r = client.get(url, headers=headers, params={"fields": "open_id,union_id,avatar_url"})
+            data = r.json()
+        
+        if r.status_code >= 400 or data.get("error", {}).get("code") != "ok":
+            return HTMLResponse(f"<span style='color:red'>TikTok API error: {data}</span>")
+        
+        user_info = data.get("data", {}).get("user", {})
+        return HTMLResponse(f"<span style='color:green'>TikTok connected. User: {user_info.get('open_id', 'unknown')}</span>")
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>TikTok test failed: {str(exc)}</span>")
+
+
 @router.get("/vk/implicit_url")
 def vk_implicit_url():
     cfg = load_settings()
@@ -1463,8 +1577,68 @@ def video_render_vertical(
     )
     # Return relative path for preview/download
     rel = out_path.replace('\\','/')
-    # Hidden field expects a path relative to media folder (filename)
-    return {"output_path": rel, "output_rel": os.path.basename(rel), "output_url": f"/media/{os.path.basename(rel)}"}
+    rel_basename = os.path.basename(rel)
+    # Save to draft as media_vertical_path
+    save_draft({"media_vertical_path": rel_basename})
+    return {"output_path": rel, "output_rel": rel_basename, "output_url": f"/media/{rel_basename}"}
+
+
+@router.post("/video/render_horizontal")
+def video_render_horizontal(
+    video: UploadFile = File(...),
+    music: UploadFile = File(None),
+    resolution: str = Form("1080p"),
+    crop_x_pct: float = Form(0.5),
+    crop_y_pct: float = Form(0.5),
+    music_offset_s: float = Form(0.0),
+    fade_in_s: float = Form(1.0),
+    fade_out_s: float = Form(1.0),
+    start_time: float = Form(0.0),
+    end_time: float = Form(0.0),
+    zoom: float = Form(1.0),
+):
+    """Render horizontal 16:9 video with optional music and effects."""
+    os.makedirs('render', exist_ok=True)
+    os.makedirs('media', exist_ok=True)
+    # Save inputs
+    base = str(int(time.time()))
+    safe_video_name = video.filename.replace('\\','/').split('/')[-1]
+    video_path = os.path.join('render', f"{base}_src_{safe_video_name}")
+    with open(video_path, 'wb') as f:
+        f.write(video.file.read())
+    music_path = None
+    if music is not None:
+        safe_music_name = music.filename.replace('\\','/').split('/')[-1]
+        music_path = os.path.join('render', f"{base}_music_{safe_music_name}")
+        with open(music_path, 'wb') as f:
+            f.write(music.file.read())
+    
+    # Import the new function
+    from app.services.video_editor import render_horizontal_with_music
+    
+    # Write final output into media so it is web-accessible
+    res_suffix = resolution.replace('p', '') if resolution else '1080'
+    out_path = os.path.join('media', f"{base}_horizontal_{res_suffix}p.mp4")
+    render_horizontal_with_music(
+        input_video=video_path,
+        output_video=out_path,
+        resolution=resolution,
+        crop_x_pct=crop_x_pct,
+        crop_y_pct=crop_y_pct,
+        music_path=music_path,
+        music_offset_s=music_offset_s,
+        fade_in_s=fade_in_s,
+        fade_out_s=fade_out_s,
+        start_time=start_time,
+        end_time=end_time,
+        zoom=zoom,
+    )
+    # Return relative path for preview/download
+    rel = out_path.replace('\\','/')
+    rel_basename = os.path.basename(rel)
+    # Save to draft as media_normal_path (for horizontal platforms)
+    save_draft({"media_normal_path": rel_basename})
+    return {"output_path": rel, "output_rel": rel_basename, "output_url": f"/media/{rel_basename}"}
 
 
 @router.post("/video/install_ffmpeg")
@@ -1482,6 +1656,7 @@ def video_install_ffmpeg():
 
 @router.get("/music/list")
 def music_list():
+    """List all music files in configured music directory with metadata."""
     try:
         cfg = load_settings()
         base = (cfg.get("music_dir") or "").strip()
@@ -1498,10 +1673,31 @@ def music_list():
                 continue
             ext = os.path.splitext(name)[1].lower()
             if ext in exts:
-                items.append({"name": name, "path": p})
+                # Get duration using pydub
+                try:
+                    from pydub import AudioSegment
+                    seg = AudioSegment.from_file(p)
+                    duration_ms = len(seg)
+                    duration_sec = duration_ms / 1000.0
+                except Exception:
+                    duration_ms = 0
+                    duration_sec = 0.0
+                
+                items.append({
+                    "name": name,
+                    "path": p,
+                    "duration_ms": duration_ms,
+                    "duration_sec": round(duration_sec, 2),
+                })
         return {"ok": True, "tracks": items}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@router.get("/music/scan")
+def music_scan():
+    """Alias for music/list - scans music directory and returns track list with metadata."""
+    return music_list()
 
 
 @router.get("/music/waveform")

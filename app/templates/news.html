@@ -99,6 +99,65 @@
 	</div>
 </form>
 
+<!-- Video Render Section -->
+<div style="margin-top:24px; padding:16px; border:2px solid #cbd5e1; border-radius:8px; background:#f8fafc;">
+	<h3 style="margin-top:0;">🎬 Video Editor</h3>
+	<div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+		<div style="min-width:320px;">
+			<div style="margin-bottom:12px;">
+				<label>Source Video:</label><br/>
+				<input type="file" id="render_video_input" accept="video/*" />
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>Music (optional):</label><br/>
+				<select id="render_music_select" style="width:300px;">
+					<option value="">No music</option>
+				</select>
+				<button type="button" class="btn" id="refresh_music_btn" style="margin-left:8px;">Refresh</button>
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>Resolution (horizontal only):</label>
+				<select id="render_resolution" style="width:120px;">
+					<option value="1080p" selected>1080p</option>
+					<option value="720p">720p</option>
+				</select>
+			</div>
+		</div>
+		<div style="min-width:320px;">
+			<div style="margin-bottom:12px;">
+				<label>Crop X: <span id="crop_x_value">50</span>%</label><br/>
+				<input type="range" id="crop_x_slider" min="0" max="100" value="50" style="width:300px;" />
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>Crop Y: <span id="crop_y_value">50</span>%</label><br/>
+				<input type="range" id="crop_y_slider" min="0" max="100" value="50" style="width:300px;" />
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>Zoom: <span id="zoom_value">1.0</span>x</label><br/>
+				<input type="range" id="zoom_slider" min="100" max="200" value="100" style="width:300px;" />
+			</div>
+		</div>
+		<div style="min-width:320px;">
+			<div style="margin-bottom:12px;">
+				<label>Music Offset (seconds): <span id="music_offset_value">0.0</span></label><br/>
+				<input type="range" id="music_offset_slider" min="0" max="30" value="0" step="0.5" style="width:300px;" />
+			</div>
+			<div style="margin-bottom:12px;">
+				<label>Fade In (seconds): </label>
+				<input type="number" id="fade_in_input" value="1.0" min="0" max="10" step="0.5" style="width:80px;" />
+				<label style="margin-left:16px;">Fade Out (seconds): </label>
+				<input type="number" id="fade_out_input" value="1.0" min="0" max="10" step="0.5" style="width:80px;" />
+			</div>
+		</div>
+	</div>
+	<div style="margin-top:16px; display:flex; gap:8px; align-items:center;">
+		<button type="button" class="btn btn-primary" id="render_horizontal_btn">Render Horizontal (16:9)</button>
+		<button type="button" class="btn btn-primary" id="render_vertical_btn">Render Vertical (9:16)</button>
+		<span id="render_status" style="margin-left:12px; color:#666;"></span>
+	</div>
+</div>
+
+<h3 style="margin-top:24px;">📱 Platform Previews</h3>
 <div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;">
   <div class="card" style="min-width:320px;max-width:480px;">
     <div style="font-weight:600;margin-bottom:8px;">X / Twitter (preview)</div>
@@ -1370,6 +1429,179 @@ document.getElementById('pick_next_evening_tmr')?.addEventListener('click', () =
   const t = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 20, 0, 0);
   setLocal(t);
 });
+
+// Video Render UI handlers
+(function() {
+  // Slider updates
+  document.getElementById('crop_x_slider')?.addEventListener('input', (e) => {
+    document.getElementById('crop_x_value').textContent = e.target.value;
+  });
+  document.getElementById('crop_y_slider')?.addEventListener('input', (e) => {
+    document.getElementById('crop_y_value').textContent = e.target.value;
+  });
+  document.getElementById('zoom_slider')?.addEventListener('input', (e) => {
+    const zoom = e.target.value / 100;
+    document.getElementById('zoom_value').textContent = zoom.toFixed(1);
+  });
+  document.getElementById('music_offset_slider')?.addEventListener('input', (e) => {
+    document.getElementById('music_offset_value').textContent = e.target.value;
+  });
+  
+  // Load music list
+  async function loadMusicList() {
+    try {
+      const resp = await fetch('/api/music/list');
+      const data = await resp.json();
+      const select = document.getElementById('render_music_select');
+      if (!select) return;
+      
+      // Clear options
+      select.innerHTML = '<option value="">No music</option>';
+      
+      if (data.ok && data.tracks && data.tracks.length > 0) {
+        data.tracks.forEach(track => {
+          const opt = document.createElement('option');
+          opt.value = track.path;
+          opt.textContent = track.name + (track.duration_sec ? ` (${track.duration_sec}s)` : '');
+          select.appendChild(opt);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to load music list:', err);
+    }
+  }
+  
+  // Refresh music button
+  document.getElementById('refresh_music_btn')?.addEventListener('click', loadMusicList);
+  
+  // Load music on page load
+  loadMusicList();
+  
+  // Render horizontal
+  document.getElementById('render_horizontal_btn')?.addEventListener('click', async () => {
+    const videoInput = document.getElementById('render_video_input');
+    if (!videoInput || !videoInput.files || !videoInput.files.length) {
+      alert('Please select a source video first');
+      return;
+    }
+    
+    const status = document.getElementById('render_status');
+    status.textContent = 'Rendering horizontal video...';
+    status.style.color = '#666';
+    
+    const formData = new FormData();
+    formData.append('video', videoInput.files[0]);
+    
+    const musicSelect = document.getElementById('render_music_select');
+    if (musicSelect && musicSelect.value) {
+      // Need to fetch music file and append
+      // For now, just send path in params or skip
+    }
+    
+    formData.append('resolution', document.getElementById('render_resolution').value);
+    formData.append('crop_x_pct', parseFloat(document.getElementById('crop_x_slider').value) / 100);
+    formData.append('crop_y_pct', parseFloat(document.getElementById('crop_y_slider').value) / 100);
+    formData.append('zoom', parseFloat(document.getElementById('zoom_slider').value) / 100);
+    formData.append('music_offset_s', parseFloat(document.getElementById('music_offset_slider').value));
+    formData.append('fade_in_s', parseFloat(document.getElementById('fade_in_input').value));
+    formData.append('fade_out_s', parseFloat(document.getElementById('fade_out_input').value));
+    
+    try {
+      const resp = await fetch('/api/video/render_horizontal', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await resp.json();
+      
+      if (data.output_url) {
+        status.textContent = 'Horizontal video rendered! ✓';
+        status.style.color = 'green';
+        
+        // Update normal video preview
+        const prevN = document.getElementById('preview_normal');
+        if (prevN) {
+          const v = document.createElement('video');
+          v.src = data.output_url;
+          v.controls = true;
+          v.style.maxWidth = '320px';
+          v.style.maxHeight = '180px';
+          prevN.innerHTML = '';
+          prevN.appendChild(v);
+        }
+        
+        // Update hidden field
+        const hiddenN = document.getElementById('media_normal_hidden');
+        if (hiddenN) hiddenN.value = data.output_rel;
+      } else {
+        status.textContent = 'Render failed';
+        status.style.color = 'red';
+      }
+    } catch (err) {
+      status.textContent = 'Error: ' + err.message;
+      status.style.color = 'red';
+    }
+  });
+  
+  // Render vertical
+  document.getElementById('render_vertical_btn')?.addEventListener('click', async () => {
+    const videoInput = document.getElementById('render_video_input');
+    if (!videoInput || !videoInput.files || !videoInput.files.length) {
+      alert('Please select a source video first');
+      return;
+    }
+    
+    const status = document.getElementById('render_status');
+    status.textContent = 'Rendering vertical video...';
+    status.style.color = '#666';
+    
+    const formData = new FormData();
+    formData.append('video', videoInput.files[0]);
+    
+    formData.append('crop_x_pct', parseFloat(document.getElementById('crop_x_slider').value) / 100);
+    formData.append('crop_y_pct', parseFloat(document.getElementById('crop_y_slider').value) / 100);
+    formData.append('zoom', parseFloat(document.getElementById('zoom_slider').value) / 100);
+    formData.append('music_offset_s', parseFloat(document.getElementById('music_offset_slider').value));
+    formData.append('fade_in_s', parseFloat(document.getElementById('fade_in_input').value));
+    formData.append('fade_out_s', parseFloat(document.getElementById('fade_out_input').value));
+    
+    try {
+      const resp = await fetch('/api/video/render_vertical', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await resp.json();
+      
+      if (data.output_url) {
+        status.textContent = 'Vertical video rendered! ✓';
+        status.style.color = 'green';
+        
+        // Update vertical video preview
+        const prevV = document.getElementById('preview_vertical');
+        if (prevV) {
+          const v = document.createElement('video');
+          v.src = data.output_url;
+          v.controls = true;
+          v.style.maxWidth = '320px';
+          v.style.maxHeight = '180px';
+          prevV.innerHTML = '';
+          prevV.appendChild(v);
+        }
+        
+        // Update hidden field
+        const hiddenV = document.getElementById('media_vertical_hidden');
+        if (hiddenV) hiddenV.value = data.output_rel;
+      } else {
+        status.textContent = 'Render failed';
+        status.style.color = 'red';
+      }
+    } catch (err) {
+      status.textContent = 'Error: ' + err.message;
+      status.style.color = 'red';
+    }
+  });
+})();
 </script>
 {% endblock %}
 

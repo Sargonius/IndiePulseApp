@@ -66,7 +66,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             brief = session.get(Brief, post.brief_id)
             text_ru = (brief.text_ru or '').strip() if brief else ''
             text_en = (brief.text_en or '').strip() if brief else ''
-            # Build gallery list for Discord; prefer payload.gallery, else single media
+            # Build gallery list for Discord; prefer payload.gallery, else single media (use normal/horizontal)
             gallery_files: list[str] = []
             primary_media: Optional[str] = None
             try:
@@ -92,15 +92,21 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
                 if media_rel:
                     gallery_files = [media_rel]
-            # Normalize to absolute paths
+            # Normalize to absolute paths and compress videos if needed
             if gallery_files:
-                import os as _os
+                import os as _os, mimetypes as _m
+                from app.services.video_editor import ensure_video_size_limit
                 _abs_files = []
                 for rel in gallery_files:
                     p = (rel or '').replace('\\', '/')
                     if not p.startswith('media/'):
                         p = f"media/{p}"
-                    _abs_files.append(_os.path.abspath(p))
+                    abs_path = _os.path.abspath(p)
+                    # Compress videos if needed
+                    ctype = _m.guess_type(abs_path)[0] or ''
+                    if ctype.startswith('video/'):
+                        abs_path = ensure_video_size_limit(abs_path, 'discord', settings)
+                    _abs_files.append(abs_path)
                 gallery_files = _abs_files
                 try:
                     if primary_media:
@@ -108,6 +114,10 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         if not pm.startswith('media/'):
                             pm = f"media/{pm}"
                         primary_media = _os.path.abspath(pm)
+                        # Compress primary if video
+                        ctype = _m.guess_type(primary_media)[0] or ''
+                        if ctype.startswith('video/'):
+                            primary_media = ensure_video_size_limit(primary_media, 'discord', settings)
                 except Exception:
                     primary_media = None
 
@@ -192,7 +202,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 except Exception:
                     hashtags = ''
             media_ids: list[str] = []
-            # prefer normal video/image if provided via job payload override or draft hidden field
+            # Use normal/horizontal video/image for X (Twitter)
             media_rel: Optional[str] = None
             try:
                 # Helper to build first tweet that always includes hashtags, trimming base text first
@@ -234,9 +244,10 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     except Exception:
                         override = None
                         gallery_list = []
+                # Prefer normal/horizontal media
                 media_rel = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             except Exception:
-                media_rel = getattr(brief, 'media_path', None)
+                media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             # If gallery present, upload up to 4 images (X limit); else single media if present
             gallery_media: list[str] = []
             try:
@@ -477,7 +488,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 except Exception:
                     pass
             attachment = None
-            # prefer normal media for VK (or override from job payload)
+            # Use normal/horizontal media for VK (or override from job payload)
             media_rel_vk: Optional[str] = None
             try:
                 import json as _json
@@ -491,11 +502,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     except Exception:
                         override = None
                         gallery_list = []
+                # Prefer normal/horizontal media
                 media_rel_vk = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
                 if (not media_rel_vk) and gallery_list:
                     media_rel_vk = gallery_list[0]
             except Exception:
-                media_rel_vk = getattr(brief, 'media_path', None)
+                media_rel_vk = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             if media_rel_vk or gallery_list:
                 try:
                     import os as _os, mimetypes as _m
@@ -628,7 +640,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 session.commit()
                 return 'error'
         elif str(post.platform) == 'PlatformEnum.yt' or str(post.platform) == 'yt':
-            # YouTube upload for non-vertical video; add to playlist if configured, with logging
+            # YouTube upload - use vertical for Shorts if available, otherwise normal
             from app.services.youtube_client import YouTubeClient
             from app.services.settings import load_settings
             from loguru import logger as _logger
@@ -643,8 +655,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         override = (_json.loads(job.payload_json) or {}).get('media_rel')
                     except Exception:
                         override = None
-                # Prefer normal media for regular YouTube
-                media_rel = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                # Try vertical first (for Shorts), then normal, then generic
+                media_rel = override or getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             except Exception:
                 media_rel = getattr(brief, 'media_path', None)
             if not media_rel:
@@ -728,7 +740,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     pass
             try:
                 rc = RedditClient(cid, csec, uname, pwd)
-                # choose media if present
+                # Use normal/horizontal media if present
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
                 # Prefer override and then first gallery item
                 try:
@@ -818,6 +830,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     message = (message + '\n' + brief.tags_json).strip()
                 except Exception:
                     pass
+            # Use normal/horizontal media for Facebook
             media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
             path_abs = None
             if media_rel:
@@ -921,24 +934,73 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.commit()
                     return 'error'
         else:
-            # TikTok export: copy vertical media into export dir for manual upload
+            # TikTok: try API first, fallback to export
             if str(post.platform) in ('PlatformEnum.tiktok', 'tiktok'):
                 from app.services.settings import load_settings
                 from app.models.models import Brief
                 cfg = load_settings()
-                export_dir = (cfg.get('tiktok_export_dir') or 'render').strip() or 'render'
+                access_token = (cfg.get('tiktok_access_token') or '').strip()
                 brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
+                
+                # Use vertical video
                 media_rel = getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
-                if media_rel:
-                    import os as _os, shutil as _sh
-                    p = media_rel.replace('\\','/')
-                    if not p.startswith('media/'):
-                        p = f"media/{p}"
-                    src = _os.path.abspath(p)
-                    _os.makedirs(export_dir, exist_ok=True)
-                    dst = _os.path.join(export_dir, _os.path.basename(src))
+                
+                if not media_rel:
+                    post.status = PostStatusEnum.error
+                    post.error_text = 'tiktok_no_media'
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = 'tiktok_no_media'
+                    session.add(post)
+                    if job is not None:
+                        session.add(job)
+                    session.commit()
+                    return 'error'
+                
+                import os as _os
+                p = media_rel.replace('\\','/')
+                if not p.startswith('media/'):
+                    p = f"media/{p}"
+                video_path = _os.path.abspath(p)
+                
+                # Compress video if needed (TikTok limit ~287MB)
+                from app.services.video_editor import ensure_video_size_limit
+                video_path = ensure_video_size_limit(video_path, 'tiktok', cfg)
+                
+                if access_token:
+                    # Use TikTok API
                     try:
-                        _sh.copy2(src, dst)
+                        from app.services.tiktok_client import TikTokClient
+                        title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'New Video')[:150]
+                        
+                        client = TikTokClient(access_token)
+                        publish_id, share_url = client.upload_video(
+                            file_path=video_path,
+                            title=title,
+                            privacy_level="PUBLIC_TO_EVERYONE",
+                        )
+                        
+                        post.platform_post_id = publish_id
+                        post.platform_url = share_url
+                    except Exception as exc:
+                        post.status = PostStatusEnum.error
+                        post.error_text = f"tiktok_api_failed: {exc}"
+                        if job is not None:
+                            job.status = JobStatusEnum.error
+                            job.last_error = post.error_text
+                        session.add(post)
+                        if job is not None:
+                            session.add(job)
+                        session.commit()
+                        return 'error'
+                else:
+                    # Fallback: export to directory for manual upload
+                    import shutil as _sh
+                    export_dir = (cfg.get('tiktok_export_dir') or 'render').strip() or 'render'
+                    _os.makedirs(export_dir, exist_ok=True)
+                    dst = _os.path.join(export_dir, _os.path.basename(video_path))
+                    try:
+                        _sh.copy2(video_path, dst)
                         post.platform_url = None
                     except Exception as exc:
                         post.status = PostStatusEnum.error
@@ -974,7 +1036,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     except Exception:
                         pass
                 client = TelegramClient(bot)
-                # Prefer image/video if available
+                # Prefer image/video if available (use normal/horizontal media)
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
                 # Prefer override or first gallery
                 try:
@@ -1000,6 +1062,9 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     if ctype.startswith('image/'):
                         sent = client.send_photo(chat_id, path, caption=text[:1024])
                     elif ctype.startswith('video/'):
+                        # Compress video if needed (Telegram limit 50MB)
+                        from app.services.video_editor import ensure_video_size_limit
+                        path = ensure_video_size_limit(path, 'tg', cfg)
                         sent = client.send_video(chat_id, path, caption=text[:1024])
                 if not sent:
                     sent = client.send_message(chat_id, text)

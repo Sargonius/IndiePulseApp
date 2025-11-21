@@ -20,3 +20,4 @@ praw
 deep-translator
 requests-oauthlib
 pillow
+pydub
