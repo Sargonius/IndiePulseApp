@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="calendar-header">
+	<h2>📅 Content Calendar</h2>
+	<div class="toolbar">
+		<button class="btn" id="refresh_btn">Refresh</button>
+		<button class="btn" id="today_btn">Today</button>
+		<span class="muted" id="calendar_info"></span>
+	</div>
+</div>
+
+<div id="calendar"></div>
+
+<!-- Event Detail Modal -->
+<div id="event_modal" class="modal-overlay" style="display:none;">
+	<div class="modal-content">
+		<div class="modal-header">
+			<h3 id="modal_title">Post Details</h3>
+			<button class="modal-close" onclick="closeModal()">&times;</button>
+		</div>
+		<div class="modal-body">
+			<div id="modal_thumb"></div>
+			<div class="detail-row">
+				<label>Platforms:</label>
+				<div id="modal_platforms" class="platform-list"></div>
+			</div>
+			<div class="detail-row">
+				<label>Status:</label>
+				<span id="modal_status"></span>
+			</div>
+			<div class="detail-row">
+				<label>Scheduled:</label>
+				<span id="modal_scheduled"></span>
+			</div>
+			<div class="detail-row">
+				<label>Preview:</label>
+				<div id="modal_preview" class="preview-text"></div>
+			</div>
+		</div>
+		<div class="modal-footer">
+			<button class="btn btn-primary" id="modal_publish_now" style="display:none;">Publish Now</button>
+			<button class="btn" id="modal_edit" style="display:none;">Edit</button>
+			<a id="modal_link" href="#" target="_blank" class="btn" style="display:none;">Open Post</a>
+			<button class="btn" onclick="closeModal()">Close</button>
+		</div>
+	</div>
+</div>
+
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/main.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+
+<style>
+.calendar-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 20px;
+}
+
+.calendar-header h2 {
+	margin: 0;
+}
+
+#calendar {
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 16px;
+}
+
+/* FullCalendar customizations */
+.fc {
+	font-family: inherit;
+}
+
+.fc-toolbar-title {
+	font-size: 18px !important;
+}
+
+.fc-event {
+	cursor: pointer;
+	border-radius: 4px;
+	font-size: 11px;
+	padding: 2px 4px;
+}
+
+.fc-event-title {
+	font-weight: 500;
+}
+
+/* Platform colors */
+.fc-event.platform-vk { background: #4a76a8 !important; border-color: #4a76a8 !important; }
+.fc-event.platform-x { background: #1da1f2 !important; border-color: #1da1f2 !important; }
+.fc-event.platform-discord { background: #5865f2 !important; border-color: #5865f2 !important; }
+.fc-event.platform-tg { background: #0088cc !important; border-color: #0088cc !important; }
+.fc-event.platform-reddit { background: #ff4500 !important; border-color: #ff4500 !important; }
+.fc-event.platform-fb_ru, .fc-event.platform-fb_en { background: #1877f2 !important; border-color: #1877f2 !important; }
+.fc-event.platform-yt { background: #ff0000 !important; border-color: #ff0000 !important; }
+.fc-event.platform-tiktok { background: #000000 !important; border-color: #000000 !important; }
+.fc-event.platform-multi { background: #374151 !important; border-color: #374151 !important; }
+
+/* Status indicators */
+.fc-event.status-done { opacity: 0.6; }
+.fc-event.status-error { border: 2px dashed #ef4444 !important; }
+.fc-event.status-running { animation: pulse 1.5s infinite; }
+
+@keyframes pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
+}
+
+/* Modal styles */
+.modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0,0,0,0.5);
+	z-index: 1000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.modal-content {
+	background: white;
+	border-radius: 12px;
+	width: 90%;
+	max-width: 500px;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+
+.modal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+	margin: 0;
+}
+
+.modal-close {
+	background: none;
+	border: none;
+	font-size: 24px;
+	cursor: pointer;
+	color: #666;
+}
+
+.modal-body {
+	padding: 20px;
+}
+
+.modal-footer {
+	display: flex;
+	gap: 8px;
+	padding: 16px 20px;
+	border-top: 1px solid var(--border);
+	justify-content: flex-end;
+}
+
+.detail-row {
+	margin-bottom: 12px;
+}
+
+.detail-row label {
+	font-weight: 600;
+	display: block;
+	margin-bottom: 4px;
+	color: #666;
+	font-size: 12px;
+	text-transform: uppercase;
+}
+
+#modal_thumb {
+	margin-bottom: 16px;
+}
+
+#modal_thumb img {
+	max-width: 100%;
+	max-height: 200px;
+	border-radius: 8px;
+}
+
+.preview-text {
+	white-space: pre-wrap;
+	background: #f8fafc;
+	padding: 12px;
+	border-radius: 6px;
+	font-size: 13px;
+	max-height: 150px;
+	overflow-y: auto;
+}
+.platform-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.platform-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+}
+.platform-item .badge {
+	font-size: 11px;
+}
+</style>
+
+<script>
+let calendar;
+let currentEvent = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+	const calendarEl = document.getElementById('calendar');
+	
+	calendar = new FullCalendar.Calendar(calendarEl, {
+		initialView: 'dayGridMonth',
+		headerToolbar: {
+			left: 'prev,next today',
+			center: 'title',
+			right: 'dayGridMonth,timeGridWeek,listWeek'
+		},
+		editable: true,
+		droppable: true,
+		eventStartEditable: true,
+		eventDurationEditable: false,
+		
+		events: async function(info, successCallback, failureCallback) {
+			try {
+				const params = new URLSearchParams({
+					start: info.startStr,
+					end: info.endStr
+				});
+				const resp = await fetch('/api/calendar/events?' + params.toString());
+				const data = await resp.json();
+				successCallback(data.events || []);
+				updateInfo(data.events || []);
+			} catch (e) {
+				failureCallback(e);
+			}
+		},
+		
+		eventClick: function(info) {
+			showEventModal(info.event);
+		},
+		
+		eventDrop: async function(info) {
+			const props = info.event.extendedProps || {};
+			if (props.status !== 'queued') {
+				info.revert();
+				return;
+			}
+			const newDate = info.event.start.toISOString();
+			
+			try {
+				const resp = await fetch('/api/calendar/move', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						brief_id: props.brief_id,
+						post_ids: props.post_ids || [],
+						new_date: newDate
+					})
+				});
+				const data = await resp.json();
+				if (!data.ok) {
+					info.revert();
+					alert('Failed to move: ' + (data.error || 'Unknown error'));
+				}
+			} catch (e) {
+				info.revert();
+				alert('Failed to move: ' + e.message);
+			}
+		},
+		
+		eventDidMount: function(info) {
+			const props = info.event.extendedProps || {};
+			const status = props.status || '';
+			const platforms = props.platforms || [];
+			
+			if (platforms.length === 1) {
+				info.el.classList.add('platform-' + platforms[0].platform);
+			} else {
+				info.el.classList.add('platform-multi');
+			}
+			info.el.classList.add('status-' + status);
+			
+			// Tooltip
+			info.el.title = `${(props.platforms_label || '').toUpperCase()} - ${status}\n${info.event.title}`;
+		}
+	});
+	
+	calendar.render();
+});
+
+function updateInfo(events) {
+	const queued = events.filter(e => e.extendedProps.status === 'queued').length;
+	const done = events.filter(e => e.extendedProps.status === 'done').length;
+	document.getElementById('calendar_info').textContent = `${queued} scheduled, ${done} published`;
+}
+
+function showEventModal(event) {
+	currentEvent = event;
+	const props = event.extendedProps;
+	
+	document.getElementById('modal_title').textContent = event.title;
+	document.getElementById('modal_status').textContent = props.status || 'unknown';
+	document.getElementById('modal_scheduled').textContent = event.start ? event.start.toLocaleString() : 'Not scheduled';
+	document.getElementById('modal_preview').textContent = props.preview || 'No preview';
+	
+	// Platforms list
+	const listEl = document.getElementById('modal_platforms');
+	listEl.innerHTML = '';
+	(props.platforms || []).forEach(p => {
+		const item = document.createElement('div');
+		item.className = 'platform-item';
+		const name = document.createElement('span');
+		name.textContent = (p.platform || '').toUpperCase();
+		const badge = document.createElement('span');
+		badge.className = 'badge ' + (p.status === 'error' ? 'error' : p.status === 'done' ? 'success' : p.status === 'running' ? 'running' : 'default');
+		badge.textContent = p.status || 'queued';
+		item.appendChild(name);
+		item.appendChild(badge);
+		if (p.platform_url) {
+			const link = document.createElement('a');
+			link.href = p.platform_url;
+			link.target = '_blank';
+			link.textContent = 'link';
+			link.style.marginLeft = '6px';
+			item.appendChild(link);
+		}
+		listEl.appendChild(item);
+	});
+	
+	// Thumbnail
+	const thumbEl = document.getElementById('modal_thumb');
+	if (props.thumb_url) {
+		thumbEl.innerHTML = `<img src="${props.thumb_url}" alt="Preview" class="thumbnail-clickable" data-lightbox="true" />`;
+	} else {
+		thumbEl.innerHTML = '';
+	}
+	
+	// Buttons based on status
+	const publishBtn = document.getElementById('modal_publish_now');
+	const editBtn = document.getElementById('modal_edit');
+	const linkBtn = document.getElementById('modal_link');
+	
+	const queuedIds = (props.platforms || []).filter(p => p.status === 'queued').map(p => p.post_id);
+	if (queuedIds.length > 0) {
+		publishBtn.style.display = 'inline-block';
+		editBtn.style.display = 'inline-block';
+		publishBtn.onclick = () => publishGroupNow(queuedIds);
+		editBtn.onclick = () => { closeModal(); openEditModal(queuedIds[0]); };
+	} else {
+		publishBtn.style.display = 'none';
+		editBtn.style.display = 'none';
+	}
+	linkBtn.style.display = 'none';
+	
+	document.getElementById('event_modal').style.display = 'flex';
+}
+
+function closeModal() {
+	document.getElementById('event_modal').style.display = 'none';
+	currentEvent = null;
+}
+
+async function publishGroupNow(postIds) {
+	if (!confirm('Publish all queued posts in this group now?')) return;
+	try {
+		for (const id of postIds) {
+			const resp = await fetch(`/api/posts/${id}/publish_now`, { method: 'POST' });
+			const data = await resp.json();
+			if (!data.ok) {
+				alert('Error publishing post ' + id + ': ' + (data.detail || 'Unknown error'));
+				return;
+			}
+		}
+		alert('Publishing started for queued posts!');
+		closeModal();
+		calendar.refetchEvents();
+	} catch (e) {
+		alert('Request failed: ' + e.message);
+	}
+}
+
+async function openEditModal(postId) {
+	// Redirect to posts page with edit action
+	window.location.href = '/posts?edit=' + postId;
+}
+
+// Button handlers
+document.getElementById('refresh_btn')?.addEventListener('click', () => {
+	calendar.refetchEvents();
+});
+
+document.getElementById('today_btn')?.addEventListener('click', () => {
+	calendar.today();
+});
+
+// Close modal on escape
+document.addEventListener('keydown', function(e) {
+	if (e.key === 'Escape') closeModal();
+});
+
+// Close modal on background click
+document.getElementById('event_modal')?.addEventListener('click', function(e) {
+	if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}

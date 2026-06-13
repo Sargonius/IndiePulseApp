@@ -1,27 +1,241 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Analytics</h2>
-<div class="toolbar">
-	<button class="btn" id="refresh_all_btn" hx-post="/api/analytics/refresh" hx-target="#analytics_table" hx-swap="outerHTML">Update metrics</button>
-	<button class="btn" id="reload_table_btn" hx-get="/api/analytics/table" hx-target="#analytics_table" hx-swap="outerHTML">Reload</button>
-	<span id="refresh_all_status" class="muted"></span>
+
+<div class="analytics-controls">
+	<div class="toolbar">
+		<button class="btn btn-primary" id="refresh_all_btn" hx-post="/api/analytics/refresh" hx-target="#analytics_table" hx-swap="outerHTML">
+			<span class="htmx-indicator">⏳</span>
+			Update Metrics
+		</button>
+		<button class="btn" id="reload_table_btn" hx-get="/api/analytics/table" hx-target="#analytics_table" hx-swap="outerHTML">
+			Reload Table
+		</button>
+		<span id="refresh_all_status" class="muted"></span>
+	</div>
+	
+	<div class="filters">
+		<label>
+			<span>Platform:</span>
+			<select id="filter_platform" onchange="filterAnalytics()">
+				<option value="">All</option>
+				<option value="vk">VK</option>
+				<option value="x">X / Twitter</option>
+				<option value="discord">Discord</option>
+				<option value="tg">Telegram</option>
+				<option value="reddit">Reddit</option>
+				<option value="fb">Facebook</option>
+				<option value="bluesky">Bluesky</option>
+				<option value="yt">YouTube</option>
+				<option value="tiktok">TikTok</option>
+			</select>
+		</label>
+		<label>
+			<span>Status:</span>
+			<select id="filter_status" onchange="filterAnalytics()">
+				<option value="">All</option>
+				<option value="done">Published</option>
+				<option value="queued">Queued</option>
+				<option value="error">Error</option>
+			</select>
+		</label>
+		<label>
+			<span>Period:</span>
+			<select id="filter_period" onchange="filterAnalytics()">
+				<option value="">All Time</option>
+				<option value="today">Today</option>
+				<option value="week">Last 7 Days</option>
+				<option value="month">Last 30 Days</option>
+			</select>
+		</label>
+	</div>
 </div>
+
+<div class="analytics-summary" id="analytics_summary">
+	<!-- Summary stats will be calculated by JS -->
+</div>
+
 <div id="analytics_table" hx-get="/api/analytics/table" hx-trigger="load" hx-swap="outerHTML">
-	<tr>
-		<th>ID</th>
-		<th>Media</th>
-		<th>Platform</th>
-		<th>Status</th>
-		<th>Published</th>
-		<th>URL</th>
-		<th>Preview</th>
-		<th>Likes</th>
-		<th>Retweets/Reposts</th>
-		<th>Replies/Comments</th>
-		<th>Quotes/Views</th>
-	</tr>
-	Loading...
+	<div style="text-align:center; padding:40px; color:#666;">
+		Loading analytics data...
+	</div>
 </div>
+
+<style>
+.analytics-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	margin-bottom: 20px;
+}
+
+.filters {
+	display: flex;
+	gap: 16px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.filters label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 500;
+}
+
+.filters select {
+	min-width: 140px;
+}
+
+.analytics-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: 12px;
+	margin-bottom: 20px;
+}
+
+.summary-card {
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 16px;
+	text-align: center;
+}
+
+.summary-card .value {
+	font-size: 28px;
+	font-weight: 700;
+	color: var(--primary);
+}
+
+.summary-card .label {
+	font-size: 12px;
+	color: var(--muted);
+	text-transform: uppercase;
+	margin-top: 4px;
+}
+
+.summary-card.success .value { color: var(--success); }
+.summary-card.warning .value { color: var(--warning); }
+.summary-card.danger .value { color: var(--danger); }
+
+/* Hide rows that don't match filter */
+.analytics-row.filtered-out {
+	display: none !important;
+}
+</style>
+
+<script>
+function filterAnalytics() {
+	const platform = document.getElementById('filter_platform').value.toLowerCase();
+	const status = document.getElementById('filter_status').value.toLowerCase();
+	const period = document.getElementById('filter_period').value;
+	
+	const rows = document.querySelectorAll('#analytics_table .analytics-row');
+	let visibleCount = 0;
+	let totalLikes = 0;
+	let totalReposts = 0;
+	let totalComments = 0;
+	let totalViews = 0;
+	let engagedCount = 0;
+	
+	const now = new Date();
+	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const weekAgo = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+	const monthAgo = new Date(todayStart.getTime() - 30 * 24 * 60 * 60 * 1000);
+	
+	rows.forEach(row => {
+		const rowPlatform = (row.dataset.platform || '').toLowerCase();
+		const rowStatus = (row.dataset.status || '').toLowerCase();
+		const rowDateStr = row.dataset.published || '';
+		const rowDate = rowDateStr ? new Date(rowDateStr) : null;
+		
+		let show = true;
+		
+		// Platform filter
+		if (platform && !rowPlatform.includes(platform)) {
+			show = false;
+		}
+		
+		// Status filter
+		if (status && rowStatus !== status) {
+			show = false;
+		}
+		
+		// Period filter
+		if (period && rowDate) {
+			if (period === 'today' && rowDate < todayStart) show = false;
+			if (period === 'week' && rowDate < weekAgo) show = false;
+			if (period === 'month' && rowDate < monthAgo) show = false;
+		} else if (period && !rowDate && status !== 'queued') {
+			// Hide posts without publish date if filtering by period (except queued)
+			show = false;
+		}
+		
+		if (show) {
+			row.classList.remove('filtered-out');
+			visibleCount++;
+
+			// Sum metrics
+			const likes = parseInt(row.dataset.likes) || 0;
+			const reposts = parseInt(row.dataset.reposts) || 0;
+			const comments = parseInt(row.dataset.comments) || 0;
+			const views = parseInt(row.dataset.views) || 0;
+			const engagement = parseInt(row.dataset.engagement) || 0;
+			totalLikes += likes;
+			totalReposts += reposts;
+			totalComments += comments;
+			totalViews += views;
+			if (engagement > 0) engagedCount++;
+		} else {
+			row.classList.add('filtered-out');
+		}
+	});
+
+	updateSummary(visibleCount, totalLikes, totalReposts, totalComments, totalViews, engagedCount);
+}
+
+function updateSummary(count, likes, reposts, comments, views, engaged) {
+	document.getElementById('analytics_summary').innerHTML = `
+		<div class="summary-card">
+			<div class="value">${count}</div>
+			<div class="label">Posts</div>
+		</div>
+		<div class="summary-card success">
+			<div class="value">${engaged}</div>
+			<div class="label">🔥 Got Reactions</div>
+		</div>
+		<div class="summary-card success">
+			<div class="value">${likes}</div>
+			<div class="label">Total Likes</div>
+		</div>
+		<div class="summary-card">
+			<div class="value">${reposts}</div>
+			<div class="label">Reposts</div>
+		</div>
+		<div class="summary-card">
+			<div class="value">${comments}</div>
+			<div class="label">Comments</div>
+		</div>
+		<div class="summary-card">
+			<div class="value">${views}</div>
+			<div class="label">Views</div>
+		</div>
+	`;
+}
+
+// Initialize summary after table loads
+document.addEventListener('htmx:afterSwap', function(e) {
+	if (e.detail.target.id === 'analytics_table') {
+		filterAnalytics();
+	}
+});
+
+// Auto-refresh metrics on page load after 1 second delay
+document.addEventListener('DOMContentLoaded', function() {
+	setTimeout(function() {
+		filterAnalytics();
+	}, 1500);
+});
+</script>
 {% endblock %}
-
-

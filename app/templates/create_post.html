@@ -1,0 +1,680 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Post</h2>
+<p class="muted">Post images, video and text to VK, X/Twitter, Discord, Facebook, Reddit, Telegram</p>
+
+<form method="post" action="/create/post" enctype="multipart/form-data" id="post_form">
+	<div class="post-layout">
+		<!-- Left: Media -->
+		<div class="post-media">
+			<label>Main Image / Video</label>
+			<div id="drop_zone_normal" class="drop-zone">
+				<span>📷 Drag & drop image or video here or click</span>
+			</div>
+			<input type="file" id="media_input_normal" accept="image/*,video/*" style="display:none;" />
+			<div id="preview_normal" class="preview-container"></div>
+			<input type="hidden" name="media_normal" id="media_normal_hidden" value="{{ draft.media_normal_path if draft else '' }}" />
+
+			<div style="height:16px;"></div>
+			
+			<label>Image Gallery (up to 10)</label>
+			<div id="drop_zone_gallery" class="drop-zone drop-zone-small">
+				<span>📸 Drop multiple images here</span>
+			</div>
+			<input type="file" id="media_input_gallery" accept="image/*" multiple style="display:none;" />
+			<div id="gallery_wrap" class="gallery-grid"></div>
+			<input type="hidden" name="gallery_order" id="gallery_order_hidden" value="{{ (draft.gallery_normal | join(',')) if draft and draft.gallery_normal else '' }}" />
+		</div>
+
+		<!-- Right: Text and Settings -->
+		<div class="post-content">
+			<div class="form-group">
+				<label>Text (RU)</label>
+				<textarea name="text_ru" id="text_ru" rows="5" required>{{ draft.text_ru if draft else '' }}</textarea>
+			</div>
+			
+			<div class="btn-row" style="margin-bottom:12px;">
+				<button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Translate to EN</button>
+				<span id="tr_status" class="htmx-indicator muted">Translating...</span>
+			</div>
+			
+			<div class="form-group">
+				<label>Text (EN)</label>
+				<textarea id="text_en" name="text_en" rows="5">{{ draft.text_en if draft else '' }}</textarea>
+				<div id="x_counter" class="counter">X: 0/280</div>
+			</div>
+
+			<div class="form-group">
+				<label>Project</label>
+				<div id="project_tiles" class="project-tiles-row">
+					<span class="muted" style="font-size:12px;">Loading...</span>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label>Hashtags</label>
+				<div class="row">
+					<input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Gamedev #Indie #UnrealEngine" style="flex:1;" />
+					<button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML">Suggest</button>
+				</div>
+			</div>
+			<div id="platform_warnings" class="warnings-panel" style="display:none;"></div>
+		</div>
+	</div>
+
+	<!-- Platforms -->
+	<div class="platforms-section">
+		<label>Platforms</label>
+		<button type="button" class="btn btn-sm" id="toggle_all_btn">Toggle All</button>
+		<div class="platforms-grid">
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="vk" checked /> VK</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="x" checked /> X / Twitter</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="discord" checked /> Discord</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="bluesky" checked /> Bluesky</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="reddit" checked /> Reddit</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="tg" checked /> Telegram</label>
+		</div>
+	</div>
+
+	<!-- Options -->
+	<div class="options-section">
+		<label><input type="checkbox" name="x_split" id="x_split" /> Split long X posts into thread</label>
+		<div class="row" style="margin-top:8px;">
+			<label>Reddit: sentences in title</label>
+			<input type="number" id="rd_sentences" name="reddit_sentences" value="{{ draft.reddit_sentences if draft and draft.reddit_sentences else 2 }}" min="1" max="10" style="width:80px;" />
+		</div>
+	</div>
+
+	<!-- Scheduling -->
+	<div class="schedule-section">
+		<label>Schedule (optional)</label>
+		<div class="row">
+			<input type="datetime-local" name="scheduled_at" id="scheduled_at" />
+			<button type="button" class="btn" id="pick_now">Now</button>
+			<button type="button" class="btn" id="pick_plus_8h">+8h</button>
+			<button type="button" class="btn" id="pick_evening">Evening (20:00)</button>
+			<button type="button" class="btn" id="pick_morning">Morning (9:00)</button>
+		</div>
+	</div>
+
+	<!-- Actions -->
+	<div class="actions-section">
+		<button type="submit" class="btn btn-primary btn-lg">Save and Queue</button>
+		<button type="button" id="clear_draft_btn" class="btn">Clear Draft</button>
+	</div>
+</form>
+
+<!-- Platform Previews -->
+<div class="previews-section">
+	<h3>📱 Platform Previews</h3>
+	<div class="previews-grid">
+		<div class="preview-card">
+			<div class="preview-header">X / Twitter</div>
+			<div id="x_preview_text" class="preview-text"></div>
+			<div id="x_preview_media" class="preview-media"></div>
+			<div id="x_thread_preview"></div>
+		</div>
+		<div class="preview-card">
+			<div class="preview-header">VK</div>
+			<div id="vk_preview_text" class="preview-text"></div>
+			<div id="vk_preview_media" class="preview-media"></div>
+		</div>
+		<div class="preview-card">
+			<div class="preview-header">Reddit</div>
+			<div><strong>Title:</strong> <span id="rd_title"></span></div>
+			<div id="rd_media" class="muted" style="font-size:12px;"></div>
+			<div><strong>Comment:</strong> <span id="rd_comment"></span></div>
+		</div>
+	</div>
+</div>
+
+<style>
+.post-layout {
+	display: grid;
+	grid-template-columns: 350px 1fr;
+	gap: 24px;
+	margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+	.post-layout {
+		grid-template-columns: 1fr;
+	}
+}
+
+.drop-zone {
+	width: 100%;
+	height: 160px;
+	border: 2px dashed #94a3b8;
+	border-radius: 8px;
+	background: #f8fafc;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: #64748b;
+	transition: all 0.2s;
+}
+
+.drop-zone:hover {
+	border-color: var(--primary);
+	background: #f0f9ff;
+}
+
+.drop-zone-small {
+	height: 80px;
+}
+
+.preview-container {
+	margin-top: 8px;
+}
+
+.preview-container img,
+.preview-container video {
+	max-width: 100%;
+	max-height: 200px;
+	border-radius: 8px;
+}
+
+.gallery-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 8px;
+	margin-top: 8px;
+}
+
+.gallery-item {
+	position: relative;
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.gallery-item img {
+	width: 100%;
+	height: 80px;
+	object-fit: cover;
+}
+
+.gallery-item .remove-btn {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 20px;
+	height: 20px;
+	background: rgba(0,0,0,0.6);
+	color: white;
+	border: none;
+	border-radius: 50%;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.post-content textarea {
+	width: 100%;
+}
+
+.counter {
+	font-size: 12px;
+	color: #666;
+	margin-top: 4px;
+}
+
+.warnings-panel {
+	margin-top: 8px;
+	padding: 8px 10px;
+	border: 1px solid #f0d7a7;
+	background: #fff7ed;
+	border-radius: 6px;
+	font-size: 12px;
+	color: #7c2d12;
+}
+.warnings-panel .warn-item {
+	margin: 2px 0;
+}
+
+.platforms-section {
+	margin-bottom: 16px;
+	padding: 12px;
+	background: #f8fafc;
+	border-radius: 8px;
+}
+
+.platforms-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-top: 8px;
+}
+
+.platform-option {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 6px 10px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.platform-option:has(input:checked) {
+	background: #e0f2fe;
+	border-color: var(--primary);
+}
+
+.options-section,
+.schedule-section {
+	margin-bottom: 16px;
+}
+
+.actions-section {
+	display: flex;
+	gap: 12px;
+	margin-top: 20px;
+}
+
+.btn-lg {
+	padding: 12px 24px;
+	font-size: 16px;
+}
+
+.previews-section {
+	margin-top: 32px;
+	padding-top: 24px;
+	border-top: 1px solid var(--border);
+}
+
+.previews-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 16px;
+	margin-top: 16px;
+}
+
+.preview-card {
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 16px;
+}
+
+.preview-header {
+	font-weight: 600;
+	margin-bottom: 12px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border);
+}
+
+.preview-text {
+	white-space: pre-wrap;
+	margin-bottom: 8px;
+}
+
+.preview-media {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.preview-media img {
+	max-width: 72px;
+	max-height: 72px;
+	border-radius: 6px;
+}
+</style>
+
+<script>
+const form = document.getElementById('post_form');
+const hiddenN = document.getElementById('media_normal_hidden');
+const galleryOrderHidden = document.getElementById('gallery_order_hidden');
+const xCounter = document.getElementById('x_counter');
+const warningBox = document.getElementById('platform_warnings');
+
+// Auto-save draft
+let saveTimer;
+function queueSave() {
+	clearTimeout(saveTimer);
+	saveTimer = setTimeout(() => {
+		const fd = new FormData();
+		fd.append('text_ru', document.getElementById('text_ru').value);
+		fd.append('text_en', document.getElementById('text_en').value);
+		fd.append('tags', form.querySelector('[name="tags"]').value);
+		fd.append('scheduled_at', form.querySelector('[name="scheduled_at"]').value);
+		const plats = Array.from(form.querySelectorAll('input[name="platforms"]:checked')).map(x => x.value);
+		plats.forEach(p => fd.append('platforms', p));
+		fd.append('reddit_sentences', document.getElementById('rd_sentences').value);
+		fetch('/api/draft/news', { method: 'POST', body: fd });
+	}, 400);
+}
+form.addEventListener('input', queueSave);
+form.addEventListener('change', queueSave);
+
+// Drop zone functionality
+function setupDropZone(dropEl, inputEl, previewEl, slot, hiddenField) {
+	dropEl.addEventListener('click', () => inputEl.click());
+	dropEl.addEventListener('dragover', (e) => { e.preventDefault(); dropEl.style.borderColor = '#2563eb'; });
+	dropEl.addEventListener('dragleave', () => { dropEl.style.borderColor = '#94a3b8'; });
+	dropEl.addEventListener('drop', (e) => {
+		e.preventDefault();
+		dropEl.style.borderColor = '#94a3b8';
+		if (e.dataTransfer.files[0]) {
+			handleFile(e.dataTransfer.files[0], previewEl, slot, hiddenField);
+		}
+	});
+	inputEl.addEventListener('change', () => {
+		if (inputEl.files[0]) {
+			handleFile(inputEl.files[0], previewEl, slot, hiddenField);
+		}
+	});
+}
+
+function handleFile(file, previewEl, slot, hiddenField) {
+	const url = URL.createObjectURL(file);
+	previewEl.innerHTML = '';
+	if (file.type.startsWith('image/')) {
+		const img = document.createElement('img');
+		img.src = url;
+		img.className = 'thumbnail-clickable';
+		img.dataset.lightbox = 'true';
+		previewEl.appendChild(img);
+	} else if (file.type.startsWith('video/')) {
+		const vid = document.createElement('video');
+		vid.src = url;
+		vid.controls = true;
+		previewEl.appendChild(vid);
+	}
+	
+	const fd = new FormData();
+	fd.append('media', file);
+	fd.append('slot', slot);
+	fetch('/api/uploads/draft_media', { method: 'POST', body: fd })
+		.then(r => r.json())
+		.then(j => { if (j.media_path) hiddenField.value = j.media_path; });
+}
+
+setupDropZone(
+	document.getElementById('drop_zone_normal'),
+	document.getElementById('media_input_normal'),
+	document.getElementById('preview_normal'),
+	'normal',
+	hiddenN
+);
+
+// Gallery functionality
+const galleryWrap = document.getElementById('gallery_wrap');
+const dzG = document.getElementById('drop_zone_gallery');
+const inG = document.getElementById('media_input_gallery');
+
+function renderGallery(items) {
+	galleryWrap.innerHTML = '';
+	items.forEach((rel, idx) => {
+		const div = document.createElement('div');
+		div.className = 'gallery-item';
+		const img = document.createElement('img');
+		img.src = '/media/' + rel.split('/').pop();
+		img.className = 'thumbnail-clickable';
+		img.dataset.lightbox = 'true';
+		img.className = 'thumbnail-clickable';
+		const btn = document.createElement('button');
+		btn.className = 'remove-btn';
+		btn.textContent = '×';
+		btn.onclick = () => { items.splice(idx, 1); syncGallery(items); };
+		div.appendChild(img);
+		div.appendChild(btn);
+		galleryWrap.appendChild(div);
+	});
+	galleryOrderHidden.value = items.join(',');
+	updatePreviews();
+}
+
+function syncGallery(items) {
+	renderGallery(items);
+	const fd = new FormData();
+	fd.append('order', items.join(','));
+	fetch('/api/gallery/reorder', { method: 'POST', body: fd });
+}
+
+function addToGallery(files) {
+	const list = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
+	Array.from(files).forEach(async (f) => {
+		const fd = new FormData();
+		fd.append('media', f);
+		fd.append('slot', 'gallery');
+		try {
+			const r = await fetch('/api/uploads/draft_media', { method: 'POST', body: fd });
+			const j = await r.json();
+			if (j.media_path) {
+				list.push(j.media_path);
+				renderGallery(list);
+			}
+		} catch (e) {}
+	});
+}
+
+dzG.addEventListener('click', () => inG.click());
+dzG.addEventListener('dragover', (e) => { e.preventDefault(); dzG.style.borderColor = '#2563eb'; });
+dzG.addEventListener('dragleave', () => { dzG.style.borderColor = '#94a3b8'; });
+dzG.addEventListener('drop', (e) => {
+	e.preventDefault();
+	dzG.style.borderColor = '#94a3b8';
+	if (e.dataTransfer.files.length) addToGallery(e.dataTransfer.files);
+});
+inG.addEventListener('change', () => { if (inG.files.length) addToGallery(inG.files); });
+
+// Text previews
+function updatePreviews() {
+	const ru = document.getElementById('text_ru').value;
+	const en = document.getElementById('text_en').value;
+	const tags = document.getElementById('tags_input')?.value || '';
+	const xSplit = document.getElementById('x_split')?.checked;
+	
+	// X preview
+	const xText = en + (tags ? '\n' + tags : '');
+	document.getElementById('x_preview_text').textContent = xText.slice(0, 280);
+	
+	// VK preview
+	document.getElementById('vk_preview_text').textContent = ru + (tags ? '\n' + tags : '');
+	
+	// Reddit preview
+	const sentences = (en || ru).match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+	const rdCount = parseInt(document.getElementById('rd_sentences')?.value) || 2;
+	document.getElementById('rd_title').textContent = sentences.slice(0, rdCount).join(' ').slice(0, 290);
+	document.getElementById('rd_comment').textContent = sentences.slice(rdCount).join(' ');
+	document.getElementById('rd_media').textContent = hiddenN.value ? 'Media attached' : 'No media';
+	
+	// Gallery previews
+	const gallery = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
+	['x_preview_media', 'vk_preview_media'].forEach(id => {
+		const el = document.getElementById(id);
+		el.innerHTML = '';
+		gallery.slice(0, 4).forEach(rel => {
+			const img = document.createElement('img');
+			img.src = '/media/' + rel.split('/').pop();
+			img.className = 'thumbnail-clickable';
+			img.dataset.lightbox = 'true';
+			el.appendChild(img);
+		});
+	});
+	
+	// X counter
+	const len = [...xText].length;
+	xCounter.textContent = `X: ${len}/280`;
+	xCounter.style.color = len > 280 ? 'red' : '#666';
+
+	updateWarnings();
+}
+
+function updateWarnings() {
+	if (!warningBox) return;
+	const ru = document.getElementById('text_ru').value || '';
+	const en = document.getElementById('text_en').value || '';
+	const tags = (document.getElementById('tags_input')?.value || '').trim();
+	const xSplit = document.getElementById('x_split')?.checked;
+	const tgText = (ru + (tags ? '\n' + tags : '')).trim();
+	const xText = (en + (tags ? '\n' + tags : '')).trim();
+	const ruLen = [...ru].length;
+	const enLen = [...en].length;
+	const tgLen = [...tgText].length;
+	const xLen = [...xText].length;
+	const selected = new Set(Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value));
+	const warnings = [];
+
+	if (selected.has('discord')) {
+		if (ruLen > 2000) warnings.push(`Discord RU: ${ruLen}/2000 → split into ${Math.ceil(ruLen / 2000)} messages`);
+		if (enLen > 2000) warnings.push(`Discord EN: ${enLen}/2000 → split into ${Math.ceil(enLen / 2000)} messages`);
+	}
+	if (selected.has('tg')) {
+		const hasMedia = !!hiddenN.value || (galleryOrderHidden.value && galleryOrderHidden.value.split(',').filter(Boolean).length > 0);
+		const limit = hasMedia ? 1024 : 4096;
+		if (tgLen > limit) {
+			const note = hasMedia ? 'caption limit 1024 with media' : 'message limit 4096';
+			warnings.push(`Telegram: ${tgLen}/${limit} → split into ${Math.ceil(tgLen / limit)} messages (${note})`);
+		}
+	}
+	if (selected.has('x') && xLen > 280) {
+		if (xSplit) {
+			warnings.push(`X: ${xLen}/280 → split into thread (${Math.ceil(xLen / 280)} tweets)`);
+		} else {
+			warnings.push(`X: ${xLen}/280 → will be truncated (enable thread split)`);
+		}
+	}
+	if (selected.has('bluesky') && xLen > 300) {
+		warnings.push(`Bluesky: ${xLen}/300 → split into thread (${Math.ceil(xLen / 300)} posts)`);
+	}
+
+	if (warnings.length) {
+		warningBox.style.display = 'block';
+		warningBox.innerHTML = warnings.map(w => `<div class="warn-item">• ${w}</div>`).join('');
+	} else {
+		warningBox.style.display = 'none';
+		warningBox.innerHTML = '';
+	}
+}
+
+['text_ru', 'text_en', 'tags_input', 'rd_sentences'].forEach(id => {
+	document.getElementById(id)?.addEventListener('input', updatePreviews);
+});
+document.getElementById('x_split')?.addEventListener('change', updatePreviews);
+document.querySelectorAll('input.pf[name="platforms"]').forEach(el => {
+	el.addEventListener('change', updateWarnings);
+});
+
+// Toggle all platforms
+document.getElementById('toggle_all_btn').addEventListener('click', () => {
+	const boxes = Array.from(document.querySelectorAll('input.pf'));
+	const allChecked = boxes.every(b => b.checked);
+	boxes.forEach(b => b.checked = !allChecked);
+});
+
+// Clear draft
+document.getElementById('clear_draft_btn').addEventListener('click', async () => {
+	document.getElementById('text_ru').value = '';
+	document.getElementById('text_en').value = '';
+	document.getElementById('tags_input').value = '';
+	document.getElementById('scheduled_at').value = '';
+	document.getElementById('preview_normal').innerHTML = '';
+	hiddenN.value = '';
+	galleryOrderHidden.value = '';
+	galleryWrap.innerHTML = '';
+	updatePreviews();
+	await fetch('/api/draft/clear', { method: 'POST' });
+});
+
+// Schedule helpers
+function setSchedule(dt) {
+	const el = document.getElementById('scheduled_at');
+	const pad = n => String(n).padStart(2, '0');
+	el.value = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+	queueSave();
+}
+
+document.getElementById('pick_now')?.addEventListener('click', () => setSchedule(new Date()));
+document.getElementById('pick_plus_8h')?.addEventListener('click', () => setSchedule(new Date(Date.now() + 8*60*60*1000)));
+document.getElementById('pick_evening')?.addEventListener('click', () => {
+	const now = new Date();
+	let t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0);
+	if (t <= now) t.setDate(t.getDate() + 1);
+	setSchedule(t);
+});
+document.getElementById('pick_morning')?.addEventListener('click', () => {
+	const now = new Date();
+	const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0);
+	setSchedule(t);
+});
+
+// Project Presets
+async function loadProjectTiles() {
+	try {
+		const r = await fetch('/api/projects');
+		const projects = await r.json();
+		const container = document.getElementById('project_tiles');
+		if (!container) return;
+		if (!projects.length) {
+			container.innerHTML = '<span class="muted" style="font-size:12px;">No projects — <a href="/projects">create one</a></span>';
+			return;
+		}
+		container.innerHTML = '';
+		projects.forEach(p => {
+			const tile = document.createElement('div');
+			tile.className = 'project-tile';
+			tile.dataset.projectId = p.id;
+			const iconHtml = p.icon_url
+				? `<img src="${p.icon_url}" alt="${p.name}" />`
+				: `<div class="tile-initial">${(p.name || '?')[0].toUpperCase()}</div>`;
+			tile.innerHTML = iconHtml + `<span>${p.name}</span>`;
+			tile.addEventListener('click', () => {
+				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
+				tile.classList.add('selected');
+				const tagsInput = document.getElementById('tags_input');
+				if (tagsInput) {
+					tagsInput.value = p.tags_json || '';
+					tagsInput.dispatchEvent(new Event('input', { bubbles: true }));
+				}
+				queueSave();
+			});
+			container.appendChild(tile);
+		});
+	} catch (e) {
+		const container = document.getElementById('project_tiles');
+		if (container) container.innerHTML = '';
+	}
+}
+
+// Hydrate on load
+document.addEventListener('DOMContentLoaded', () => {
+	loadProjectTiles();
+	const norm = hiddenN.value;
+	if (norm) {
+		const url = '/media/' + norm.split('/').pop();
+		const previewNorm = document.getElementById('preview_normal');
+		const isVideo = /\.(mp4|mov|webm|avi|mkv)$/i.test(norm);
+		if (isVideo) {
+			const vid = document.createElement('video');
+			vid.src = url;
+			vid.controls = true;
+			previewNorm.appendChild(vid);
+		} else {
+			const img = document.createElement('img');
+			img.src = url;
+			img.className = 'thumbnail-clickable';
+			img.dataset.lightbox = 'true';
+			previewNorm.appendChild(img);
+		}
+	}
+	
+	const gallery = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
+	if (gallery.length) renderGallery(gallery);
+	
+	updatePreviews();
+});
+
+// HTMX handlers
+document.addEventListener('htmx:afterSwap', (e) => {
+	if (e.target.id === 'text_en' || e.target.id === 'tags_input') {
+		updatePreviews();
+	}
+});
+</script>
+{% endblock %}

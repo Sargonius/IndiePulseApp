@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session
 
 from app.db.session import get_session
-from app.models.models import Brief, Post, PlatformEnum, PostStatusEnum, Job, JobKindEnum, JobStatusEnum
+from app.models.models import Brief, Post, PlatformEnum, PostStatusEnum, Job, JobKindEnum, JobStatusEnum, Project
 from app.jobs.tasks import publish_news_post
 from app.services.draft_store import load_draft, save_draft, clear_draft
 from app.services.settings import load_settings
@@ -52,18 +52,38 @@ def _enrich_posts(posts):
                         thumb_url = f"/media/{name}"
         except Exception:
             preview = ''
+        platform_text = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
+        platform_url = getattr(p, 'platform_url', None)
+        # Fix Reddit links: prefer the post permalink over media URLs
+        try:
+            if platform_text == 'reddit' and getattr(p, 'platform_post_id', None):
+                if not platform_url or any(x in (platform_url or '') for x in ['redd.it', 'i.redd.it', 'preview.redd.it']):
+                    platform_url = f"https://reddit.com/comments/{p.platform_post_id}"
+        except Exception:
+            platform_url = getattr(p, 'platform_url', None)
+        m_like = pick('like', 'likes')
+        m_repost = pick('retweet', 'reposts', 'repost')
+        m_reply = pick('reply', 'comments')
+        m_quote = pick('quote')
+        m_views = pick('views', 'impressions')
+        # Total engagement: any direct reaction (views excluded — they are reach, not reaction)
+        m_total = sum(v for v in (m_like, m_repost, m_reply, m_quote) if isinstance(v, int))
+        has_metrics = any(isinstance(v, int) for v in (m_like, m_repost, m_reply, m_quote, m_views))
         row = {
             'id': p.id,
-            'platform_text': (p.platform.value if hasattr(p.platform, 'value') else str(p.platform)),
+            'platform_text': platform_text,
             'status_text': (p.status.value if hasattr(p.status, 'value') else str(p.status)),
             'brief_id': getattr(p, 'brief_id', None),
             'scheduled_at': getattr(p, 'scheduled_at', None),
             'published_at': getattr(p, 'published_at', None),
-            'platform_url': getattr(p, 'platform_url', None),
-            'm_like': pick('like', 'likes'),
-            'm_repost': pick('retweet', 'reposts'),
-            'm_reply': pick('reply', 'comments'),
-            'm_quote': pick('quote', 'views'),
+            'platform_url': platform_url,
+            'm_like': m_like,
+            'm_repost': m_repost,
+            'm_reply': m_reply,
+            'm_quote': m_quote,
+            'm_views': m_views,
+            'm_total': m_total,
+            'has_metrics': has_metrics,
             'tags': tags_val,
             'preview': preview,
             'thumb_url': thumb_url,
@@ -89,6 +109,7 @@ def news_form(request: Request):
         'fb_en': bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip())),
         'reddit': bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip())),
         'tg': bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip())),
+        'bluesky': bool(((cfg.get('bluesky_handle') or '').strip()) and ((cfg.get('bluesky_app_password') or '').strip())),
         'tiktok': True,
     }
     return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready, 'ui_language': cfg.get('ui_language', 'en')})
@@ -98,6 +119,31 @@ def steam_export_page(request: Request):
     draft = load_draft()
     cfg = load_settings()
     return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en')})
+
+@router.get('/projects', response_class=HTMLResponse)
+def projects_page(request: Request, session: Session = Depends(get_session)):
+    from sqlmodel import select
+    rows = session.exec(
+        select(Project).where(Project.user_id == 1).order_by(Project.sort_order, Project.id)
+    ).all()
+    projects = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "icon_url": f"/media/{p.icon_path}" if p.icon_path else None,
+            "tags_json": p.tags_json or "",
+            "platforms_json": p.platforms_json or "{}",
+            "sort_order": p.sort_order,
+        }
+        for p in rows
+    ]
+    cfg = load_settings()
+    return templates.TemplateResponse('projects.html', {
+        'request': request,
+        'projects': projects,
+        'ui_language': cfg.get('ui_language', 'en'),
+    })
+
 
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
@@ -127,10 +173,15 @@ def accounts(request: Request):
             'yt_client_secret': cfg.get('yt_client_secret', ''),
             'yt_access_token': cfg.get('yt_access_token', ''),
             'yt_refresh_token': cfg.get('yt_refresh_token', ''),
+            'fb_app_id': cfg.get('fb_app_id', ''),
+            'fb_app_secret': cfg.get('fb_app_secret', ''),
             'fb_ru_page_id': cfg.get('fb_ru_page_id', ''),
             'fb_en_page_id': cfg.get('fb_en_page_id', ''),
             'fb_ru_page_access_token': cfg.get('fb_ru_page_access_token', ''),
             'fb_en_page_access_token': cfg.get('fb_en_page_access_token', ''),
+            'bluesky_handle': cfg.get('bluesky_handle', ''),
+            'bluesky_service': cfg.get('bluesky_service', 'https://bsky.social'),
+            'bluesky_pw_hint': (('•••' + (cfg.get('bluesky_app_password') or '')[-4:]) if (cfg.get('bluesky_app_password') or '') else ''),
             'reddit_client_id': cfg.get('reddit_client_id', ''),
             'reddit_client_secret': cfg.get('reddit_client_secret', ''),
             'reddit_username': cfg.get('reddit_username', ''),
@@ -243,6 +294,12 @@ def analytics_list(request: Request, session: Session = Depends(get_session)):
     cfg = load_settings()
     return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
+
+@router.get('/calendar', response_class=HTMLResponse)
+def calendar_view(request: Request):
+    cfg = load_settings()
+    return templates.TemplateResponse('calendar.html', {'request': request, 'ui_language': cfg.get('ui_language', 'en')})
+
 @router.get('/posts/partial', response_class=HTMLResponse)
 def posts_table_partial(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
@@ -353,6 +410,8 @@ def submit_news(
             return bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip()))
         if plat == 'tg':
             return bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip()))
+        if plat == 'bluesky':
+            return bool(((cfg.get('bluesky_handle') or '').strip()) and ((cfg.get('bluesky_app_password') or '').strip()))
         if plat == 'tiktok':
             return True
         return False
@@ -485,4 +544,245 @@ def submit_news(
         'brief_id': brief.id,
         'num_posts': len(created_posts),
         'skipped': skipped,
+    })
+
+
+# ==================== Create Post / Video Pages ====================
+
+@router.get('/create/post', response_class=HTMLResponse)
+def create_post_form(request: Request):
+    """Simplified form for image posts to VK, X, Discord, FB, Reddit, Telegram."""
+    draft = load_draft()
+    cfg = load_settings()
+    return templates.TemplateResponse('create_post.html', {
+        'request': request,
+        'draft': draft,
+        'ui_language': cfg.get('ui_language', 'en')
+    })
+
+
+@router.post('/create/post')
+def submit_post(
+    request: Request,
+    text_ru: str = Form(...),
+    text_en: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    platforms: Optional[List[str]] = Form(None),
+    scheduled_at: Optional[str] = Form(None),
+    media_normal: Optional[str] = Form(None),
+    gallery_order: Optional[str] = Form(None),
+    reddit_sentences: Optional[int] = Form(2),
+    x_split: Optional[str] = Form(None),
+    session: Session = Depends(get_session),
+):
+    """Process image post submission."""
+    media_path = None
+    if media_normal:
+        media_path = f"media/{media_normal}" if not media_normal.startswith('media/') else media_normal
+
+    # Weekday auto-tags
+    tags_final = (tags or '').strip()
+    if scheduled_at:
+        try:
+            when_dt = datetime.fromisoformat(scheduled_at)
+            if when_dt.weekday() == 5:
+                tags_final = (tags_final + ' #screenshotsaturday').strip()
+            if when_dt.weekday() == 2:
+                tags_final = (tags_final + ' #wishlistwednesday').strip()
+        except Exception:
+            pass
+
+    brief = Brief(
+        user_id=1,
+        type='post',
+        text_ru=text_ru or '',
+        text_en=text_en or '',
+        tags_json=tags_final,
+        media_path=media_path,
+    )
+    session.add(brief)
+    session.commit()
+    session.refresh(brief)
+
+    created_posts: List[Post] = []
+    cfg = load_settings()
+
+    when_dt: Optional[datetime] = None
+    if scheduled_at:
+        try:
+            when_dt = datetime.fromisoformat(scheduled_at)
+        except Exception:
+            when_dt = None
+
+    if platforms:
+        for p in platforms:
+            try:
+                enum_val = PlatformEnum(p)
+            except ValueError:
+                continue
+            post = Post(
+                user_id=1,
+                brief_id=brief.id,
+                platform=enum_val,
+                status=PostStatusEnum.queued,
+                scheduled_at=when_dt,
+            )
+            session.add(post)
+            created_posts.append(post)
+        session.commit()
+
+    # Enqueue publish tasks
+    for post in created_posts:
+        import json as _json
+        payload = {"post_id": post.id}
+        if gallery_order:
+            glist = [x.strip() for x in gallery_order.split(',') if x.strip()]
+            if glist:
+                payload["gallery"] = glist
+        if media_normal:
+            payload["media_rel"] = media_normal
+        if str(post.platform) in (str(PlatformEnum.x), 'x'):
+            payload["x_thread"] = bool(x_split)
+        if str(post.platform) in (str(PlatformEnum.reddit), 'reddit'):
+            payload["reddit_sentences"] = max(1, min(10, int(reddit_sentences or 2)))
+
+        job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+
+        delay_s = 0
+        if when_dt:
+            from datetime import datetime as _dt
+            delay_s = int(max(0, (when_dt - _dt.now()).total_seconds()))
+        publish_news_post.schedule(args=(job.id, post.id), delay=delay_s)
+
+    clear_draft()
+
+    return templates.TemplateResponse('news_success.html', {
+        'request': request,
+        'brief_id': brief.id,
+        'num_posts': len(created_posts),
+        'skipped': [],
+    })
+
+
+@router.get('/create/video', response_class=HTMLResponse)
+def create_video_form(request: Request):
+    """Form for video posts to YouTube, TikTok, VK Video."""
+    draft = load_draft()
+    cfg = load_settings()
+    return templates.TemplateResponse('create_video.html', {
+        'request': request,
+        'draft': draft,
+        'ui_language': cfg.get('ui_language', 'en')
+    })
+
+
+@router.post('/create/video')
+def submit_video(
+    request: Request,
+    title: Optional[str] = Form(None),
+    text_ru: Optional[str] = Form(None),
+    text_en: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    platforms: Optional[List[str]] = Form(None),
+    scheduled_at: Optional[str] = Form(None),
+    media_horizontal: Optional[str] = Form(None),
+    media_vertical: Optional[str] = Form(None),
+    yt_playlist: Optional[str] = Form(None),
+    yt_privacy: Optional[str] = Form('public'),
+    session: Session = Depends(get_session),
+):
+    """Process video post submission."""
+    # Use horizontal for YouTube, vertical for TikTok/Shorts
+    media_path = media_horizontal or media_vertical
+    if media_path and not media_path.startswith('media/'):
+        media_path = f"media/{media_path}"
+
+    brief = Brief(
+        user_id=1,
+        type='video',
+        text_ru=text_ru or '',
+        text_en=text_en or '',
+        title=(title or '').strip() or None,
+        tags_json=(tags or '').strip(),
+        media_path=media_path,
+    )
+    session.add(brief)
+    session.commit()
+    session.refresh(brief)
+
+    created_posts: List[Post] = []
+
+    when_dt: Optional[datetime] = None
+    if scheduled_at:
+        try:
+            when_dt = datetime.fromisoformat(scheduled_at)
+        except Exception:
+            when_dt = None
+
+    if platforms:
+        for p in platforms:
+            try:
+                enum_val = PlatformEnum(p)
+            except ValueError:
+                continue
+
+            # Skip if no media for platform
+            if p == 'tiktok' and not media_vertical:
+                continue
+            if p in ('yt', 'vk_video') and not media_horizontal:
+                continue
+
+            post = Post(
+                user_id=1,
+                brief_id=brief.id,
+                platform=enum_val,
+                status=PostStatusEnum.queued,
+                scheduled_at=when_dt,
+            )
+            session.add(post)
+            created_posts.append(post)
+        session.commit()
+
+    # Enqueue publish tasks
+    for post in created_posts:
+        import json as _json
+        payload = {"post_id": post.id}
+
+        if str(post.platform) in (str(PlatformEnum.yt), 'yt'):
+            if media_horizontal:
+                payload["media_rel"] = media_horizontal
+            if title:
+                payload["yt_title"] = title
+            if yt_playlist:
+                payload["yt_playlist"] = yt_playlist
+            if yt_privacy:
+                payload["yt_privacy"] = yt_privacy
+        elif str(post.platform) in (str(PlatformEnum.tiktok), 'tiktok'):
+            if media_vertical:
+                payload["media_rel"] = media_vertical
+        else:
+            if media_horizontal:
+                payload["media_rel"] = media_horizontal
+
+        job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+
+        delay_s = 0
+        if when_dt:
+            from datetime import datetime as _dt
+            delay_s = int(max(0, (when_dt - _dt.now()).total_seconds()))
+        publish_news_post.schedule(args=(job.id, post.id), delay=delay_s)
+
+    clear_draft()
+
+    return templates.TemplateResponse('news_success.html', {
+        'request': request,
+        'brief_id': brief.id,
+        'num_posts': len(created_posts),
+        'skipped': [],
     })

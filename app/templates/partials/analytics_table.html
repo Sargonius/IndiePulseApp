@@ -1,93 +1,225 @@
 <table class="table" id="analytics_table">
-	<tr>
-		<th>ID</th>
-		<th>Media</th>
-		<th>Platform</th>
-		<th>Status</th>
-		<th>Published</th>
-		<th>URL</th>
-		<th>Preview</th>
-		<th>Likes</th>
-		<th>Retweets/Reposts</th>
-		<th>Replies/Comments</th>
-		<th>Quotes/Views</th>
-	</tr>
+	<thead>
+		<tr>
+			<th>ID</th>
+			<th>Media</th>
+			<th>Platform</th>
+			<th>Status</th>
+			<th>Published</th>
+			<th>Post Link</th>
+			<th>Preview</th>
+			<th>👍 Likes</th>
+			<th>🔄 Reposts</th>
+			<th>💬 Comments</th>
+			<th>👁️ Views</th>
+			<th>🔥 Total</th>
+			<th>Actions</th>
+		</tr>
+	</thead>
+	<tbody>
 	{% if posts|length == 0 %}
 	<tr>
-		<td colspan="11" style="text-align:center; padding:24px; color:#999;">
-			Нет постов для отображения. Создайте и опубликуйте посты через страницу News.
+		<td colspan="13" style="text-align:center; padding:24px; color:#999;">
+			No posts to display. Create and publish posts via the News page.
 		</td>
 	</tr>
 	{% else %}
 		{% for p in posts %}
-		<tr>
+		<tr class="analytics-row {% if p.m_total and p.m_total > 0 %}has-engagement{% endif %}"
+			data-platform="{{ p.platform_text }}"
+			data-status="{{ p.status_text }}"
+			data-published="{{ p.published_at.isoformat() if p.published_at else '' }}"
+			data-likes="{{ p.m_like if p.m_like is not none else 0 }}"
+			data-reposts="{{ p.m_repost if p.m_repost is not none else 0 }}"
+			data-comments="{{ p.m_reply if p.m_reply is not none else 0 }}"
+			data-engagement="{{ p.m_total or 0 }}"
+			data-views="{{ p.m_views if p.m_views is not none else 0 }}">
 			<td>{{ p.id }}</td>
 			<td>
 				{% if p.thumb_url %}
-					<img src="{{ p.thumb_url }}" alt="thumb" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
+					<img src="{{ p.thumb_url }}" alt="thumb" class="thumbnail-clickable" data-lightbox="true" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
 				{% else %}
 					—
 				{% endif %}
 			</td>
-			<td>{{ p.platform_text }}</td>
+			<td>
+				<span class="platform-badge platform-{{ p.platform_text }}">{{ p.platform_text }}</span>
+			</td>
 			<td>
 				{% if p.status_text == 'done' %}
-					<span style="color:#4caf50;">✓ {{ p.status_text }}</span>
+					<span class="badge success">✓ Published</span>
 				{% elif p.status_text == 'error' %}
-					<span style="color:#f44336;">✗ {{ p.status_text }}</span>
+					<span class="badge error">✗ Error</span>
+				{% elif p.status_text == 'queued' %}
+					<span class="badge default">⏳ Queued</span>
+				{% elif p.status_text == 'running' %}
+					<span class="badge running">🔄 Running</span>
 				{% else %}
-					{{ p.status_text }}
+					<span class="badge default">{{ p.status_text }}</span>
 				{% endif %}
 			</td>
-			<td>{{ p.published_at or '—' }}</td>
-			<td>{% if p.platform_url %}<a href="{{ p.platform_url }}" target="_blank">link</a>{% else %}—{% endif %}</td>
-			<td class="muted" style="max-width:420px; white-space:pre-wrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview or '' }}</td>
 			<td>
+				{% if p.published_at %}
+					<span title="{{ p.published_at }}">{{ p.published_at.strftime('%Y-%m-%d %H:%M') if p.published_at.strftime else p.published_at }}</span>
+				{% else %}
+					—
+				{% endif %}
+			</td>
+			<td>
+				{% if p.platform_url %}
+					<a href="{{ p.platform_url }}" target="_blank" class="btn btn-icon" title="Open post">🔗</a>
+				{% else %}
+					<span style="color:#999;">—</span>
+				{% endif %}
+			</td>
+			<td class="muted" style="max-width:300px; white-space:pre-wrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview[:100] if p.preview else '' }}{% if p.preview and p.preview|length > 100 %}...{% endif %}</td>
+			<td class="metric-cell">
 				{% if p.m_like is not none and p.m_like >= 0 %}
-					{{ p.m_like }}
+					<span class="metric-value">{{ p.m_like }}</span>
 				{% elif p.status_text == 'done' and p.platform_url %}
-					<span style="color:#999; font-size:11px;">нет данных</span>
+					<span class="metric-pending">—</span>
 				{% else %}
 					—
 				{% endif %}
 			</td>
-			<td>
+			<td class="metric-cell">
 				{% if p.m_repost is not none and p.m_repost >= 0 %}
-					{{ p.m_repost }}
+					<span class="metric-value">{{ p.m_repost }}</span>
 				{% elif p.status_text == 'done' and p.platform_url %}
-					<span style="color:#999; font-size:11px;">нет данных</span>
+					<span class="metric-pending">—</span>
 				{% else %}
 					—
 				{% endif %}
 			</td>
-			<td>
+			<td class="metric-cell">
 				{% if p.m_reply is not none and p.m_reply >= 0 %}
-					{{ p.m_reply }}
+					<span class="metric-value">{{ p.m_reply }}</span>
 				{% elif p.status_text == 'done' and p.platform_url %}
-					<span style="color:#999; font-size:11px;">нет данных</span>
+					<span class="metric-pending">—</span>
+				{% else %}
+					—
+				{% endif %}
+			</td>
+			<td class="metric-cell">
+				{% if p.m_views is not none %}
+					<span class="metric-value">{{ p.m_views }}</span>
+				{% elif p.status_text == 'done' and p.platform_url %}
+					<span class="metric-pending">—</span>
+				{% else %}
+					—
+				{% endif %}
+			</td>
+			<td class="metric-cell">
+				{% if p.m_total and p.m_total > 0 %}
+					<span class="engagement-badge">🔥 {{ p.m_total }}</span>
+				{% elif p.has_metrics %}
+					<span class="metric-pending">0</span>
 				{% else %}
 					—
 				{% endif %}
 			</td>
 			<td>
-				{% if p.m_quote is not none and p.m_quote >= 0 %}
-					{{ p.m_quote }}
-				{% elif p.status_text == 'done' and p.platform_url %}
-					<span style="color:#999; font-size:11px;">нет данных</span>
-				{% else %}
-					—
-				{% endif %}
+				<div class="row" style="gap:4px;flex-wrap:nowrap;">
+					<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-vals='{"id": {{ p.id }} }' hx-target="#analytics_table" hx-swap="outerHTML">⟳</button>
+					{% if p.status_text == 'done' and p.platform_url %}
+						<button class="btn btn-icon btn-red" title="Delete from platform" onclick="deleteRemote({{ p.id }})">🗑</button>
+					{% endif %}
+				</div>
 			</td>
 		</tr>
 		{% endfor %}
 	{% endif %}
+	</tbody>
 </table>
 
+<style>
+.platform-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.platform-badge.platform-vk { background: #4a76a8; color: white; }
+.platform-badge.platform-x { background: #1da1f2; color: white; }
+.platform-badge.platform-discord { background: #5865f2; color: white; }
+.platform-badge.platform-tg { background: #0088cc; color: white; }
+.platform-badge.platform-reddit { background: #ff4500; color: white; }
+.platform-badge.platform-fb_ru, .platform-badge.platform-fb_en { background: #1877f2; color: white; }
+.platform-badge.platform-yt { background: #ff0000; color: white; }
+.platform-badge.platform-tiktok { background: #000000; color: white; }
+.platform-badge.platform-bluesky { background: #0085ff; color: white; }
+
+.analytics-row.has-engagement td:first-child {
+	box-shadow: inset 3px 0 0 var(--success);
+}
+
+.engagement-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: #dcfce7;
+	color: #166534;
+	font-weight: 700;
+	font-size: 12px;
+	white-space: nowrap;
+}
+
+.metric-cell {
+	text-align: center;
+	min-width: 60px;
+}
+
+.metric-value {
+	font-weight: 600;
+	color: var(--text);
+}
+
+.metric-pending {
+	color: #999;
+	font-size: 11px;
+}
+
+#analytics_table thead th {
+	position: sticky;
+	top: 64px;
+	background: #f8fafc;
+	z-index: 10;
+}
+</style>
+
+<script>
+async function deleteRemote(postId) {
+	if (!confirm('Delete this post from the platform?')) return;
+	
+	try {
+		const resp = await fetch(`/api/posts/${postId}/delete_remote`, { method: 'POST' });
+		const data = await resp.json();
+		if (data.deleted) {
+			alert('Post deleted successfully!');
+			htmx.trigger('#analytics_table', 'refresh');
+		} else if (data.fallback_url) {
+			if (confirm('API deletion not supported. Open post page to delete manually?\n\n' + data.error)) {
+				window.open(data.fallback_url, '_blank');
+			}
+		} else {
+			alert('Error: ' + (data.error || 'Unknown error'));
+		}
+	} catch (e) {
+		alert('Request failed: ' + e.message);
+	}
+}
+
+// Trigger filter recalculation after table loads
+if (typeof filterAnalytics === 'function') {
+	setTimeout(filterAnalytics, 100);
+}
+</script>
+
 {% if posts|length > 0 %}
-<div style="margin-top:12px; padding:8px; background:#f5f5f5; border-radius:4px; font-size:13px; color:#666;">
-	<b>💡 Подсказка:</b> Если метрики показывают "нет данных", нажмите кнопку <b>"Update metrics"</b> выше для обновления статистики с платформ.
+<div style="margin-top:12px; padding:12px; background:#f0f9ff; border-left:3px solid var(--primary); border-radius:4px; font-size:13px; color:#1e40af;">
+	<b>💡 Tip:</b> Click "Update Metrics" to refresh statistics from all platforms. Some platforms may require specific API setup in Settings.
 </div>
 {% endif %}
-
-
-

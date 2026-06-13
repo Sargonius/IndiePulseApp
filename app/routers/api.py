@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlmodel import select
 from app.db.session import get_session
 from sqlmodel import Session
-from app.models.models import Brief, Post
+from app.models.models import Brief, Post, Project, now_ts
 from app.services.discord_client import DiscordClient
 from app.services.settings import load_settings, save_settings
 import httpx
@@ -714,10 +714,15 @@ def save_settings_endpoint(
 	yt_client_secret: str = Form(""),
 	yt_access_token: str = Form(""),
 	yt_refresh_token: str = Form(""),
+	fb_app_id: str = Form(""),
+	fb_app_secret: str = Form(""),
 	fb_ru_page_id: str = Form(""),
 	fb_en_page_id: str = Form(""),
 	fb_ru_page_access_token: str = Form(""),
 	fb_en_page_access_token: str = Form(""),
+	bluesky_handle: str = Form(""),
+	bluesky_app_password: str = Form(""),
+	bluesky_service: str = Form(""),
 	reddit_client_id: str = Form(""),
 	reddit_client_secret: str = Form(""),
 	reddit_username: str = Form(""),
@@ -768,6 +773,16 @@ def save_settings_endpoint(
 		updates["yt_access_token"] = yt_access_token.strip()
 	if yt_refresh_token.strip():
 		updates["yt_refresh_token"] = yt_refresh_token.strip()
+	if fb_app_id.strip():
+		updates["fb_app_id"] = fb_app_id.strip()
+	if fb_app_secret.strip():
+		updates["fb_app_secret"] = fb_app_secret.strip()
+	if bluesky_handle.strip():
+		updates["bluesky_handle"] = bluesky_handle.strip().lstrip('@')
+	if bluesky_app_password.strip():
+		updates["bluesky_app_password"] = bluesky_app_password.strip()
+	if bluesky_service.strip():
+		updates["bluesky_service"] = bluesky_service.strip()
 	if fb_ru_page_id.strip():
 		updates["fb_ru_page_id"] = fb_ru_page_id.strip()
 	if fb_en_page_id.strip():
@@ -1272,6 +1287,131 @@ def facebook_test():
 @router.get("/facebook/test")
 def facebook_test_get():
     return facebook_test()
+
+
+@router.post("/facebook/fetch_pages")
+def facebook_fetch_pages(
+    fb_app_id: str = Form(""),
+    fb_app_secret: str = Form(""),
+    fb_user_token: str = Form(""),
+):
+    """Easy setup: exchange a short-lived user token for a long-lived one,
+    then list manageable Pages with ready-to-save Page tokens."""
+    import html as _html
+    cfg = load_settings()
+    app_id = (fb_app_id or '').strip() or (cfg.get('fb_app_id') or '').strip()
+    app_secret = (fb_app_secret or '').strip() or (cfg.get('fb_app_secret') or '').strip()
+    user_token = (fb_user_token or '').strip()
+    # Persist app credentials for next time
+    updates = {}
+    if (fb_app_id or '').strip():
+        updates['fb_app_id'] = (fb_app_id or '').strip()
+    if (fb_app_secret or '').strip():
+        updates['fb_app_secret'] = (fb_app_secret or '').strip()
+    if updates:
+        save_settings(updates)
+    if not user_token:
+        return HTMLResponse("<span style='color:#b45309'>Paste a User Access Token from Graph API Explorer first.</span>")
+    notes = []
+    try:
+        with httpx.Client(timeout=20) as client:
+            # Step 1: exchange for a long-lived user token (60 days; Page tokens derived from it don't expire)
+            if app_id and app_secret:
+                r = client.get(
+                    "https://graph.facebook.com/v19.0/oauth/access_token",
+                    params={
+                        "grant_type": "fb_exchange_token",
+                        "client_id": app_id,
+                        "client_secret": app_secret,
+                        "fb_exchange_token": user_token,
+                    },
+                )
+                d = r.json()
+                if r.status_code < 400 and d.get('access_token'):
+                    user_token = d['access_token']
+                    notes.append("Token exchanged for a long-lived one ✓")
+                else:
+                    notes.append(f"Token exchange failed (using token as-is): {str(d)[:200]}")
+            else:
+                notes.append("No App ID/Secret — using token as-is (Page tokens may expire in ~1 hour)")
+            # Step 2: list pages with their Page tokens
+            r = client.get(
+                "https://graph.facebook.com/v19.0/me/accounts",
+                params={"fields": "id,name,access_token", "access_token": user_token, "limit": 50},
+            )
+            d = r.json()
+            if r.status_code >= 400 or 'error' in d:
+                raise RuntimeError(str(d.get('error') or d)[:400])
+            pages = d.get('data') or []
+    except Exception as exc:
+        logger.exception(f"fb.fetch_pages error: {exc}")
+        return HTMLResponse(f"<span style='color:red'>Failed: {_html.escape(str(exc))}</span>")
+    if not pages:
+        return HTMLResponse(
+            "<span style='color:#b45309'>No Pages found. Make sure the token has scopes "
+            "pages_show_list + pages_manage_posts and that you are an admin of the Page.</span>"
+        )
+    blocks = [f"<div class='muted' style='margin-bottom:6px;'>{' · '.join(_html.escape(n) for n in notes)}</div>"]
+    for p in pages:
+        pid = _html.escape(str(p.get('id') or ''))
+        name = _html.escape(str(p.get('name') or ''))
+        ptok = _html.escape(str(p.get('access_token') or ''))
+        if not (pid and ptok):
+            continue
+        blocks.append(
+            f"<div style='display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid #e5e7eb;'>"
+            f"<b style='flex:1'>{name}</b><span class='muted'>{pid}</span>"
+            f"<form hx-post='/api/facebook/assign_page' hx-target='#fb_status' hx-swap='innerHTML' style='display:inline'>"
+            f"<input type='hidden' name='page_id' value='{pid}'/><input type='hidden' name='page_token' value='{ptok}'/>"
+            f"<input type='hidden' name='page_name' value='{name}'/><input type='hidden' name='lang' value='ru'/>"
+            f"<button type='submit' class='btn'>Use as RU</button></form>"
+            f"<form hx-post='/api/facebook/assign_page' hx-target='#fb_status' hx-swap='innerHTML' style='display:inline'>"
+            f"<input type='hidden' name='page_id' value='{pid}'/><input type='hidden' name='page_token' value='{ptok}'/>"
+            f"<input type='hidden' name='page_name' value='{name}'/><input type='hidden' name='lang' value='en'/>"
+            f"<button type='submit' class='btn'>Use as EN</button></form>"
+            f"</div>"
+        )
+    return HTMLResponse("<div>" + "".join(blocks) + "</div>")
+
+
+@router.post("/facebook/assign_page")
+def facebook_assign_page(
+    lang: str = Form(...),
+    page_id: str = Form(...),
+    page_token: str = Form(...),
+    page_name: str = Form(""),
+):
+    import html as _html
+    lang = (lang or '').strip().lower()
+    if lang not in ('ru', 'en'):
+        return HTMLResponse("<span style='color:red'>Invalid language</span>")
+    save_settings({
+        f'fb_{lang}_page_id': (page_id or '').strip(),
+        f'fb_{lang}_page_access_token': (page_token or '').strip(),
+    })
+    logger.info(f"fb.assign_page lang={lang} page_id={page_id} name={page_name}")
+    return HTMLResponse(
+        f"<span style='color:green'>Saved \"{_html.escape(page_name or page_id)}\" as {lang.upper()} page ✓</span>"
+    )
+
+
+@router.post("/bluesky/test")
+def bluesky_test():
+    """Verify Bluesky credentials by creating a session (no post is made)."""
+    import html as _html
+    try:
+        cfg = load_settings()
+        handle = (cfg.get('bluesky_handle') or '').strip()
+        app_pw = (cfg.get('bluesky_app_password') or '').strip()
+        if not (handle and app_pw):
+            return HTMLResponse("<span style='color:#b45309'>Enter handle and app password, click Save, then Test.</span>")
+        from app.services.bluesky_client import BlueskyClient
+        client = BlueskyClient(handle, app_pw, (cfg.get('bluesky_service') or 'https://bsky.social'))
+        client.login()
+        return HTMLResponse(f"<span style='color:green'>Connected as @{_html.escape(client.handle or handle)} ✓</span>")
+    except Exception as exc:
+        logger.exception(f"bsky.test error: {exc}")
+        return HTMLResponse(f"<span style='color:red'>Bluesky login failed: {_html.escape(str(exc))}</span>")
 
 
 # YouTube OAuth (installed app style flow via user-provided tokens)
@@ -2127,13 +2267,41 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
         post_id = None
     if not post_id:
         return HTMLResponse("<span style='color:red'>no_post_in_payload</span>", status_code=400)
-    # Create a new queued job with same payload
-    nj = Job(kind=JobKindEnum.publish, payload_json=job.payload_json, status=JobStatusEnum.queued)
-    session.add(nj)
-    session.commit()
-    session.refresh(nj)
-    from app.jobs.tasks import publish_news_post
-    publish_news_post.schedule(args=(nj.id, post_id), delay=0)
+    # Reset the post back to queued, otherwise publish_news_post exits with
+    # 'skipped_already_handled' and the new job hangs in queued forever.
+    from app.models.models import PostStatusEnum as _PSE
+    target_post = session.get(Post, post_id)
+    do_schedule = True
+    if target_post is None:
+        do_schedule = False
+    elif target_post.status == _PSE.done:
+        # Already published — don't duplicate the post on an accidental retry
+        do_schedule = False
+    else:
+        if target_post.status not in (_PSE.queued, _PSE.running):
+            target_post.status = _PSE.queued
+        target_post.error_text = None
+        # Manual retry means "publish now", drop a stale schedule
+        target_post.scheduled_at = None
+        session.add(target_post)
+        session.commit()
+    if do_schedule:
+        # Create a new queued job with same payload
+        nj = Job(kind=JobKindEnum.publish, payload_json=job.payload_json, status=JobStatusEnum.queued)
+        session.add(nj)
+        session.commit()
+        session.refresh(nj)
+        from app.jobs.tasks import publish_news_post
+        publish_news_post.schedule(args=(nj.id, post_id), delay=0)
+        # The old failed job row is no longer actionable — mark it handled
+        try:
+            if job.status in (JobStatusEnum.queued, JobStatusEnum.error):
+                job.status = JobStatusEnum.done
+                job.last_error = ((job.last_error or '') + ' retried_as_job_' + str(nj.id)).strip()
+                session.add(job)
+                session.commit()
+        except Exception:
+            pass
     # refresh table
     from app.models.models import Job as _Job, Post as _Post, Brief as _Brief
     rows = session.exec(select(_Job).order_by(_Job.created_at.desc()).limit(50)).all()
@@ -2173,3 +2341,644 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
             'thumb_url': thumb_url,
         })
     return templates_api.TemplateResponse('partials/jobs_table.html', {'request': request, 'jobs': enriched})
+
+
+# ==================== Calendar API ====================
+
+@router.get("/calendar/events")
+def calendar_events(start: Optional[str] = None, end: Optional[str] = None, session: Session = Depends(get_session)):
+    """Get grouped posts as FullCalendar events within the requested date range."""
+    from sqlmodel import select
+    from sqlmodel.sql.expression import or_
+    from datetime import datetime as _dt
+    from app.models.models import Post as _Post, Brief as _Brief
+    
+    query = select(_Post)
+    if start and end:
+        try:
+            start_dt = _dt.fromisoformat(start.replace('Z', '').split('+')[0].split('.')[0])
+            end_dt = _dt.fromisoformat(end.replace('Z', '').split('+')[0].split('.')[0])
+            query = query.where(or_(
+                _Post.scheduled_at.between(start_dt, end_dt),
+                _Post.published_at.between(start_dt, end_dt),
+                _Post.created_at.between(start_dt, end_dt),
+            ))
+        except Exception:
+            pass
+    rows = session.exec(query.order_by(_Post.created_at.desc()).limit(500)).all()
+    
+    groups = {}
+    for p in rows:
+        key = p.brief_id or f"post_{p.id}"
+        if key not in groups:
+            groups[key] = {'posts': [], 'brief': None}
+        groups[key]['posts'].append(p)
+    
+    events = []
+    for key, bucket in groups.items():
+        posts = bucket['posts']
+        brief_id = posts[0].brief_id
+        brief = session.get(_Brief, brief_id) if brief_id else None
+        
+        preview = ''
+        thumb_url = None
+        brief_type = ''
+        if brief:
+            base = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
+            preview = base[:120] + ('...' if len(base) > 120 else '')
+            media_rel = getattr(brief, 'media_path', None)
+            if media_rel:
+                name = str(media_rel).replace('\\', '/').split('/')[-1]
+                thumb_url = f"/media/{name}"
+            brief_type = getattr(brief, 'type', '') or ''
+        
+        platform_items = []
+        statuses = []
+        dates = []
+        for p in posts:
+            platform = p.platform.value if hasattr(p.platform, 'value') else str(p.platform)
+            status = p.status.value if hasattr(p.status, 'value') else str(p.status)
+            statuses.append(status)
+            event_date = p.scheduled_at or p.published_at or p.created_at
+            if event_date:
+                dates.append(event_date)
+            platform_items.append({
+                'platform': platform,
+                'status': status,
+                'post_id': p.id,
+                'platform_url': p.platform_url,
+            })
+        
+        # Group status: error > running > queued > done
+        if any(s == 'error' for s in statuses):
+            group_status = 'error'
+        elif any(s == 'running' for s in statuses):
+            group_status = 'running'
+        elif any(s == 'queued' for s in statuses):
+            group_status = 'queued'
+        elif all(s == 'done' for s in statuses):
+            group_status = 'done'
+        else:
+            group_status = 'queued'
+        
+        # Event date: earliest meaningful date in group
+        event_date = min(dates) if dates else None
+        if not event_date:
+            continue
+        
+        type_label = 'Post'
+        if str(brief_type) == 'video':
+            type_label = 'Video'
+        elif str(brief_type) == 'news':
+            type_label = 'Post'
+        
+        platforms_label = ','.join(sorted({x['platform'] for x in platform_items}))
+        title = f"{type_label} ({len(platform_items)}): {preview[:40]}{'...' if len(preview) > 40 else ''}"
+        
+        events.append({
+            'id': f"brief_{brief_id or key}",
+            'title': title,
+            'start': event_date.isoformat(),
+            'allDay': False,
+            'startEditable': group_status == 'queued',
+            'extendedProps': {
+                'brief_id': brief_id,
+                'status': group_status,
+                'preview': preview,
+                'thumb_url': thumb_url,
+                'platforms': platform_items,
+                'platforms_label': platforms_label,
+                'type_label': type_label,
+                'post_ids': [x['post_id'] for x in platform_items],
+            }
+        })
+    
+    return {'events': events}
+
+
+class CalendarMoveRequest(BaseModel):
+    post_id: Optional[int] = None
+    brief_id: Optional[int] = None
+    post_ids: Optional[List[int]] = None
+    new_date: str
+
+
+@router.post("/calendar/move")
+def calendar_move(req: CalendarMoveRequest, session: Session = Depends(get_session)):
+    """Move a group (brief) or single post to a new date (drag-drop from calendar)."""
+    from datetime import datetime as _dt
+    from app.models.models import Post, PostStatusEnum
+    from sqlmodel import select
+    
+    # Parse new date
+    try:
+        date_str = req.new_date.replace('Z', '').split('+')[0].split('.')[0]
+        new_dt = _dt.fromisoformat(date_str)
+    except Exception as e:
+        return {'ok': False, 'error': f'Invalid date format: {e}'}
+    
+    # Update group if brief_id is provided
+    if req.brief_id:
+        posts = session.exec(
+            select(Post).where(Post.brief_id == req.brief_id, Post.status == PostStatusEnum.queued)
+        ).all()
+        if not posts:
+            return {'ok': False, 'error': 'No queued posts in this group'}
+        for p in posts:
+            p.scheduled_at = new_dt
+            session.add(p)
+        session.commit()
+        return {'ok': True}
+    
+    # Update list of post_ids if provided
+    if req.post_ids:
+        posts = session.exec(
+            select(Post).where(Post.id.in_(req.post_ids), Post.status == PostStatusEnum.queued)
+        ).all()
+        if not posts:
+            return {'ok': False, 'error': 'No queued posts found'}
+        for p in posts:
+            p.scheduled_at = new_dt
+            session.add(p)
+        session.commit()
+        return {'ok': True}
+    
+    # Fallback to single post_id
+    if not req.post_id:
+        return {'ok': False, 'error': 'Missing post_id'}
+    post = session.get(Post, req.post_id)
+    if not post:
+        return {'ok': False, 'error': 'Post not found'}
+    if post.status != PostStatusEnum.queued:
+        return {'ok': False, 'error': 'Can only move queued posts'}
+    
+    # Update post
+    post.scheduled_at = new_dt
+    session.add(post)
+    session.commit()
+    
+    return {'ok': True}
+
+
+# ==================== Settings Status & Post Management ====================
+
+@router.get("/settings/status")
+def settings_status():
+    """Check the status of all platform integrations."""
+    cfg = load_settings()
+    
+    def check_discord():
+        url = (cfg.get('discord_webhook_ru') or cfg.get('discord_webhook_en') or cfg.get('discord_webhook_url') or '').strip()
+        if not url:
+            return {'status': 'not_configured', 'message': 'No webhook URL'}
+        return {'status': 'configured', 'message': 'Webhook URL set'}
+    
+    def check_telegram():
+        token = (cfg.get('tg_bot_token') or '').strip()
+        chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+        if not token:
+            return {'status': 'not_configured', 'message': 'No bot token'}
+        if not chat_id:
+            return {'status': 'partial', 'message': 'Missing chat ID'}
+        return {'status': 'configured', 'message': 'Bot token and chat ID set'}
+    
+    def check_vk():
+        token = (cfg.get('vk_access_token') or '').strip()
+        group_id = (cfg.get('vk_group_id') or '').strip()
+        if not token:
+            return {'status': 'not_configured', 'message': 'No access token'}
+        if not group_id:
+            return {'status': 'partial', 'message': 'Missing group ID'}
+        return {'status': 'configured', 'message': 'Token and group ID set'}
+    
+    def check_x():
+        token = (cfg.get('x_access_token') or '').strip()
+        if not token:
+            return {'status': 'not_configured', 'message': 'No access token'}
+        api_key = (cfg.get('x_api_key') or '').strip()
+        oauth_token = (cfg.get('x_oauth_token') or '').strip()
+        if not (api_key and oauth_token):
+            return {'status': 'partial', 'message': 'Text only (no media upload)'}
+        return {'status': 'configured', 'message': 'Full access configured'}
+    
+    def check_youtube():
+        access = (cfg.get('yt_access_token') or '').strip()
+        refresh = (cfg.get('yt_refresh_token') or '').strip()
+        client_id = (cfg.get('yt_client_id') or '').strip()
+        if not (access and refresh):
+            return {'status': 'not_configured', 'message': 'No tokens'}
+        if not client_id:
+            return {'status': 'partial', 'message': 'Missing client ID'}
+        return {'status': 'configured', 'message': 'OAuth tokens set'}
+    
+    def check_facebook():
+        ru_id = (cfg.get('fb_ru_page_id') or '').strip()
+        ru_token = (cfg.get('fb_ru_page_access_token') or '').strip()
+        en_id = (cfg.get('fb_en_page_id') or '').strip()
+        en_token = (cfg.get('fb_en_page_access_token') or '').strip()
+        ru_ok = bool(ru_id and ru_token)
+        en_ok = bool(en_id and en_token)
+        if not (ru_ok or en_ok):
+            return {'status': 'not_configured', 'message': 'No pages configured'}
+        if ru_ok and en_ok:
+            return {'status': 'configured', 'message': 'RU and EN pages set'}
+        return {'status': 'partial', 'message': 'Only one page configured'}
+    
+    def check_reddit():
+        cid = (cfg.get('reddit_client_id') or '').strip()
+        csec = (cfg.get('reddit_client_secret') or '').strip()
+        uname = (cfg.get('reddit_username') or '').strip()
+        pwd = (cfg.get('reddit_password') or '').strip()
+        sub = (cfg.get('reddit_subreddit_en') or '').strip()
+        if not (cid and csec and uname and pwd):
+            return {'status': 'not_configured', 'message': 'Missing credentials'}
+        if not sub:
+            return {'status': 'partial', 'message': 'Missing subreddit'}
+        return {'status': 'configured', 'message': 'Full credentials set'}
+    
+    def check_tiktok():
+        token = (cfg.get('tiktok_access_token') or '').strip()
+        if not token:
+            return {'status': 'not_configured', 'message': 'No access token (export mode)'}
+        return {'status': 'configured', 'message': 'API access configured'}
+    
+    def check_openai():
+        key = (cfg.get('openai_api_key') or '').strip()
+        if not key:
+            return {'status': 'not_configured', 'message': 'No API key'}
+        return {'status': 'configured', 'message': 'API key set'}
+
+    def check_bluesky():
+        handle = (cfg.get('bluesky_handle') or '').strip()
+        app_pw = (cfg.get('bluesky_app_password') or '').strip()
+        if not (handle or app_pw):
+            return {'status': 'not_configured', 'message': 'No handle / app password'}
+        if not (handle and app_pw):
+            return {'status': 'partial', 'message': 'Missing handle or app password'}
+        return {'status': 'configured', 'message': f'@{handle}'}
+
+    return {
+        'discord': check_discord(),
+        'telegram': check_telegram(),
+        'vk': check_vk(),
+        'x': check_x(),
+        'youtube': check_youtube(),
+        'facebook': check_facebook(),
+        'reddit': check_reddit(),
+        'tiktok': check_tiktok(),
+        'bluesky': check_bluesky(),
+        'openai': check_openai(),
+    }
+
+
+@router.post("/posts/{post_id}/publish_now")
+def publish_post_now(post_id: int, session: Session = Depends(get_session)):
+    """Immediately publish a scheduled post."""
+    from app.models.models import Post, PostStatusEnum, Job, JobKindEnum, JobStatusEnum
+    import json as _json
+    
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if post.status != PostStatusEnum.queued:
+        raise HTTPException(status_code=400, detail="Post is not in queued status")
+    
+    post.scheduled_at = None
+    session.add(post)
+    session.commit()
+    
+    payload = {"post_id": post.id}
+    job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    
+    from app.jobs.tasks import publish_news_post
+    publish_news_post.schedule(args=(job.id, post.id), delay=0)
+    
+    return {"ok": True, "message": "Publishing now", "job_id": job.id}
+
+
+@router.get("/posts/{post_id}/edit_data")
+def get_post_edit_data(post_id: int, session: Session = Depends(get_session)):
+    """Get post and brief data for editing."""
+    from app.models.models import Post, Brief
+    
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    brief = session.get(Brief, post.brief_id) if post.brief_id else None
+    
+    return {
+        'post': {
+            'id': post.id,
+            'platform': post.platform.value if hasattr(post.platform, 'value') else str(post.platform),
+            'status': post.status.value if hasattr(post.status, 'value') else str(post.status),
+            'scheduled_at': post.scheduled_at.isoformat() if post.scheduled_at else None,
+            'brief_id': post.brief_id,
+        },
+        'brief': {
+            'id': brief.id if brief else None,
+            'text_ru': brief.text_ru if brief else '',
+            'text_en': brief.text_en if brief else '',
+            'title': brief.title if brief else '',
+            'tags_json': brief.tags_json if brief else '',
+            'media_path': brief.media_path if brief else None,
+        } if brief else None
+    }
+
+
+@router.post("/posts/{post_id}/update")
+def update_post(
+    post_id: int,
+    text_ru: Optional[str] = Form(None),
+    text_en: Optional[str] = Form(None),
+    title: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    scheduled_at: Optional[str] = Form(None),
+    session: Session = Depends(get_session)
+):
+    """Update post and its brief. Updates all queued posts sharing the same brief."""
+    from app.models.models import Post, Brief, PostStatusEnum
+    from datetime import datetime as _dt
+    
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    if post.brief_id:
+        brief = session.get(Brief, post.brief_id)
+        if brief:
+            if text_ru is not None:
+                brief.text_ru = text_ru
+            if text_en is not None:
+                brief.text_en = text_en
+            if title is not None:
+                brief.title = title
+            if tags is not None:
+                brief.tags_json = tags
+            session.add(brief)
+    
+    if scheduled_at is not None:
+        new_dt = None
+        if scheduled_at.strip():
+            try:
+                new_dt = _dt.fromisoformat(scheduled_at.strip())
+            except Exception:
+                pass
+        
+        post.scheduled_at = new_dt
+        session.add(post)
+        
+        if post.brief_id:
+            from sqlmodel import select
+            related = session.exec(
+                select(Post).where(
+                    Post.brief_id == post.brief_id,
+                    Post.status == PostStatusEnum.queued,
+                    Post.id != post.id
+                )
+            ).all()
+            for p in related:
+                p.scheduled_at = new_dt
+                session.add(p)
+    
+    session.commit()
+    return {"ok": True, "message": "Post updated"}
+
+
+@router.post("/posts/{post_id}/delete_remote")
+def delete_post_remote(post_id: int, session: Session = Depends(get_session)):
+    """Delete a post from the remote platform. Returns fallback URL if API delete not supported."""
+    from app.models.models import Post
+    
+    post = session.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    
+    cfg = load_settings()
+    platform = str(post.platform)
+    deleted = False
+    error = None
+    fallback_url = post.platform_url
+    
+    try:
+        if platform.endswith('vk') and post.platform_post_id:
+            token = (cfg.get('vk_access_token') or '').strip()
+            if token and post.platform_post_id:
+                parts = post.platform_post_id.split('_')
+                owner_id = parts[0] if len(parts) > 0 else ''
+                post_vk_id = parts[1] if len(parts) > 1 else ''
+                if owner_id and post_vk_id:
+                    with httpx.Client(timeout=15) as client:
+                        r = client.post("https://api.vk.com/method/wall.delete", data={
+                            "owner_id": owner_id,
+                            "post_id": post_vk_id,
+                            "access_token": token,
+                            "v": "5.199"
+                        })
+                        d = r.json()
+                        if d.get('response') == 1:
+                            deleted = True
+                        else:
+                            error = str(d.get('error', d))
+        
+        elif platform.endswith('x') and post.platform_post_id:
+            try:
+                token = _x_ensure_token()
+                with httpx.Client(timeout=15) as client:
+                    r = client.delete(
+                        f"https://api.twitter.com/2/tweets/{post.platform_post_id}",
+                        headers={"Authorization": f"Bearer {token}"}
+                    )
+                    if r.status_code < 300:
+                        deleted = True
+                    else:
+                        error = f"HTTP {r.status_code}: {r.text[:200]}"
+            except Exception as e:
+                error = str(e)
+        
+        elif platform in ('fb_ru', 'fb_en', 'PlatformEnum.fb_ru', 'PlatformEnum.fb_en') and post.platform_post_id:
+            is_ru = 'ru' in platform
+            page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+            if page_token:
+                with httpx.Client(timeout=15) as client:
+                    r = client.delete(
+                        f"https://graph.facebook.com/v19.0/{post.platform_post_id}",
+                        params={"access_token": page_token}
+                    )
+                    if r.status_code < 300:
+                        deleted = True
+                    else:
+                        error = f"HTTP {r.status_code}: {r.text[:200]}"
+        
+        elif platform.endswith('reddit') and post.platform_post_id:
+            try:
+                from app.services.reddit_client import RedditClient
+                cid = (cfg.get('reddit_client_id') or '').strip()
+                csec = (cfg.get('reddit_client_secret') or '').strip()
+                uname = (cfg.get('reddit_username') or '').strip()
+                pwd = (cfg.get('reddit_password') or '').strip()
+                if cid and csec and uname and pwd:
+                    rc = RedditClient(cid, csec, uname, pwd)
+                    sid = post.platform_post_id.replace('t3_', '')
+                    submission = rc.reddit.submission(id=sid)
+                    submission.delete()
+                    deleted = True
+            except Exception as e:
+                error = str(e)
+        
+        elif platform.endswith('tg') and post.platform_post_id:
+            token = (cfg.get('tg_bot_token') or '').strip()
+            chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+            if token and chat_id and post.platform_post_id:
+                try:
+                    from app.services.telegram_client import TelegramClient
+                    tg = TelegramClient(token)
+                    result = tg.delete_message(chat_id, int(post.platform_post_id))
+                    if result.get('ok'):
+                        deleted = True
+                    else:
+                        error = str(result)
+                except Exception as e:
+                    error = str(e)
+        
+        else:
+            error = "Platform does not support API deletion"
+    
+    except Exception as e:
+        error = str(e)
+    
+    return {
+        "deleted": deleted,
+        "error": error,
+        "fallback_url": fallback_url if not deleted else None,
+        "platform": platform
+    }
+
+
+# ── Projects ─────────────────────────────────────────────────────────────────
+
+def _projects_list_html(request: Request, session: Session) -> HTMLResponse:
+    rows = session.exec(
+        select(Project).where(Project.user_id == 1).order_by(Project.sort_order, Project.id)
+    ).all()
+    projects = [
+        {
+            "id": p.id,
+            "name": p.name,
+            "icon_url": f"/media/{p.icon_path}" if p.icon_path else None,
+            "tags_json": p.tags_json or "",
+            "platforms_json": p.platforms_json or "{}",
+            "sort_order": p.sort_order,
+        }
+        for p in rows
+    ]
+    return templates_api.TemplateResponse(
+        "partials/projects_list.html",
+        {"request": request, "projects": projects},
+    )
+
+
+@router.get("/projects")
+def list_projects(session: Session = Depends(get_session)):
+    rows = session.exec(
+        select(Project).where(Project.user_id == 1).order_by(Project.sort_order, Project.id)
+    ).all()
+    return [
+        {
+            "id": p.id,
+            "name": p.name,
+            "icon_url": f"/media/{p.icon_path}" if p.icon_path else None,
+            "tags_json": p.tags_json or "",
+            "platforms_json": p.platforms_json or "{}",
+            "sort_order": p.sort_order,
+        }
+        for p in rows
+    ]
+
+
+@router.get("/projects/partial", response_class=HTMLResponse)
+def projects_partial(request: Request, session: Session = Depends(get_session)):
+    return _projects_list_html(request, session)
+
+
+@router.post("/projects", response_class=HTMLResponse)
+def create_project(
+    request: Request,
+    name: str = Form(...),
+    tags_json: Optional[str] = Form(""),
+    platforms_json: Optional[str] = Form("{}"),
+    sort_order: Optional[int] = Form(0),
+    icon: Optional[UploadFile] = File(None),
+    session: Session = Depends(get_session),
+):
+    icon_path = None
+    if icon and icon.filename:
+        os.makedirs("media", exist_ok=True)
+        safe_name = icon.filename.replace("..", "").replace("/", "_").replace("\\", "_")
+        rel = f"media/{int(time.time())}_{safe_name}"
+        with open(rel, "wb") as f:
+            f.write(icon.file.read())
+        icon_path = rel.split("media/", 1)[-1]
+    p = Project(
+        user_id=1,
+        name=(name or "").strip(),
+        icon_path=icon_path,
+        tags_json=(tags_json or "").strip(),
+        platforms_json=(platforms_json or "{}").strip(),
+        sort_order=sort_order or 0,
+    )
+    session.add(p)
+    session.commit()
+    return _projects_list_html(request, session)
+
+
+@router.post("/projects/{project_id}/update", response_class=HTMLResponse)
+def update_project(
+    project_id: int,
+    request: Request,
+    name: Optional[str] = Form(None),
+    tags_json: Optional[str] = Form(None),
+    platforms_json: Optional[str] = Form(None),
+    sort_order: Optional[int] = Form(None),
+    icon: Optional[UploadFile] = File(None),
+    session: Session = Depends(get_session),
+):
+    p = session.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if name is not None:
+        p.name = name.strip()
+    if tags_json is not None:
+        p.tags_json = tags_json.strip()
+    if platforms_json is not None:
+        p.platforms_json = platforms_json.strip()
+    if sort_order is not None:
+        p.sort_order = sort_order
+    if icon and icon.filename:
+        os.makedirs("media", exist_ok=True)
+        safe_name = icon.filename.replace("..", "").replace("/", "_").replace("\\", "_")
+        rel = f"media/{int(time.time())}_{safe_name}"
+        with open(rel, "wb") as f:
+            f.write(icon.file.read())
+        p.icon_path = rel.split("media/", 1)[-1]
+    p.updated_at = now_ts()
+    session.add(p)
+    session.commit()
+    return _projects_list_html(request, session)
+
+
+@router.post("/projects/{project_id}/delete", response_class=HTMLResponse)
+def delete_project(
+    project_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    p = session.get(Project, project_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Project not found")
+    session.delete(p)
+    session.commit()
+    return _projects_list_html(request, session)

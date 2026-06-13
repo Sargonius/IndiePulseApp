@@ -24,6 +24,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             return "not_found"
         # Skip if not queued anymore (avoid duplicate publish)
         if post.status not in (PostStatusEnum.queued, PostStatusEnum.running):
+            # Close the job too, otherwise it hangs in 'queued' forever
+            if job is not None:
+                job.status = JobStatusEnum.done
+                job.last_error = ((job.last_error or '') + ' skipped_already_handled').strip()
+                session.add(job)
+                session.commit()
             return 'skipped_already_handled'
 
         # Respect schedule edits: if scheduled_at is in the future, reschedule and exit
@@ -308,6 +314,38 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         session.add(job)
                         session.commit()
             client = XClient(token)
+            import httpx as _httpx
+            from app.services.bluesky_client import _sentence_chunks as _x_chunks
+            _x_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+            def _x_post_v2(text_val: str, media: Optional[list] = None, reply_to: Optional[str] = None) -> Optional[str]:
+                payload = {"text": text_val}
+                if media:
+                    payload["media"] = {"media_ids": media[:4]}
+                if reply_to:
+                    payload["reply"] = {"in_reply_to_tweet_id": reply_to}
+                with _httpx.Client(timeout=20) as _h:
+                    r = _h.post("https://api.twitter.com/2/tweets", json=payload, headers=_x_headers)
+                    d = r.json()
+                if r.status_code >= 400:
+                    raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
+                return (d.get('data') or {}).get('id')
+
+            def _x_thread_fallback(media: Optional[list] = None) -> Optional[str]:
+                """280-safe thread: first tweet keeps hashtags (+media), the rest go as replies.
+                Used when the account has no Premium and a long single tweet got 403."""
+                tags = (hashtags or '').strip()
+                fixed = ('\n' + tags) if tags else ''
+                budget = max(40, 280 - len(fixed))
+                chunks = _x_chunks((base_text or '').strip(), budget)
+                first_text = ((chunks[0] if chunks else '') + fixed).strip() or tags
+                first_id = _x_post_v2(first_text, media=media)
+                parent = first_id
+                for seg in chunks[1:]:
+                    if not parent:
+                        break
+                    parent = _x_post_v2(seg, reply_to=parent)
+                return first_id
             try:
                 # Read x_thread option from job payload (default False)
                 thread_enabled = False
@@ -323,17 +361,22 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     import httpx, re
                     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
                     if not thread_enabled:
-                        # Do not split: send full text (may exceed 280). Do not trim or split on failure.
+                        # Send full text in one tweet (works with Premium, >280 allowed).
+                        # Without Premium X returns 403 — fall back to a thread automatically.
                         full_text = (base_text or '').strip()
                         if hashtags:
                             full_text = (full_text + '\n' + hashtags).strip()
-                        payload = {"text": full_text, "media": {"media_ids": media_ids[:4]}}
-                        with httpx.Client(timeout=20) as h:
-                            r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
-                            d = r.json()
-                        if r.status_code >= 400:
-                            raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
-                        tid = (d.get('data') or {}).get('id')
+                        try:
+                            tid = _x_post_v2(full_text, media=media_ids)
+                        except RuntimeError as exc:
+                            if len(full_text) > 280 and 'status=403' in str(exc):
+                                tid = _x_thread_fallback(media=media_ids)
+                                if job is not None:
+                                    job.last_error = ((job.last_error or '') + ' x_280_limit_fallback_thread').strip()
+                                    session.add(job)
+                                    session.commit()
+                            else:
+                                raise
                         url = f"https://twitter.com/i/web/status/{tid}" if tid else None
                     else:
                         # Split by sentence boundaries; ensure hashtags in first tweet
@@ -383,11 +426,26 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     # no media
                     import re
                     if not thread_enabled:
-                        # Do not split; post full text in one tweet
+                        # Post full text in one tweet (XClient.tweet would silently cut at 280,
+                        # so go through the raw API for long texts and fall back to a thread on 403).
                         full_text = (base_text or '').strip()
                         if hashtags:
                             full_text = (full_text + '\n' + hashtags).strip()
-                        tid2, url = client.tweet(full_text)
+                        if len(full_text) <= 280:
+                            tid2, url = client.tweet(full_text)
+                        else:
+                            try:
+                                tid2 = _x_post_v2(full_text)
+                            except RuntimeError as exc:
+                                if 'status=403' in str(exc):
+                                    tid2 = _x_thread_fallback()
+                                    if job is not None:
+                                        job.last_error = ((job.last_error or '') + ' x_280_limit_fallback_thread').strip()
+                                        session.add(job)
+                                        session.commit()
+                                else:
+                                    raise
+                            url = f"https://twitter.com/i/web/status/{tid2}" if tid2 else None
                         if tid2:
                             post.platform_post_id = tid2
                     else:
@@ -670,6 +728,68 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
+            path = media_rel.replace('\\', '/')
+            if not path.startswith('media/'):
+                path = f"media/{path}"
+            import os as _os
+            path = _os.path.abspath(path)
+            # Title preference: use explicit yt_title from job/brief if present, else EN then RU
+            title = None
+            try:
+                import json as _json
+                override_title = None
+                if job and job.payload_json:
+                    try:
+                        override_title = (_json.loads(job.payload_json) or {}).get('yt_title')
+                    except Exception:
+                        override_title = None
+                if override_title:
+                    title = override_title
+            except Exception:
+                pass
+            if not title:
+                title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
+            # For YouTube, include English description and hashtags
+            desc = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'Uploaded via IndiePulse')
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    desc = (desc + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
+            yt = YouTubeClient(
+                access_token=(cfg.get('yt_access_token') or '').strip(),
+                refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
+                client_id=(cfg.get('yt_client_id') or '').strip(),
+                client_secret=(cfg.get('yt_client_secret') or '').strip(),
+            )
+            try:
+                _logger.info(f"yt.upload start path={path} title_len={len(title or '')} desc_len={len(desc or '')}")
+                vid, url = yt.upload_video(path, title=title, description=desc)
+                post.platform_post_id = vid
+                post.platform_url = url
+                # Playlist handling
+                playlist_id = (cfg.get('yt_playlist_id') or '').strip()
+                if not playlist_id:
+                    pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
+                    playlist_id = yt.ensure_playlist(pname) or ''
+                if playlist_id and vid:
+                    try:
+                        yt.add_to_playlist(playlist_id, vid)
+                        _logger.info(f"yt.add_to_playlist ok playlist_id={playlist_id} video_id={vid}")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                _logger.error(f"yt.upload error: {exc}")
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
         elif str(post.platform) in ('PlatformEnum.fb_ru', 'fb_ru', 'PlatformEnum.fb_en', 'fb_en'):
             # Facebook Page posting (separate RU / EN pages)
             from app.services.facebook_client import FacebookClient
@@ -686,6 +806,136 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 if job is not None:
                     job.status = JobStatusEnum.error
                     job.last_error = 'fb_missing_page_or_token'
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+            # RU page gets RU text, EN page gets EN text (with fallback to the other)
+            primary = ((getattr(brief, 'text_ru', None) if is_ru else getattr(brief, 'text_en', None)) or '') if brief else ''
+            fallback = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
+            message = (primary or fallback).strip()
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    message = (message + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
+            # Prefer override / first gallery item, then normal/horizontal media
+            media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+            try:
+                import json as _json
+                if job and job.payload_json:
+                    parsed = (_json.loads(job.payload_json) or {})
+                    override = parsed.get('media_rel')
+                    gallery_list = parsed.get('gallery') or []
+                    if override:
+                        media_rel = override
+                    elif (not media_rel) and gallery_list:
+                        media_rel = gallery_list[0]
+            except Exception:
+                pass
+            path_abs = None
+            if media_rel:
+                p = media_rel.replace('\\', '/')
+                if not p.startswith('media/'):
+                    p = f"media/{p}"
+                import os as _os
+                path_abs = _os.path.abspath(p)
+            try:
+                from loguru import logger as _logger
+                import mimetypes as _m
+                fb = FacebookClient(page_token)
+                _logger.info(f"fb.publish start platform={'fb_ru' if is_ru else 'fb_en'} page_id={page_id}")
+                is_image = bool(path_abs and (_m.guess_type(path_abs)[0] or '').startswith('image/'))
+                if path_abs and is_image:
+                    _logger.info(f"fb.publish create_photo path={path_abs} msg_len={len(message or '')}")
+                    resp = fb.create_photo(page_id, path_abs, caption=message)
+                else:
+                    _logger.info(f"fb.publish create_post msg_len={len(message or '')}")
+                    resp = fb.create_post(page_id, message)
+                fb_post_id = str(resp.get('post_id') or resp.get('id') or '')
+                _logger.info(f"fb.publish resp id={fb_post_id} raw={str(resp)[:400]}")
+                post.platform_post_id = fb_post_id
+                try:
+                    post.platform_url = fb.get_permalink(fb_post_id)
+                    _logger.info(f"fb.publish permalink={post.platform_url}")
+                except Exception as _exc:
+                    _logger.warning(f"fb.publish permalink error: {_exc}")
+                    post.platform_url = None
+            except Exception as exc:
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+        elif str(post.platform) in ('PlatformEnum.bluesky', 'bluesky'):
+            # Bluesky via AT Protocol: text thread (300-char chunks) + up to 4 images
+            from app.services.bluesky_client import BlueskyClient
+            from app.services.settings import load_settings
+            from app.models.models import Brief
+            cfg = load_settings()
+            handle = (cfg.get('bluesky_handle') or '').strip()
+            app_pw = (cfg.get('bluesky_app_password') or '').strip()
+            service = (cfg.get('bluesky_service') or 'https://bsky.social').strip()
+            if not (handle and app_pw):
+                post.status = PostStatusEnum.error
+                post.error_text = 'bluesky_not_configured'
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = 'bluesky_not_configured'
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+            brief = session.get(Brief, post.brief_id)
+            base_text = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
+            hashtags = (getattr(brief, 'tags_json', None) or '').strip() if brief else ''
+            langs = ['en'] if (brief and (getattr(brief, 'text_en', None) or '').strip()) else ['ru']
+            # Collect image candidates: gallery first, then override, then brief media
+            candidates: list[str] = []
+            try:
+                import json as _json
+                if job and job.payload_json:
+                    parsed = (_json.loads(job.payload_json) or {})
+                    override = parsed.get('media_rel')
+                    gallery_list = parsed.get('gallery') or []
+                    if isinstance(gallery_list, list) and gallery_list:
+                        candidates = [str(x) for x in gallery_list if isinstance(x, str)]
+                    elif override:
+                        candidates = [str(override)]
+            except Exception:
+                candidates = []
+            if not candidates:
+                media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+                if media_rel:
+                    candidates = [media_rel]
+            # Only images are embedded (video upload needs a separate service); text still posts
+            import os as _os, mimetypes as _m
+            image_paths: list[str] = []
+            for rel in candidates[:4]:
+                p = (rel or '').replace('\\', '/')
+                if not p.startswith('media/'):
+                    p = f"media/{p}"
+                abs_path = _os.path.abspath(p)
+                if (_m.guess_type(abs_path)[0] or '').startswith('image/'):
+                    image_paths.append(abs_path)
+            try:
+                client = BlueskyClient(handle, app_pw, service)
+                uri, web_url = client.post_thread(base_text, hashtags=hashtags, image_paths=image_paths, langs=langs)
+                post.platform_post_id = uri
+                post.platform_url = web_url
+            except Exception as exc:
+                post.status = PostStatusEnum.error
+                post.error_text = str(exc)
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = str(exc)
                 session.add(post)
                 if job is not None:
                     session.add(job)
@@ -791,7 +1041,15 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 if not sid:
                     sid, url = rc.submit_text(sub, title=title, text=head or body)
                 post.platform_post_id = sid
-                post.platform_url = url
+                # Prefer permalink to the post, not the direct media URL
+                try:
+                    submission = rc.reddit.submission(id=sid)
+                    if submission and submission.permalink:
+                        post.platform_url = f"https://reddit.com{submission.permalink}"
+                    else:
+                        post.platform_url = url
+                except Exception:
+                    post.platform_url = url
                 # Mark done and return to avoid falling through into unrelated branches
                 from app.models.models import PostStatusEnum, JobStatusEnum
                 post.status = PostStatusEnum.done
@@ -822,117 +1080,6 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
-            # Build a message if needed for FB branch; Reddit handled above
-            message = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
-            # include hashtags for FB
-            if brief and getattr(brief, 'tags_json', None):
-                try:
-                    message = (message + '\n' + brief.tags_json).strip()
-                except Exception:
-                    pass
-            # Use normal/horizontal media for Facebook
-            media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
-            path_abs = None
-            if media_rel:
-                p = media_rel.replace('\\','/')
-                if not p.startswith('media/'):
-                    p = f"media/{p}"
-                import os as _os
-                path_abs = _os.path.abspath(p)
-            try:
-                from app.services.facebook_client import FacebookClient as _FB
-                fb = _FB(page_token)
-                from loguru import logger as _logger
-                _logger.info(f"fb.publish start platform={'fb_ru' if is_ru else 'fb_en'} page_id={page_id}")
-                if path_abs:
-                    _logger.info(f"fb.publish create_photo path={path_abs} msg_len={len(message or '')}")
-                    resp = fb.create_photo(page_id, path_abs, caption=message)
-                else:
-                    _logger.info(f"fb.publish create_post msg_len={len(message or '')}")
-                    resp = fb.create_post(page_id, message)
-                post_id = str(resp.get('post_id') or resp.get('id') or '')
-                _logger.info(f"fb.publish resp id={post_id} raw={str(resp)[:400]}")
-                post.platform_post_id = post_id
-                try:
-                    post.platform_url = fb.get_permalink(post_id)
-                    _logger.info(f"fb.publish permalink={post.platform_url}")
-                except Exception as _exc:
-                    _logger.warning(f"fb.publish permalink error: {_exc}")
-                    post.platform_url = None
-            except Exception as exc:
-                post.status = PostStatusEnum.error
-                post.error_text = str(exc)
-                if job is not None:
-                    job.status = JobStatusEnum.error
-                    job.last_error = str(exc)
-                session.add(post)
-                if job is not None:
-                    session.add(job)
-                session.commit()
-                return 'error'
-            if str(post.platform) == 'PlatformEnum.yt' or str(post.platform) == 'yt':
-                path = media_rel.replace('\\', '/')
-                if not path.startswith('media/'):
-                    path = f"media/{path}"
-                import os as _os
-                path = _os.path.abspath(path)
-                # Title preference: use explicit yt_title from job/brief if present, else EN then RU
-                title = None
-                try:
-                    import json as _json
-                    override = None
-                    if job and job.payload_json:
-                        try:
-                            override = (_json.loads(job.payload_json) or {}).get('yt_title')
-                        except Exception:
-                            override = None
-                    if override:
-                        title = override
-                except Exception:
-                    pass
-                if not title:
-                    title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
-                # For YouTube, include English description and hashtags
-                desc = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'Uploaded via IndiePulse')
-                if brief and getattr(brief, 'tags_json', None):
-                    try:
-                        desc = (desc + '\n' + brief.tags_json).strip()
-                    except Exception:
-                        pass
-                yt = YouTubeClient(
-                    access_token=(cfg.get('yt_access_token') or '').strip(),
-                    refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
-                    client_id=(cfg.get('yt_client_id') or '').strip(),
-                    client_secret=(cfg.get('yt_client_secret') or '').strip(),
-                )
-                try:
-                    _logger.info(f"yt.upload start path={path} title_len={len(title or '')} desc_len={len(desc or '')}")
-                    vid, url = yt.upload_video(path, title=title, description=desc)
-                    post.platform_post_id = vid
-                    post.platform_url = url
-                    # Playlist handling
-                    playlist_id = (cfg.get('yt_playlist_id') or '').strip()
-                    if not playlist_id:
-                        pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
-                        playlist_id = yt.ensure_playlist(pname) or ''
-                    if playlist_id and vid:
-                        try:
-                            yt.add_to_playlist(playlist_id, vid)
-                            _logger.info(f"yt.add_to_playlist ok playlist_id={playlist_id} video_id={vid}")
-                        except Exception:
-                            pass
-                except Exception as exc:
-                    _logger.error(f"yt.upload error: {exc}")
-                    post.status = PostStatusEnum.error
-                    post.error_text = str(exc)
-                    if job is not None:
-                        job.status = JobStatusEnum.error
-                        job.last_error = str(exc)
-                    session.add(post)
-                    if job is not None:
-                        session.add(job)
-                    session.commit()
-                    return 'error'
         else:
             # TikTok: try API first, fallback to export
             if str(post.platform) in ('PlatformEnum.tiktok', 'tiktok'):
@@ -1060,12 +1207,12 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     path = _os.path.abspath(p)
                     ctype = _m.guess_type(path)[0] or ''
                     if ctype.startswith('image/'):
-                        sent = client.send_photo(chat_id, path, caption=text[:1024])
+                        sent = client.send_photo(chat_id, path, caption=text)
                     elif ctype.startswith('video/'):
                         # Compress video if needed (Telegram limit 50MB)
                         from app.services.video_editor import ensure_video_size_limit
                         path = ensure_video_size_limit(path, 'tg', cfg)
-                        sent = client.send_video(chat_id, path, caption=text[:1024])
+                        sent = client.send_video(chat_id, path, caption=text)
                 if not sent:
                     sent = client.send_message(chat_id, text)
                 # Store message id
@@ -1171,6 +1318,8 @@ def refresh_metrics_for_post(post_id: int) -> str:
                         "reply": pm.get("reply_count"),
                         "like": pm.get("like_count"),
                         "quote": pm.get("quote_count"),
+                        "views": pm.get("impression_count"),
+                        "bookmark": pm.get("bookmark_count"),
                     }
             elif platform.endswith('vk') and post.platform_post_id:
                 cfg = load_settings()
@@ -1191,7 +1340,7 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     comments = ((item.get("comments") or {}).get("count"))
                     views = ((item.get("views") or {}).get("count"))
                     metrics = {"likes": likes, "reposts": reposts, "comments": comments, "views": views}
-            elif platform.endswith('facebook') or platform in ('fb_ru', 'fb_en'):
+            elif platform.endswith('fb_ru') or platform.endswith('fb_en'):
                 # Facebook Page post insights: use summary counts for reactions and comments; shares via 'shares' field
                 cfg = load_settings()
                 is_ru = platform.endswith('fb_ru') or platform == 'fb_ru'
@@ -1207,6 +1356,20 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     comments = (((d.get('comments') or {}).get('summary') or {}).get('total_count'))
                     shares = ((d.get('shares') or {}).get('count'))
                     metrics = {"likes": likes, "comments": comments, "reposts": shares}
+                    # Best-effort reach via insights (needs pages_read_engagement)
+                    try:
+                        with httpx.Client(timeout=15) as client:
+                            r2 = client.get(
+                                f"https://graph.facebook.com/v19.0/{post.platform_post_id}/insights",
+                                params={"metric": "post_impressions", "access_token": page_token},
+                            )
+                            d2 = r2.json()
+                        vals = ((d2.get('data') or [{}])[0].get('values') or [{}])
+                        impressions = vals[0].get('value')
+                        if isinstance(impressions, int):
+                            metrics["views"] = impressions
+                    except Exception:
+                        pass
             elif platform.endswith('reddit') and post.platform_post_id:
                 # Basic Reddit stats via public JSON endpoint to avoid heavy dependencies if PRAW not configured
                 try:
@@ -1240,9 +1403,22 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     metrics = {"likes": int(likes) if likes is not None else None,
                                "comments": int(comments) if comments is not None else None,
                                "views": int(views) if views is not None else None}
+            elif platform.endswith('bluesky') and post.platform_post_id:
+                from app.services.bluesky_client import BlueskyClient
+                metrics = BlueskyClient.get_post_metrics(post.platform_post_id) or {"error": "bluesky_fetch_failed"}
             elif platform.endswith('tg') and post.platform_post_id:
-                # Telegram Bot API has limited stats; we won't have reliable view counts unless it's a channel post
-                metrics = {"status": "sent"}
+                # Bot API exposes no stats; for public channels we parse views from the t.me embed page
+                cfg = load_settings()
+                bot = (cfg.get('tg_bot_token') or '').strip()
+                chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+                views = None
+                try:
+                    if bot and chat_id:
+                        from app.services.telegram_client import TelegramClient
+                        views = TelegramClient(bot).get_channel_post_views(chat_id, int(post.platform_post_id))
+                except Exception:
+                    views = None
+                metrics = {"views": views} if views is not None else {"status": "sent"}
             elif platform.endswith('discord'):
                 metrics = {"status": "sent"}
         except Exception as exc:
@@ -1257,6 +1433,29 @@ def refresh_metrics_for_post(post_id: int) -> str:
         session.add(post)
         session.commit()
         return "ok"
+
+
+@huey.periodic_task(crontab(minute='*/30'))
+def refresh_recent_metrics() -> str:
+    """Every 30 minutes refresh metrics for posts published in the last 7 days,
+    so Analytics stays fresh without manual clicking."""
+    from app.models.models import Post, PostStatusEnum
+    from sqlmodel import select
+    from datetime import datetime as _dt, timedelta as _td
+    cutoff = _dt.utcnow() - _td(days=7)
+    with Session(engine) as session:
+        rows = session.exec(
+            select(Post).where(
+                Post.status == PostStatusEnum.done,
+                Post.published_at.is_not(None),
+                Post.published_at >= cutoff,
+            ).order_by(Post.published_at.desc()).limit(60)
+        ).all()
+        ids = [p.id for p in rows]
+    # Stagger requests to be gentle on platform APIs
+    for i, pid in enumerate(ids):
+        refresh_metrics_for_post.schedule(args=(pid,), delay=i * 2)
+    return f"scheduled={len(ids)}"
 
 
 @huey.task()

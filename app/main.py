@@ -25,8 +25,8 @@ def on_startup():
     except Exception:
         app.state.asset_version = "1"
     # App versioning for footer
-    app.state.app_version = "1.0.2"
-    app.state.app_last_change = "Version 1.0.2 - Facebook test logging and integration fixes"
+    app.state.app_version = "1.1.0"
+    app.state.app_last_change = "Version 1.1.0 - Bluesky support, Facebook publish fix, easy FB setup, UI polish"
 
 app.include_router(pages.router)
 app.include_router(api.router)

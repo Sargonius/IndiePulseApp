@@ -46,10 +46,16 @@ DEFAULTS: Dict[str, Any] = {
     "yt_playlist_id": "",
     "yt_playlist_title": "Synthetica",
     # Facebook (two groups)
+    "fb_app_id": "",
+    "fb_app_secret": "",
     "fb_ru_page_access_token": "",
     "fb_en_page_access_token": "",
     "fb_ru_page_id": "",
     "fb_en_page_id": "",
+    # Bluesky (handle + app password, that's it)
+    "bluesky_handle": "",
+    "bluesky_app_password": "",
+    "bluesky_service": "https://bsky.social",
     # Reddit
     "reddit_client_id": "",
     "reddit_client_secret": "",

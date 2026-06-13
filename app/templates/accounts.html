@@ -1,377 +1,718 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Accounts</h2>
+<h2>Settings</h2>
 
-<div class="grid cols-3" style="align-items:start;">
+<div id="settings_container">
+	<!-- Each platform as a two-column row: settings left, instructions right -->
 
-	<section class="card">
-		<h3>Discord</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте Discord, выберите нужный сервер и текстовый канал</li>
-				<li><b>Шаг 2:</b> Настройки канала → Интеграции → Вебхуки → Создать вебхук</li>
-				<li><b>Шаг 3:</b> Скопируйте <b>URL вебхука</b> (формат: <code>https://discord.com/api/webhooks/...</code>)</li>
-				<li><b>Шаг 4:</b> Вставьте URL в поле ниже и нажмите "Save"</li>
-				<li><b>Шаг 5:</b> Проверьте кнопкой <b>"Send test"</b></li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/discord/webhook" hx-target="#discord_status" hx-swap="innerHTML">
-			<input type="text" name="url" value="{{ discord_webhook }}" placeholder="https://discord.com/api/webhooks/..." style="width:100%;" />
-			<button type="submit" class="btn btn-primary">Save</button>
-			<button type="button" class="btn" hx-post="/api/discord/test" hx-target="#discord_status" hx-swap="innerHTML">Send test</button>
-		</form>
-		<div id="discord_status"></div>
-	</section>
-
-	<section class="card">
-		<h3>Interface Language</h3>
-		<form hx-post="/api/settings/save" hx-target="#lang_status" hx-swap="innerHTML">
-			<div>
-				<label>Language</label><br/>
-				<select name="ui_language" style="width:100%;">
-					<option value="en" {% if (ui_language or 'en') == 'en' %}selected{% endif %}>English</option>
-					<option value="ru" {% if (ui_language or 'en') == 'ru' %}selected{% endif %}>Русский</option>
-				</select>
+	<!-- Discord -->
+	<div class="settings-section" id="section_discord">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Discord</h3>
+					<span class="status-badge" id="status_discord">Loading...</span>
+				</div>
+				<form hx-post="/api/discord/webhook" hx-target="#discord_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Webhook URL</label>
+						<input type="text" name="url" value="{{ discord_webhook }}" placeholder="https://discord.com/api/webhooks/..." />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/discord/test" hx-target="#discord_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
+				<div id="discord_status" class="status-msg"></div>
 			</div>
-			<button type="submit" class="btn btn-primary" style="margin-top:8px;">Save</button>
-		</form>
-		<div id="lang_status"></div>
-	</section>
-
-	<section class="card">
-		<h3>Translation (OpenAI, optional)</h3>
-		<form hx-post="/api/settings/save" hx-target="#ai_status" hx-swap="innerHTML">
-			<div>
-				<label>OpenAI API Key</label><br/>
-				<input type="password" name="openai_api_key" value="" placeholder="sk-..." style="width:100%;" />
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open Discord, select your server and text channel</li>
+						<li>Channel Settings → Integrations → Webhooks → Create Webhook</li>
+						<li>Copy the <b>Webhook URL</b></li>
+						<li>Paste URL and click "Save"</li>
+						<li>Click "Test" to verify</li>
+					</ol>
+				</div>
 			</div>
-			<div style="margin-top:6px;">
-				<label>Model</label><br/>
-				<input type="text" name="openai_model" value="{{ openai_model or 'gpt-4o-mini' }}" style="width:100%;" />
-			</div>
-			<button type="submit" class="btn btn-primary" style="margin-top:8px;">Сохранить</button>
-		</form>
-		<div id="ai_status"></div>
-	</section>
-
-	<section class="card">
-		<h3>Discord (multi-channel)</h3>
-		<form hx-post="/api/discord/webhooks/save" hx-target="#discord_multi_status" hx-swap="innerHTML">
-			<div>
-				<label>Webhook RU (#showcase-ru)</label><br/>
-				<input type="text" name="url_ru" value="{{ vk_client_id if false }}" placeholder="https://discord.com/api/webhooks/..." style="width:100%;" />
-			</div>
-			<div style="margin-top:6px;">
-				<label>Webhook EN (#showcase-en)</label><br/>
-				<input type="text" name="url_en" value="" placeholder="https://discord.com/api/webhooks/..." style="width:100%;" />
-			</div>
-			<button type="submit" class="btn btn-primary" style="margin-top:8px;">Save webhooks</button>
-		</form>
-		<div id="discord_multi_status"></div>
-	</section>
-
-	<section class="card">
-		<h3>X / Twitter</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank">Twitter Developer Portal</a> → Projects & Apps → Создайте приложение</li>
-				<li><b>Шаг 2:</b> Включите <b>OAuth 2.0</b> (с PKCE) в настройках приложения. Скопируйте <b>Client ID</b> и <b>Client Secret</b></li>
-				<li><b>Шаг 3:</b> Redirect URI: <code>http://127.0.0.1:8000/api/accounts/callback/x</code> (для локальной разработки)</li>
-				<li><b>Шаг 4:</b> Настройте права (scopes): <code>tweet.read, tweet.write, users.read, offline.access</code></li>
-				<li><b>Шаг 5:</b> <span style="color:#d32f2f; font-weight:600;">Для загрузки медиа (фото/видео):</span> Получите OAuth 1.0a ключи:
-					<ul style="margin-top:4px;">
-						<li>Keys & tokens → API Key/Secret (Consumer Key/Secret)</li>
-						<li>Access Token & Secret (OAuth 1.0a)</li>
-					</ul>
-				</li>
-				<li><b>Шаг 6:</b> Заполните все поля ниже и нажмите "Save X settings"</li>
-				<li><b>Шаг 7:</b> Используйте кнопку <b>"Get X authorization link"</b> для OAuth 2.0 авторизации</li>
-				<li><b>Шаг 8:</b> Проверьте кнопкой <b>"Tweet (test)"</b></li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
-			<div>
-				<label>Client ID (OAuth 2.0)</label><br/>
-				<input type="text" name="x_client_id" value="{{ x_client_id }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Client Secret (OAuth 2.0)</label><br/>
-				<input type="text" name="x_client_secret" value="{{ x_client_secret }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Redirect URI</label><br/>
-				<input type="text" name="x_redirect_uri" value="{{ x_redirect_uri }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>API Key / Consumer Key (OAuth 1.0a, for media upload)</label><br/>
-				<input type="text" name="x_api_key" value="{{ x_api_key }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>API Secret / Consumer Secret (OAuth 1.0a, for media upload)</label><br/>
-				<input type="text" name="x_api_secret" value="{{ x_api_secret }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>OAuth1 Access Token (for media upload)</label><br/>
-				<input type="text" name="x_oauth_token" value="{{ x_oauth_token }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>OAuth1 Access Token Secret (for media upload)</label><br/>
-				<input type="text" name="x_oauth_token_secret" value="{{ x_oauth_token_secret }}" style="width:100%;" />
-			</div>
-			<button type="submit" class="btn btn-primary">Save X settings</button>
-		</form>
-		<div id="x_status"></div>
-		
-		<div style="margin-top:6px;">
-			<a class="btn" href="#" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Get X authorization link</a>
-			<div id="x_auth"></div>
-			<form hx-post="/api/x/test_tweet" hx-target="#x_tweet_status" hx-swap="innerHTML" style="margin-top:6px;">
-				<input type="text" name="text" value="Hello from IndiePulse" style="width:100%;" />
-				<button type="submit" class="btn">Tweet (test)</button>
-			</form>
-			<div id="x_tweet_status"></div>
 		</div>
-	</section>
+	</div>
 
-	<section class="card">
-		<h3>YouTube Shorts</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> → Создайте проект</li>
-				<li><b>Шаг 2:</b> Включите <b>YouTube Data API v3</b> (APIs & Services → Library)</li>
-				<li><b>Шаг 3:</b> Создайте OAuth 2.0 Client (Credentials → Create Credentials → OAuth client ID → Desktop app)</li>
-				<li><b>Шаг 4:</b> Скопируйте <b>Client ID</b> и <b>Client Secret</b></li>
-				<li><b>Шаг 5:</b> Получите Access Token и Refresh Token (через локальное приложение или скрипт авторизации)</li>
-				<li><b>Шаг 6:</b> Вставьте все 4 значения в поля ниже и нажмите "Save YouTube"</li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
-			<div>
-				<label>Client ID</label><br/>
-				<input type="text" name="yt_client_id" value="{{ yt_client_id }}" style="width:100%;" />
+	<!-- Telegram -->
+	<div class="settings-section" id="section_telegram">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Telegram</h3>
+					<span class="status-badge" id="status_telegram">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#tg_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Bot Token</label>
+						<input type="text" name="tg_bot_token" value="" placeholder="123456:ABC-DEF..." />
+					</div>
+					<div class="form-group">
+						<label>Chat ID (group/channel)</label>
+						<input type="text" name="tg_chat_id_ru" value="" placeholder="-1001234567890" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/telegram/test" hx-target="#tg_status" hx-swap="innerHTML">Test</button>
+						<button type="button" class="btn" hx-post="/api/telegram/check" hx-target="#tg_status" hx-swap="innerHTML">Check</button>
+					</div>
+				</form>
+				<div id="tg_status" class="status-msg"></div>
 			</div>
-			<div>
-				<label>Client Secret</label><br/>
-				<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" style="width:100%;" />
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open Telegram, find <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
+						<li>Send <code>/newbot</code> and follow instructions</li>
+						<li>Copy the <b>Bot Token</b></li>
+						<li>Add bot to your group/channel with send permissions</li>
+						<li>Get Chat ID via <a href="https://t.me/RawDataBot" target="_blank">@RawDataBot</a></li>
+					</ol>
+				</div>
 			</div>
-			<div>
-				<label>Access Token</label><br/>
-				<input type="text" name="yt_access_token" value="{{ yt_access_token }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Refresh Token</label><br/>
-				<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" style="width:100%;" />
-			</div>
-			<button type="submit" class="btn btn-primary">Save YouTube</button>
-		</form>
-		<div id="yt_status"></div>
-	</section>
-
-	<section class="card">
-		<h3>VK</h3>
-		
-		<details open style="margin-bottom:12px; padding:12px; background:#fff3cd; border-left:4px solid #ff9800; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600; color:#856404;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.8;">
-				<li><b>Шаг 1:</b> Откройте <a href="https://dev.vk.com/apps" target="_blank">VK для разработчиков</a> → Мои приложения → Создать приложение</li>
-				<li><b>Шаг 2:</b> Скопируйте <b>Client ID</b> (ID приложения) и <b>Client Secret</b> (Защищенный ключ) в соответствующие поля ниже, нажмите "Save VK settings"</li>
-				<li><b>Шаг 3:</b> Найдите <b>Group ID</b>: откройте вашу группу ВКонтакте, в адресной строке будет <code>vk.com/club123456</code> или <code>vk.com/public123456</code> — число это ID группы</li>
-				<li style="background:#fff; padding:8px; border-radius:4px; margin:8px 0;">
-					<b>Шаг 4 (КРИТИЧНО):</b> Нажмите кнопку <b>"Get link to obtain Access Token (Implicit)"</b> ниже<br/>
-					<span style="color:#d32f2f; font-weight:600;">⚠️ ВНИМАНИЕ:</span> Токен ДОЛЖЕН иметь права: 
-					<code style="background:#f5f5f5; padding:2px 4px; border-radius:3px;">photos, wall, groups, offline, video</code><br/>
-					<span style="font-size:12px; color:#666;">Без прав <code>photos</code> и <code>video</code> загрузка медиа НЕ БУДЕТ РАБОТАТЬ!</span>
-				</li>
-				<li><b>Шаг 5:</b> После авторизации скопируйте <b>access_token</b> из адресной строки (после #access_token=...)</li>
-				<li><b>Шаг 6:</b> Вставьте токен в ОБА поля: <b>"Access Token"</b> И <b>"User Access Token"</b> (оба обязательны!)</li>
-				<li><b>Шаг 7:</b> Нажмите "Save VK settings", затем используйте кнопку <b>"Check token"</b> чтобы убедиться что токен имеет все права</li>
-				<li><b>Шаг 8:</b> Проверьте кнопкой <b>"Post to group (test)"</b></li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/settings/save" hx-target="#vk_status" hx-swap="innerHTML">
-			<div>
-				<label>Client ID</label><br/>
-				<input type="text" name="vk_client_id" value="{{ vk_client_id }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Client Secret</label><br/>
-				<input type="text" name="vk_client_secret" value="{{ vk_client_secret }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Group ID (for group posting)</label><br/>
-				<input type="text" name="vk_group_id" value="{{ vk_group_id }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Redirect URI</label><br/>
-				<input type="text" name="vk_redirect_uri" value="{{ vk_redirect_uri }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>Access Token (manual) <span style="color:#d32f2f;">*</span></label><br/>
-	      <input type="password" name="vk_access_token" value="" placeholder="{{ vk_token_hint }}" style="width:100%;" />
-			</div>
-			<div>
-				<label>User Access Token (manual, used for photos/video upload) <span style="color:#d32f2f;">*</span></label><br/>
-	      <input type="password" name="vk_user_access_token" value="" placeholder="{{ vk_user_token_hint }}" style="width:100%;" />
-			</div>
-			<button type="submit">Save VK settings</button>
-		</form>
-		<div id="vk_status"></div>
-		<div style="margin-top:6px;">
-			<a class="btn" href="#" hx-get="/api/accounts/connect/vk" hx-target="#vk_auth" hx-swap="innerHTML">Get authorization link</a>
-			<div id="vk_auth"></div>
-			<div style="margin-top:6px;">
-				<a class="btn" href="#" hx-get="/api/vk/implicit_url" hx-target="#vk_implicit" hx-swap="innerHTML">Get link to obtain Access Token (Implicit)</a>
-				<div id="vk_implicit"></div>
-			</div>
-			<form hx-post="/api/vk/test_post" hx-target="#vk_post_status" hx-swap="innerHTML" style="margin-top:6px;">
-				<input type="text" name="text" value="Test from IndiePulse" style="width:100%;" />
-				<button type="submit" class="btn">Post to group (test)</button>
-			</form>
-			<div id="vk_post_status"></div>
-			<form hx-post="/api/vk/check_token" hx-target="#vk_token_status" hx-swap="innerHTML" style="margin-top:6px;">
-				<input type="text" name="token" placeholder="Check token" style="width:100%;" />
-				<button type="submit" class="btn">Check token</button>
-			</form>
-			<div id="vk_token_status"></div>
 		</div>
-	</section>
+	</div>
 
-	<section class="card">
-		<h3>Facebook</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте <a href="https://developers.facebook.com/" target="_blank">Meta for Developers</a> → Мои приложения → Создать приложение</li>
-				<li><b>Шаг 2:</b> Выберите тип "Business" или "Other" → заполните данные приложения</li>
-				<li><b>Шаг 3:</b> Добавьте продукт "Facebook Login" в настройках приложения</li>
-				<li><b>Шаг 4:</b> Получите <b>Page Access Token</b>:
-					<ul style="margin-top:4px;">
-						<li>Tools → Graph API Explorer</li>
-						<li>Выберите вашу страницу Facebook</li>
-						<li>Добавьте права: <code>pages_manage_posts, pages_read_engagement</code></li>
-						<li>Generate Access Token → скопируйте токен</li>
-					</ul>
-				</li>
-				<li><b>Шаг 5:</b> Найдите <b>Page ID</b>: Settings вашей страницы → внизу страницы Page ID</li>
-				<li><b>Шаг 6:</b> <span style="color:#d32f2f; font-weight:600;">Важно:</span> Используйте Page Access Token (не User Token). Для загрузки медиа нужна роль админа страницы</li>
-				<li><b>Шаг 7:</b> Вставьте данные в поля ниже, нажмите "Save Facebook", затем "Test post"</li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/settings/save" hx-target="#fb_status" hx-swap="innerHTML">
-		  <div>
-				<label>RU Page ID</label><br/>
-				<input type="text" name="fb_ru_page_id" value="{{ fb_ru_page_id or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>RU Page Access Token</label><br/>
-				<input type="text" name="fb_ru_page_access_token" value="{{ fb_ru_page_access_token or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>EN Page ID</label><br/>
-				<input type="text" name="fb_en_page_id" value="{{ fb_en_page_id or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>EN Page Access Token</label><br/>
-				<input type="text" name="fb_en_page_access_token" value="{{ fb_en_page_access_token or '' }}" style="width:100%;" />
-		  </div>
-		  <button type="submit" class="btn btn-primary">Save Facebook</button>
-		</form>
-		<div id="fb_status"></div>
-		<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
-			<button type="button" class="btn" hx-get="/api/facebook/test" hx-target="#fb_test_result" hx-swap="innerHTML">Test post</button>
-			<span class="htmx-indicator" style="font-size:12px;color:#666;">Testing...</span>
+	<!-- VK -->
+	<div class="settings-section" id="section_vk">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>VK</h3>
+					<span class="status-badge" id="status_vk">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#vk_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Client ID</label>
+						<input type="text" name="vk_client_id" value="{{ vk_client_id }}" />
+					</div>
+					<div class="form-group">
+						<label>Client Secret</label>
+						<input type="text" name="vk_client_secret" value="{{ vk_client_secret }}" />
+					</div>
+					<div class="form-group">
+						<label>Group ID</label>
+						<input type="text" name="vk_group_id" value="{{ vk_group_id }}" placeholder="123456789" />
+					</div>
+					<div class="form-group">
+						<label>Access Token</label>
+						<input type="password" name="vk_access_token" value="" placeholder="{{ vk_token_hint }}" />
+					</div>
+					<div class="form-group">
+						<label>User Access Token (for media upload)</label>
+						<input type="password" name="vk_user_access_token" value="" placeholder="{{ vk_user_token_hint }}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/vk/test_post" hx-target="#vk_status" hx-swap="innerHTML">Test Post</button>
+					</div>
+				</form>
+				<div class="btn-row" style="margin-top:8px;">
+					<button type="button" class="btn btn-success" hx-get="/api/vk/implicit_url" hx-target="#vk_implicit" hx-swap="innerHTML">Get Access Token</button>
+					<button type="button" class="btn" hx-post="/api/vk/check_token" hx-target="#vk_status" hx-swap="innerHTML">Check Token</button>
+				</div>
+				<div id="vk_implicit" class="status-msg"></div>
+				<div id="vk_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://dev.vk.com/apps" target="_blank">VK for Developers</a> → Create app</li>
+						<li>Copy <b>Client ID</b> and <b>Client Secret</b></li>
+						<li>Find Group ID from group URL (vk.com/club<b>123456</b>)</li>
+						<li>Click "Get Access Token" → authorize</li>
+						<li>Copy token from URL (after #access_token=)</li>
+						<li>Paste into <b>both</b> Access Token fields</li>
+					</ol>
+					<div class="warning-box">
+						<b>Required scopes:</b> photos, wall, groups, offline, video
+					</div>
+				</div>
+			</div>
 		</div>
-		<div id="fb_test_result" style="margin-top:6px;"></div>
-	</section>
+	</div>
 
-	<section class="card">
-		<h3>Reddit</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте <a href="https://www.reddit.com/prefs/apps" target="_blank">Reddit App Preferences</a></li>
-				<li><b>Шаг 2:</b> Нажмите "create another app..." → Выберите тип <b>"script"</b></li>
-				<li><b>Шаг 3:</b> Заполните название, redirect uri: <code>http://localhost:8080</code></li>
-				<li><b>Шаг 4:</b> Скопируйте <b>Client ID</b> (под названием приложения) и <b>Client Secret</b></li>
-				<li><b>Шаг 5:</b> Укажите ваш Reddit <b>Username</b> и <b>Password</b></li>
-				<li><b>Шаг 6:</b> Укажите название <b>Subreddit</b> (без r/, например: <code>gamedev</code>)</li>
-				<li><b>Шаг 7:</b> Убедитесь что у вас есть права на постинг в указанном subreddit</li>
-				<li><b>Шаг 8:</b> Нажмите "Save Reddit"</li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/settings/save" hx-target="#rd_status" hx-swap="innerHTML">
-		  <div>
-				<label>Client ID</label><br/>
-				<input type="text" name="reddit_client_id" value="{{ reddit_client_id or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>Client Secret</label><br/>
-				<input type="text" name="reddit_client_secret" value="{{ reddit_client_secret or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>Username</label><br/>
-				<input type="text" name="reddit_username" value="{{ reddit_username or '' }}" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>Password</label><br/>
-				<input type="password" name="reddit_password" value="" placeholder="••••" style="width:100%;" />
-		  </div>
-		  <div>
-				<label>Subreddit (EN, без r/)</label><br/>
-				<input type="text" name="reddit_subreddit_en" value="{{ reddit_subreddit_en or '' }}" placeholder="gamedev" style="width:100%;" />
-		  </div>
-		  <button type="submit" class="btn btn-primary">Save Reddit</button>
-		</form>
-		<div id="rd_status"></div>
-	</section>
+	<!-- X/Twitter -->
+	<div class="settings-section" id="section_x">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>X / Twitter</h3>
+					<span class="status-badge" id="status_x">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Client ID (OAuth 2.0)</label>
+						<input type="text" name="x_client_id" value="{{ x_client_id }}" />
+					</div>
+					<div class="form-group">
+						<label>Client Secret (OAuth 2.0)</label>
+						<input type="text" name="x_client_secret" value="{{ x_client_secret }}" />
+					</div>
+					<div class="form-group">
+						<label>Redirect URI</label>
+						<input type="text" name="x_redirect_uri" value="{{ x_redirect_uri }}" placeholder="http://127.0.0.1:8000/api/accounts/callback/x" />
+					</div>
+					<details style="margin:8px 0;">
+						<summary style="cursor:pointer;color:#666;">OAuth 1.0a (for media upload)</summary>
+						<div style="padding:8px;background:#f8fafc;border-radius:4px;margin-top:4px;">
+							<div class="form-group">
+								<label>API Key / Consumer Key</label>
+								<input type="text" name="x_api_key" value="{{ x_api_key }}" />
+							</div>
+							<div class="form-group">
+								<label>API Secret / Consumer Secret</label>
+								<input type="text" name="x_api_secret" value="{{ x_api_secret }}" />
+							</div>
+							<div class="form-group">
+								<label>OAuth1 Access Token</label>
+								<input type="text" name="x_oauth_token" value="{{ x_oauth_token }}" />
+							</div>
+							<div class="form-group">
+								<label>OAuth1 Access Token Secret</label>
+								<input type="text" name="x_oauth_token_secret" value="{{ x_oauth_token_secret }}" />
+							</div>
+						</div>
+					</details>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Authorize</button>
+						<button type="button" class="btn" hx-post="/api/x/test_tweet" hx-target="#x_status" hx-swap="innerHTML">Test Tweet</button>
+					</div>
+				</form>
+				<div id="x_auth" class="status-msg"></div>
+				<div id="x_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank">Twitter Developer Portal</a></li>
+						<li>Create app, enable <b>OAuth 2.0</b> with PKCE</li>
+						<li>Set Redirect URI to your callback URL</li>
+						<li>Copy Client ID and Secret</li>
+						<li>For media uploads: also get OAuth 1.0a keys</li>
+					</ol>
+					<div class="info-box">
+						<b>Scopes needed:</b> tweet.read, tweet.write, users.read, offline.access
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
 
-	<section class="card">
-		<h3>Telegram</h3>
-		
-		<details open style="margin-bottom:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
-			<summary style="cursor:pointer; font-weight:600;">📋 Пошаговая инструкция</summary>
-			<ol style="margin-top:8px; line-height:1.6;">
-				<li><b>Шаг 1:</b> Откройте Telegram, найдите бота <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
-				<li><b>Шаг 2:</b> Отправьте команду <code>/newbot</code> и следуйте инструкциям</li>
-				<li><b>Шаг 3:</b> Скопируйте <b>Bot Token</b> (формат: <code>123456789:ABCdefGHIjklMNOpqrsTUVwxyz</code>)</li>
-				<li><b>Шаг 4:</b> Добавьте бота в вашу группу/канал и дайте права на отправку сообщений</li>
-				<li><b>Шаг 5:</b> Получите Chat ID:
-					<ul style="margin-top:4px;">
-						<li>Добавьте <a href="https://t.me/RawDataBot" target="_blank">@RawDataBot</a> в группу → он покажет chat_id</li>
-						<li>Или используйте метод getUpdates API</li>
-					</ul>
-				</li>
-				<li><b>Шаг 6:</b> Вставьте Bot Token и Chat ID в поля ниже, нажмите "Save Telegram"</li>
-			</ol>
-		</details>
-		
-		<form hx-post="/api/settings/save" hx-target="#tg_status" hx-swap="innerHTML">
-		  <div>
-				<label>Bot Token</label><br/>
-				<input type="text" name="tg_bot_token" value="" placeholder="123456:ABC-DEF..." style="width:100%;" />
-		  </div>
-		  <div>
-				<label>RU Chat ID (group/channel)</label><br/>
-				<input type="text" name="tg_chat_id_ru" value="" placeholder="-1001234567890" style="width:100%;" />
-		  </div>
-		  <button type="submit" class="btn btn-primary">Save Telegram</button>
-		</form>
-		<div id="tg_status"></div>
-	</section>
+	<!-- YouTube -->
+	<div class="settings-section" id="section_youtube">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>YouTube</h3>
+					<span class="status-badge" id="status_youtube">Loading...</span>
+				</div>
+				<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Client ID</label>
+						<input type="text" name="yt_client_id" value="{{ yt_client_id }}" />
+					</div>
+					<div class="form-group">
+						<label>Client Secret</label>
+						<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" />
+					</div>
+					<div class="form-group">
+						<label>Access Token</label>
+						<input type="text" name="yt_access_token" value="{{ yt_access_token }}" />
+					</div>
+					<div class="form-group">
+						<label>Refresh Token</label>
+						<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+				<div id="yt_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
+						<li>Create project, enable <b>YouTube Data API v3</b></li>
+						<li>Create OAuth 2.0 Client (Desktop app)</li>
+						<li>Get tokens via OAuth flow or script</li>
+					</ol>
+				</div>
+			</div>
+		</div>
+	</div>
 
+	<!-- Bluesky -->
+	<div class="settings-section" id="section_bluesky">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Bluesky</h3>
+					<span class="status-badge" id="status_bluesky">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#bsky_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Handle</label>
+						<input type="text" name="bluesky_handle" value="{{ bluesky_handle or '' }}" placeholder="yourname.bsky.social" />
+					</div>
+					<div class="form-group">
+						<label>App Password</label>
+						<input type="password" name="bluesky_app_password" value="" placeholder="{{ bluesky_pw_hint or 'xxxx-xxxx-xxxx-xxxx' }}" />
+					</div>
+					<div class="form-group">
+						<label>Service URL (optional, for self-hosted PDS)</label>
+						<input type="text" name="bluesky_service" value="{{ bluesky_service or 'https://bsky.social' }}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/bluesky/test" hx-target="#bsky_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
+				<div id="bsky_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://bsky.app/settings/app-passwords" target="_blank">bsky.app → Settings → App Passwords</a></li>
+						<li>Click <b>Add App Password</b>, name it "IndiePulse"</li>
+						<li>Copy the generated password (xxxx-xxxx-xxxx-xxxx)</li>
+						<li>Enter your handle (e.g. <code>yourname.bsky.social</code>) and the app password, click Save</li>
+						<li>Click "Test" to verify</li>
+					</ol>
+					<div class="info-box">
+						No developer account or OAuth needed. Posts over 300 chars are split into a thread; up to 4 images per post.
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Facebook -->
+	<div class="settings-section" id="section_facebook">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Facebook</h3>
+					<span class="status-badge" id="status_facebook">Loading...</span>
+				</div>
+				<h4 style="margin:0 0 8px 0;">Easy setup</h4>
+				<form hx-post="/api/facebook/fetch_pages" hx-target="#fb_pages_list" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>App ID</label>
+						<input type="text" name="fb_app_id" value="{{ fb_app_id or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>App Secret</label>
+						<input type="text" name="fb_app_secret" value="{{ fb_app_secret or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>User Access Token (from Graph API Explorer)</label>
+						<input type="text" name="fb_user_token" value="" placeholder="EAAB..." />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Fetch My Pages</button>
+						<button type="button" class="btn" hx-get="/api/facebook/test" hx-target="#fb_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
+				<div id="fb_pages_list" class="status-msg"></div>
+				<div id="fb_status" class="status-msg"></div>
+				<details style="margin-top:12px;">
+					<summary style="cursor:pointer;color:#666;">Manual fields (advanced)</summary>
+					<form hx-post="/api/settings/save" hx-target="#fb_status" hx-swap="innerHTML" style="margin-top:8px;">
+						<div class="form-group">
+							<label>RU Page ID</label>
+							<input type="text" name="fb_ru_page_id" value="{{ fb_ru_page_id or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>RU Page Access Token</label>
+							<input type="text" name="fb_ru_page_access_token" value="{{ fb_ru_page_access_token or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>EN Page ID</label>
+							<input type="text" name="fb_en_page_id" value="{{ fb_en_page_id or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>EN Page Access Token</label>
+							<input type="text" name="fb_en_page_access_token" value="{{ fb_en_page_access_token or '' }}" />
+						</div>
+						<div class="btn-row">
+							<button type="submit" class="btn btn-primary">Save</button>
+						</div>
+					</form>
+				</details>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Easy Setup (one-time, ~5 min)</h4>
+					<ol>
+						<li>Create an app at <a href="https://developers.facebook.com/apps" target="_blank">Meta for Developers</a> (type: <b>Business</b>). Keep it in <b>Development mode</b> — no App Review needed when you are the app admin and Page admin.</li>
+						<li>Copy <b>App ID</b> and <b>App Secret</b> from App Settings → Basic into the fields here.</li>
+						<li>Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a>, pick your app, click <b>Generate Access Token</b> with permissions: <b>pages_show_list</b>, <b>pages_manage_posts</b>, <b>pages_read_engagement</b>.</li>
+						<li>Paste the token here and click <b>Fetch My Pages</b>.</li>
+						<li>Click <b>Use as RU</b> / <b>Use as EN</b> next to your pages. Done.</li>
+					</ol>
+					<div class="info-box">
+						The app exchanges your token for a long-lived one automatically — Page tokens obtained this way effectively don't expire. Re-run this flow only if Facebook invalidates the token (password change, revoked permissions).
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Reddit -->
+	<div class="settings-section" id="section_reddit">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Reddit</h3>
+					<span class="status-badge" id="status_reddit">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#rd_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Client ID</label>
+						<input type="text" name="reddit_client_id" value="{{ reddit_client_id or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>Client Secret</label>
+						<input type="text" name="reddit_client_secret" value="{{ reddit_client_secret or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>Username</label>
+						<input type="text" name="reddit_username" value="{{ reddit_username or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>Password</label>
+						<input type="password" name="reddit_password" value="" placeholder="••••" />
+					</div>
+					<div class="form-group">
+						<label>Subreddit (EN, without r/)</label>
+						<input type="text" name="reddit_subreddit_en" value="{{ reddit_subreddit_en or '' }}" placeholder="gamedev" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+				<div id="rd_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://www.reddit.com/prefs/apps" target="_blank">Reddit App Preferences</a></li>
+						<li>Click "create another app..." → type: <b>script</b></li>
+						<li>Set redirect URI: <code>http://localhost:8080</code></li>
+						<li>Copy Client ID (under app name) and Secret</li>
+						<li>Enter your Reddit username/password</li>
+					</ol>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- TikTok -->
+	<div class="settings-section" id="section_tiktok">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>TikTok</h3>
+					<span class="status-badge" id="status_tiktok">Loading...</span>
+				</div>
+				<div class="info-box" style="margin-bottom:12px;">
+					TikTok currently works in <b>export mode</b> - videos are saved for manual upload.
+					API publishing requires TikTok developer approval.
+				</div>
+				<div class="btn-row">
+					<button type="button" class="btn" hx-get="/api/accounts/connect/tiktok" hx-target="#tiktok_status" hx-swap="innerHTML">Connect TikTok</button>
+					<button type="button" class="btn" hx-post="/api/tiktok/test" hx-target="#tiktok_status" hx-swap="innerHTML">Test</button>
+				</div>
+				<div id="tiktok_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Apply for TikTok Developer access</li>
+						<li>Create app with video.publish scope</li>
+						<li>Complete authorization flow</li>
+					</ol>
+					<div class="info-box">
+						Without API access, videos are exported to <code>render/</code> folder for manual upload.
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- OpenAI (Translation) -->
+	<div class="settings-section" id="section_openai">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>OpenAI (Translation)</h3>
+					<span class="status-badge" id="status_openai">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#ai_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>API Key</label>
+						<input type="password" name="openai_api_key" value="" placeholder="sk-..." />
+					</div>
+					<div class="form-group">
+						<label>Model</label>
+						<input type="text" name="openai_model" value="{{ openai_model or 'gpt-4o-mini' }}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-get="/api/translate/test_openai" hx-target="#ai_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
+				<div id="ai_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI API Keys</a></li>
+						<li>Create new secret key</li>
+						<li>Paste key and save</li>
+					</ol>
+					<div class="info-box">
+						OpenAI is optional - used for better translations. Falls back to free translators if not configured.
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Interface Language -->
+	<div class="settings-section" id="section_ui">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Interface</h3>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#lang_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Language</label>
+						<select name="ui_language">
+							<option value="en" {% if (ui_language or 'en') == 'en' %}selected{% endif %}>English</option>
+							<option value="ru" {% if (ui_language or 'en') == 'ru' %}selected{% endif %}>Русский</option>
+						</select>
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+				<div id="lang_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>UI Settings</h4>
+					<p>Change the interface language for the application.</p>
+				</div>
+			</div>
+		</div>
+	</div>
 </div>
+
+<style>
+.settings-section {
+	margin-bottom: 16px;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--card);
+}
+
+.settings-section.status-configured {
+	border-left: 4px solid var(--success);
+}
+
+.settings-section.status-partial {
+	border-left: 4px solid var(--warning);
+}
+
+.settings-section.status-not_configured {
+	border-left: 4px solid var(--danger);
+}
+
+.settings-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0;
+}
+
+@media (max-width: 900px) {
+	.settings-row {
+		grid-template-columns: 1fr;
+	}
+}
+
+.settings-left {
+	padding: 16px 20px;
+	border-right: 1px solid var(--border);
+}
+
+.settings-right {
+	padding: 16px 20px;
+	background: var(--surface-2);
+}
+
+.settings-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.settings-header h3 {
+	margin: 0;
+	font-size: 16px;
+}
+
+.status-badge {
+	padding: 4px 10px;
+	border-radius: 12px;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.status-badge.configured {
+	background: #dcfce7;
+	color: #166534;
+}
+
+.status-badge.partial {
+	background: #fef3c7;
+	color: #92400e;
+}
+
+.status-badge.not_configured {
+	background: #fee2e2;
+	color: #991b1b;
+}
+
+.form-group {
+	margin-bottom: 10px;
+}
+
+.form-group label {
+	display: block;
+	font-size: 13px;
+	font-weight: 600;
+	margin-bottom: 4px;
+	color: #374151;
+}
+
+.form-group input,
+.form-group select {
+	width: 100%;
+	min-width: 0;
+}
+
+.btn-row {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.status-msg {
+	margin-top: 8px;
+	font-size: 13px;
+}
+
+.instructions {
+	font-size: 13px;
+	color: #4b5563;
+}
+
+.instructions h4 {
+	margin: 0 0 8px 0;
+	font-size: 14px;
+	color: #1f2937;
+}
+
+.instructions ol {
+	margin: 0;
+	padding-left: 20px;
+	line-height: 1.7;
+}
+
+.instructions code {
+	background: #e5e7eb;
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-size: 12px;
+}
+
+.warning-box {
+	margin-top: 12px;
+	padding: 8px 12px;
+	background: #fef3c7;
+	border-left: 3px solid #f59e0b;
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.info-box {
+	margin-top: 12px;
+	padding: 8px 12px;
+	background: #e0f2fe;
+	border-left: 3px solid #0284c7;
+	border-radius: 4px;
+	font-size: 12px;
+}
+</style>
+
+<script>
+// Load status indicators on page load
+async function loadSettingsStatus() {
+	try {
+		const resp = await fetch('/api/settings/status');
+		const data = await resp.json();
+		
+		const platforms = ['discord', 'telegram', 'vk', 'x', 'youtube', 'bluesky', 'facebook', 'reddit', 'tiktok', 'openai'];
+		
+		platforms.forEach(platform => {
+			const info = data[platform];
+			if (!info) return;
+			
+			const badge = document.getElementById('status_' + platform);
+			const section = document.getElementById('section_' + platform);
+			
+			if (badge) {
+				badge.textContent = info.message;
+				badge.className = 'status-badge ' + info.status;
+			}
+			
+			if (section) {
+				section.classList.remove('status-configured', 'status-partial', 'status-not_configured');
+				section.classList.add('status-' + info.status);
+			}
+		});
+	} catch (err) {
+		console.error('Failed to load settings status:', err);
+	}
+}
+
+document.addEventListener('DOMContentLoaded', loadSettingsStatus);
+
+// Refresh status after any form submission
+document.addEventListener('htmx:afterSwap', (e) => {
+	setTimeout(loadSettingsStatus, 500);
+});
+</script>
 {% endblock %}

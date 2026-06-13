@@ -1,0 +1,730 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Video Post</h2>
+<p class="muted">Create and publish videos to YouTube, TikTok, and VK Video</p>
+
+<form method="post" action="/create/video" enctype="multipart/form-data" id="video_form">
+	<div class="video-layout">
+		<!-- Left: Video Editor -->
+		<div class="video-editor">
+			<div class="editor-section">
+				<h3>🎬 Video Editor</h3>
+				
+				<div class="form-group">
+					<label>Source Video</label>
+					<div id="drop_zone_video" class="drop-zone">
+						<span>🎥 Drag & drop video here or click</span>
+					</div>
+					<input type="file" id="video_input" accept="video/*" style="display:none;" />
+				</div>
+				
+				<!-- Live Preview -->
+				<div id="live_preview" class="live-preview" style="display:none;">
+					<label>Preview</label>
+					<div class="preview-wrapper">
+						<video id="source_video" controls></video>
+						<div id="crop_overlay" class="crop-overlay"></div>
+					</div>
+					<div class="crop-info" id="crop_info"></div>
+				</div>
+				
+				<!-- Crop Controls -->
+				<div class="crop-controls" id="crop_controls" style="display:none;">
+					<div class="slider-group">
+						<label>X Position: <span id="crop_x_val">50</span>%</label>
+						<input type="range" id="crop_x" min="0" max="100" value="50" />
+					</div>
+					<div class="slider-group">
+						<label>Y Position: <span id="crop_y_val">50</span>%</label>
+						<input type="range" id="crop_y" min="0" max="100" value="50" />
+					</div>
+					<div class="slider-group">
+						<label>Zoom: <span id="zoom_val">1.0</span>x</label>
+						<input type="range" id="zoom" min="100" max="200" value="100" />
+					</div>
+				</div>
+				
+				<!-- Timeline -->
+				<div class="timeline-section" id="timeline_section" style="display:none;">
+					<label>Timeline</label>
+					<div class="timeline-controls">
+						<button type="button" class="btn btn-sm" id="set_start">Set Start</button>
+						<button type="button" class="btn btn-sm" id="set_end">Set End</button>
+						<span id="timeline_info" class="muted">Full video</span>
+					</div>
+					<div class="timeline">
+						<div class="timeline-bar" id="timeline_bar">
+							<div class="timeline-selection" id="timeline_selection"></div>
+							<div class="timeline-handle start" id="timeline_start"></div>
+							<div class="timeline-handle end" id="timeline_end"></div>
+							<div class="timeline-current" id="timeline_current"></div>
+						</div>
+					</div>
+				</div>
+				
+				<!-- Music -->
+				<details class="music-section">
+					<summary>🎵 Add Music (optional)</summary>
+					<div class="music-controls">
+						<div class="form-group">
+							<label>Music File</label>
+							<div class="row">
+								<select id="music_select" style="flex:1;">
+									<option value="">No music</option>
+								</select>
+								<button type="button" class="btn" id="refresh_music">Refresh</button>
+							</div>
+							<input type="file" id="music_input" accept="audio/*" style="margin-top:8px;" />
+						</div>
+						<div class="slider-group">
+							<label>Music Offset: <span id="music_offset_val">0</span>s</label>
+							<input type="range" id="music_offset" min="0" max="60" value="0" step="0.5" />
+						</div>
+						<div class="row">
+							<div class="form-group" style="flex:1;">
+								<label>Fade In (s)</label>
+								<input type="number" id="fade_in" value="1" min="0" max="10" step="0.5" />
+							</div>
+							<div class="form-group" style="flex:1;">
+								<label>Fade Out (s)</label>
+								<input type="number" id="fade_out" value="1" min="0" max="10" step="0.5" />
+							</div>
+						</div>
+					</div>
+				</details>
+				
+				<!-- Render Buttons -->
+				<div class="render-buttons">
+					<button type="button" class="btn btn-primary" id="render_horizontal">Render 16:9 (YouTube)</button>
+					<button type="button" class="btn btn-primary" id="render_vertical">Render 9:16 (Shorts/TikTok)</button>
+					<span id="render_status" class="muted"></span>
+				</div>
+				
+				<!-- Rendered Previews -->
+				<div id="rendered_previews" class="rendered-previews"></div>
+				
+				<input type="hidden" name="media_horizontal" id="media_horizontal_hidden" />
+				<input type="hidden" name="media_vertical" id="media_vertical_hidden" />
+			</div>
+		</div>
+		
+		<!-- Right: Content -->
+		<div class="video-content">
+			<div class="form-group">
+				<label>Video Title (YouTube/TikTok)</label>
+				<input type="text" name="title" id="video_title" placeholder="Enter video title..." />
+				<div class="char-counter" id="title_counter">0/100</div>
+			</div>
+			
+			<div class="form-group">
+				<label>Description (RU)</label>
+				<textarea name="text_ru" id="text_ru" rows="4">{{ draft.text_ru if draft else '' }}</textarea>
+			</div>
+			
+			<div class="btn-row" style="margin-bottom:12px;">
+				<button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML">Translate to EN</button>
+			</div>
+			
+			<div class="form-group">
+				<label>Description (EN)</label>
+				<textarea id="text_en" name="text_en" rows="4">{{ draft.text_en if draft else '' }}</textarea>
+			</div>
+			
+			<div class="form-group">
+				<label>Project</label>
+				<div id="project_tiles" class="project-tiles-row">
+					<span class="muted" style="font-size:12px;">Loading...</span>
+				</div>
+			</div>
+
+			<div class="form-group">
+				<label>Tags/Hashtags</label>
+				<input type="text" name="tags" id="tags_input" placeholder="#Shorts #Gaming #Gamedev" />
+			</div>
+			
+			<!-- YouTube-specific -->
+			<details class="youtube-section">
+				<summary>🎬 YouTube Settings</summary>
+				<div class="form-group">
+					<label>Playlist</label>
+					<select name="yt_playlist" id="yt_playlist">
+						<option value="">No playlist</option>
+						<option value="devlog">Devlog</option>
+						<option value="shorts">Shorts</option>
+					</select>
+				</div>
+				<div class="form-group">
+					<label>Privacy</label>
+					<select name="yt_privacy" id="yt_privacy">
+						<option value="public">Public</option>
+						<option value="unlisted">Unlisted</option>
+						<option value="private">Private</option>
+					</select>
+				</div>
+			</details>
+		</div>
+	</div>
+
+	<!-- Platforms -->
+	<div class="platforms-section">
+		<label>Platforms</label>
+		<div class="platforms-grid">
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="yt" checked /> YouTube</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="tiktok" checked /> TikTok</label>
+			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="vk_video" /> VK Video</label>
+		</div>
+	</div>
+
+	<!-- Schedule -->
+	<div class="schedule-section">
+		<label>Schedule (optional)</label>
+		<div class="row">
+			<input type="datetime-local" name="scheduled_at" id="scheduled_at" />
+			<button type="button" class="btn" id="pick_now">Now</button>
+			<button type="button" class="btn" id="pick_evening">Evening</button>
+			<button type="button" class="btn" id="pick_tomorrow">Tomorrow</button>
+		</div>
+	</div>
+
+	<!-- Actions -->
+	<div class="actions-section">
+		<button type="submit" class="btn btn-primary btn-lg">Save and Queue</button>
+		<button type="button" id="clear_btn" class="btn">Clear</button>
+		<button type="button" id="install_ffmpeg" class="btn">Install FFmpeg</button>
+	</div>
+</form>
+
+<style>
+.video-layout {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 24px;
+	margin-bottom: 20px;
+}
+
+@media (max-width: 1100px) {
+	.video-layout {
+		grid-template-columns: 1fr;
+	}
+}
+
+.editor-section {
+	background: #f8fafc;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	padding: 20px;
+}
+
+.editor-section h3 {
+	margin: 0 0 16px 0;
+}
+
+.drop-zone {
+	width: 100%;
+	height: 180px;
+	border: 2px dashed #94a3b8;
+	border-radius: 8px;
+	background: white;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: #64748b;
+	transition: all 0.2s;
+}
+
+.drop-zone:hover {
+	border-color: var(--primary);
+	background: #f0f9ff;
+}
+
+.live-preview {
+	margin-top: 16px;
+}
+
+.preview-wrapper {
+	position: relative;
+	display: inline-block;
+	border: 2px solid #ccc;
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.preview-wrapper video {
+	display: block;
+	max-width: 100%;
+	max-height: 300px;
+}
+
+.crop-overlay {
+	position: absolute;
+	border: 2px solid #ef4444;
+	background: rgba(239, 68, 68, 0.2);
+	pointer-events: none;
+}
+
+.crop-info {
+	margin-top: 8px;
+	font-size: 12px;
+	color: #666;
+}
+
+.crop-controls {
+	margin-top: 16px;
+}
+
+.slider-group {
+	margin-bottom: 12px;
+}
+
+.slider-group label {
+	display: block;
+	margin-bottom: 4px;
+	font-size: 13px;
+}
+
+.slider-group input[type="range"] {
+	width: 100%;
+}
+
+.timeline-section {
+	margin-top: 16px;
+}
+
+.timeline-controls {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+.timeline {
+	background: #e5e7eb;
+	border-radius: 4px;
+	height: 40px;
+	position: relative;
+}
+
+.timeline-bar {
+	position: relative;
+	height: 100%;
+	cursor: pointer;
+}
+
+.timeline-selection {
+	position: absolute;
+	top: 0;
+	height: 100%;
+	background: rgba(37, 99, 235, 0.3);
+	border: 1px solid var(--primary);
+}
+
+.timeline-handle {
+	position: absolute;
+	top: 0;
+	width: 4px;
+	height: 100%;
+	background: var(--primary);
+	cursor: ew-resize;
+}
+
+.timeline-current {
+	position: absolute;
+	top: 0;
+	width: 2px;
+	height: 100%;
+	background: #ef4444;
+}
+
+.music-section,
+.youtube-section {
+	margin-top: 16px;
+	padding: 12px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+}
+
+.music-section summary,
+.youtube-section summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.music-controls {
+	padding-top: 12px;
+}
+
+.render-buttons {
+	margin-top: 20px;
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.rendered-previews {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 12px;
+	margin-top: 16px;
+}
+
+.rendered-previews video {
+	width: 100%;
+	border-radius: 8px;
+}
+
+.video-content .form-group {
+	margin-bottom: 16px;
+}
+
+.video-content input,
+.video-content textarea,
+.video-content select {
+	width: 100%;
+}
+
+.char-counter {
+	font-size: 12px;
+	color: #666;
+	text-align: right;
+}
+
+.platforms-section {
+	margin-bottom: 16px;
+	padding: 12px;
+	background: #f8fafc;
+	border-radius: 8px;
+}
+
+.platforms-grid {
+	display: flex;
+	gap: 16px;
+	margin-top: 8px;
+}
+
+.platform-option {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 14px;
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.platform-option:has(input:checked) {
+	background: #fef3c7;
+	border-color: #f59e0b;
+}
+
+.schedule-section {
+	margin-bottom: 16px;
+}
+
+.actions-section {
+	display: flex;
+	gap: 12px;
+	margin-top: 20px;
+}
+
+.btn-lg {
+	padding: 12px 24px;
+	font-size: 16px;
+}
+</style>
+
+<script>
+const videoInput = document.getElementById('video_input');
+const dropZone = document.getElementById('drop_zone_video');
+const sourceVideo = document.getElementById('source_video');
+const livePreview = document.getElementById('live_preview');
+const cropControls = document.getElementById('crop_controls');
+const timelineSection = document.getElementById('timeline_section');
+const cropOverlay = document.getElementById('crop_overlay');
+
+let videoLoaded = false;
+let videoWidth = 0;
+let videoHeight = 0;
+let videoDuration = 0;
+let timelineStart = 0;
+let timelineEnd = 1;
+
+// Drop zone
+dropZone.addEventListener('click', () => videoInput.click());
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#94a3b8'; });
+dropZone.addEventListener('drop', (e) => {
+	e.preventDefault();
+	dropZone.style.borderColor = '#94a3b8';
+	if (e.dataTransfer.files[0]) handleVideoFile(e.dataTransfer.files[0]);
+});
+videoInput.addEventListener('change', () => {
+	if (videoInput.files[0]) handleVideoFile(videoInput.files[0]);
+});
+
+function handleVideoFile(file) {
+	const url = URL.createObjectURL(file);
+	sourceVideo.src = url;
+	sourceVideo.onloadedmetadata = () => {
+		videoWidth = sourceVideo.videoWidth;
+		videoHeight = sourceVideo.videoHeight;
+		videoDuration = sourceVideo.duration;
+		videoLoaded = true;
+		
+		livePreview.style.display = 'block';
+		cropControls.style.display = 'block';
+		timelineSection.style.display = 'block';
+		
+		updateCropOverlay();
+		updateTimeline();
+		
+		document.getElementById('crop_info').textContent = 
+			`Video: ${videoWidth}x${videoHeight} (${videoDuration.toFixed(1)}s)`;
+	};
+	sourceVideo.addEventListener('timeupdate', updateTimelineCurrent);
+}
+
+// Crop controls
+['crop_x', 'crop_y', 'zoom'].forEach(id => {
+	document.getElementById(id)?.addEventListener('input', (e) => {
+		document.getElementById(id + '_val').textContent = 
+			id === 'zoom' ? (e.target.value / 100).toFixed(1) : e.target.value;
+		updateCropOverlay();
+	});
+});
+
+function updateCropOverlay() {
+	if (!videoLoaded) return;
+	
+	const displayW = sourceVideo.clientWidth;
+	const displayH = sourceVideo.clientHeight;
+	const zoom = document.getElementById('zoom').value / 100;
+	const xPct = document.getElementById('crop_x').value / 100;
+	const yPct = document.getElementById('crop_y').value / 100;
+	
+	// For 9:16 vertical crop
+	const overlayH = displayH / zoom;
+	const overlayW = overlayH * (9/16);
+	
+	const maxX = displayW - overlayW;
+	const maxY = displayH - overlayH;
+	
+	cropOverlay.style.width = overlayW + 'px';
+	cropOverlay.style.height = overlayH + 'px';
+	cropOverlay.style.left = (maxX * xPct) + 'px';
+	cropOverlay.style.top = (maxY * yPct) + 'px';
+}
+
+// Timeline
+function updateTimeline() {
+	if (!videoDuration) return;
+	
+	const bar = document.getElementById('timeline_bar');
+	const sel = document.getElementById('timeline_selection');
+	const startEl = document.getElementById('timeline_start');
+	const endEl = document.getElementById('timeline_end');
+	const info = document.getElementById('timeline_info');
+	
+	const w = bar.offsetWidth;
+	sel.style.left = (timelineStart * w) + 'px';
+	sel.style.width = ((timelineEnd - timelineStart) * w) + 'px';
+	startEl.style.left = (timelineStart * w) + 'px';
+	endEl.style.left = (timelineEnd * w) + 'px';
+	
+	const startTime = (timelineStart * videoDuration).toFixed(1);
+	const endTime = (timelineEnd * videoDuration).toFixed(1);
+	const duration = (endTime - startTime).toFixed(1);
+	info.textContent = timelineStart === 0 && timelineEnd === 1 
+		? `Full video (${duration}s)` 
+		: `${startTime}s - ${endTime}s (${duration}s)`;
+}
+
+function updateTimelineCurrent() {
+	if (!videoDuration) return;
+	const curr = document.getElementById('timeline_current');
+	const bar = document.getElementById('timeline_bar');
+	curr.style.left = ((sourceVideo.currentTime / videoDuration) * bar.offsetWidth) + 'px';
+}
+
+document.getElementById('set_start')?.addEventListener('click', () => {
+	if (videoLoaded && videoDuration) {
+		timelineStart = sourceVideo.currentTime / videoDuration;
+		if (timelineStart >= timelineEnd) timelineStart = timelineEnd - 0.01;
+		updateTimeline();
+	}
+});
+
+document.getElementById('set_end')?.addEventListener('click', () => {
+	if (videoLoaded && videoDuration) {
+		timelineEnd = sourceVideo.currentTime / videoDuration;
+		if (timelineEnd <= timelineStart) timelineEnd = timelineStart + 0.01;
+		updateTimeline();
+	}
+});
+
+// Music
+document.getElementById('refresh_music')?.addEventListener('click', async () => {
+	try {
+		const r = await fetch('/api/music/list');
+		const j = await r.json();
+		const sel = document.getElementById('music_select');
+		sel.innerHTML = '<option value="">No music</option>';
+		(j.tracks || []).forEach(t => {
+			const opt = document.createElement('option');
+			opt.value = t.path;
+			opt.textContent = t.name;
+			sel.appendChild(opt);
+		});
+	} catch (e) {}
+});
+
+document.getElementById('music_offset')?.addEventListener('input', (e) => {
+	document.getElementById('music_offset_val').textContent = e.target.value;
+});
+
+// Render buttons
+async function renderVideo(type) {
+	if (!videoInput.files[0]) {
+		alert('Please select a video first');
+		return;
+	}
+	
+	const status = document.getElementById('render_status');
+	status.textContent = `Rendering ${type}...`;
+	
+	const fd = new FormData();
+	fd.append('video', videoInput.files[0]);
+	fd.append('crop_x_pct', document.getElementById('crop_x').value / 100);
+	fd.append('crop_y_pct', document.getElementById('crop_y').value / 100);
+	fd.append('zoom', document.getElementById('zoom').value / 100);
+	fd.append('start_time', (timelineStart * videoDuration).toFixed(2));
+	fd.append('end_time', (timelineEnd * videoDuration).toFixed(2));
+	fd.append('music_offset_s', document.getElementById('music_offset').value);
+	fd.append('fade_in_s', document.getElementById('fade_in').value);
+	fd.append('fade_out_s', document.getElementById('fade_out').value);
+	
+	const musicInput = document.getElementById('music_input');
+	if (musicInput.files[0]) {
+		fd.append('music', musicInput.files[0]);
+	}
+	
+	try {
+		const endpoint = type === 'horizontal' ? '/api/video/render_horizontal' : '/api/video/render_vertical';
+		const r = await fetch(endpoint, { method: 'POST', body: fd });
+		const j = await r.json();
+		
+		if (j.output_url) {
+			status.textContent = `${type} rendered ✓`;
+			
+			const prev = document.getElementById('rendered_previews');
+			const v = document.createElement('video');
+			v.src = j.output_url;
+			v.controls = true;
+			prev.appendChild(v);
+			
+			const hidden = type === 'horizontal' ? 'media_horizontal_hidden' : 'media_vertical_hidden';
+			document.getElementById(hidden).value = j.output_rel;
+		} else {
+			status.textContent = 'Render failed';
+		}
+	} catch (e) {
+		status.textContent = 'Error: ' + e.message;
+	}
+}
+
+document.getElementById('render_horizontal')?.addEventListener('click', () => renderVideo('horizontal'));
+document.getElementById('render_vertical')?.addEventListener('click', () => renderVideo('vertical'));
+
+// Title counter
+document.getElementById('video_title')?.addEventListener('input', (e) => {
+	document.getElementById('title_counter').textContent = `${e.target.value.length}/100`;
+});
+
+// Schedule helpers
+function setSchedule(dt) {
+	const el = document.getElementById('scheduled_at');
+	const pad = n => String(n).padStart(2, '0');
+	el.value = `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
+document.getElementById('pick_now')?.addEventListener('click', () => setSchedule(new Date()));
+document.getElementById('pick_evening')?.addEventListener('click', () => {
+	const now = new Date();
+	let t = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 20, 0);
+	if (t <= now) t.setDate(t.getDate() + 1);
+	setSchedule(t);
+});
+document.getElementById('pick_tomorrow')?.addEventListener('click', () => {
+	const now = new Date();
+	const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12, 0);
+	setSchedule(t);
+});
+
+// FFmpeg install
+document.getElementById('install_ffmpeg')?.addEventListener('click', async () => {
+	const btn = document.getElementById('install_ffmpeg');
+	btn.disabled = true;
+	btn.textContent = 'Installing...';
+	try {
+		await fetch('/api/video/install_ffmpeg', { method: 'POST' });
+		btn.textContent = 'FFmpeg Installed ✓';
+	} catch (e) {
+		btn.textContent = 'Install Failed';
+	}
+});
+
+// Clear
+document.getElementById('clear_btn')?.addEventListener('click', () => {
+	document.getElementById('video_title').value = '';
+	document.getElementById('text_ru').value = '';
+	document.getElementById('text_en').value = '';
+	document.getElementById('tags_input').value = '';
+	document.getElementById('scheduled_at').value = '';
+	document.getElementById('rendered_previews').innerHTML = '';
+	document.getElementById('media_horizontal_hidden').value = '';
+	document.getElementById('media_vertical_hidden').value = '';
+});
+
+// Project Presets
+(async function loadProjectTiles() {
+	try {
+		const r = await fetch('/api/projects');
+		const projects = await r.json();
+		const container = document.getElementById('project_tiles');
+		if (!container) return;
+		if (!projects.length) {
+			container.innerHTML = '<span class="muted" style="font-size:12px;">No projects — <a href="/projects">create one</a></span>';
+			return;
+		}
+		container.innerHTML = '';
+		projects.forEach(p => {
+			const tile = document.createElement('div');
+			tile.className = 'project-tile';
+			const iconHtml = p.icon_url
+				? `<img src="${p.icon_url}" alt="${p.name}" />`
+				: `<div class="tile-initial">${(p.name || '?')[0].toUpperCase()}</div>`;
+			tile.innerHTML = iconHtml + `<span>${p.name}</span>`;
+			tile.addEventListener('click', () => {
+				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
+				tile.classList.add('selected');
+				const tagsInput = document.getElementById('tags_input');
+				if (tagsInput) {
+					tagsInput.value = p.tags_json || '';
+					tagsInput.dispatchEvent(new Event('input', { bubbles: true }));
+				}
+			});
+			container.appendChild(tile);
+		});
+	} catch (e) {
+		const container = document.getElementById('project_tiles');
+		if (container) container.innerHTML = '';
+	}
+})();
+
+// Load music on start
+document.getElementById('refresh_music')?.click();
+</script>
+{% endblock %}

@@ -18,9 +18,11 @@ class PlatformEnum(str, Enum):
     fb_en = "fb_en"
     reddit = "reddit"
     tg = "tg"
+    bluesky = "bluesky"
 
 class BriefTypeEnum(str, Enum):
     news = "news"
+    post = "post"
     video = "video"
 
 class PostStatusEnum(str, Enum):
@@ -64,6 +66,18 @@ class Preset(SQLModel, table=True):
     name: str = Field(index=True)
     tags_json: str
     created_at: datetime = Field(default_factory=now_ts)
+
+class Project(SQLModel, table=True):
+    __tablename__ = "projects"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(default=1, index=True)
+    name: str = Field(index=True)
+    icon_path: Optional[str] = Field(default=None)
+    tags_json: Optional[str] = Field(default=None)
+    platforms_json: Optional[str] = Field(default=None)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=now_ts)
+    updated_at: datetime = Field(default_factory=now_ts)
 
 class Brief(SQLModel, table=True):
     __tablename__ = "briefs"

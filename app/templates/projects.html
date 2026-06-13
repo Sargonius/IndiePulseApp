@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Projects</h2>
+<p class="muted">Define project presets to quickly apply tags when creating posts.</p>
+
+<!-- Create New Project -->
+<div class="settings-section" style="margin-bottom:20px;">
+  <div style="padding:16px 20px;">
+    <h3 style="margin:0 0 14px 0; font-size:15px;">New Project</h3>
+    <form id="create_project_form"
+          enctype="multipart/form-data"
+          hx-post="/api/projects"
+          hx-target="#projects_list"
+          hx-swap="outerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>Name</label>
+        <input type="text" name="name" required placeholder="My Game" style="max-width:320px;" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>Default Tags</label>
+        <input type="text" name="tags_json" placeholder="#Gamedev #Indie #UnrealEngine" style="max-width:480px;" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>Icon / Logo</label>
+        <input type="file" name="icon" accept="image/*" />
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>Sort Order</label>
+        <input type="number" name="sort_order" value="0" style="width:80px;" />
+      </div>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label>Platform Overrides (JSON)</label>
+        <textarea name="platforms_json" rows="3"
+                  style="max-width:480px; font-family:monospace; font-size:12px;"
+                  placeholder='{}'>{}</textarea>
+        <div class="muted" style="font-size:11px; margin-top:3px;">Advanced: overrides per-platform settings for this project. Leave as {} if unsure.</div>
+      </div>
+      <button type="submit" class="btn btn-primary">Create Project</button>
+    </form>
+  </div>
+</div>
+
+<!-- Projects List -->
+{% include 'partials/projects_list.html' %}
+{% endblock %}

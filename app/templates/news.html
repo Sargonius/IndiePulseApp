@@ -41,7 +41,12 @@
             <textarea id="text_en" name="text_en" rows="6" cols="80">{{ draft.text_en if draft else '' }}</textarea>
             <div id="x_counter" style="font-size:12px;color:#666;margin-top:4px;">X: 0/280</div>
             <div id="word_counter" style="font-size:12px;color:#666;margin-top:2px;">Words: 0</div>
+            <div id="platform_warnings" style="display:none;margin-top:6px;padding:8px 10px;border:1px solid #f0d7a7;background:#fff7ed;border-radius:6px;font-size:12px;color:#7c2d12;"></div>
 			<div style="margin-top:6px;">
+				<label>Project</label>
+				<div id="project_tiles" class="project-tiles-row" style="margin-bottom:8px;">
+					<span class="muted" style="font-size:12px;">Loading...</span>
+				</div>
 				<label>Hashtags (space-separated)</label><br/>
                 <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie" style="width: 520px;" />
                 <button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Suggest hashtags</button>
@@ -59,8 +64,9 @@
                     <label><input class="pf" type="checkbox" name="platforms" value="vk" checked data-ready="{{ 1 if platforms_ready.vk else 0 }}" /> VK</label>
                     <label><input class="pf" type="checkbox" name="platforms" value="x" checked data-ready="{{ 1 if platforms_ready.x else 0 }}" /> X/Twitter</label>
                     <label><input class="pf" type="checkbox" name="platforms" value="discord" checked data-ready="{{ 1 if platforms_ready.discord else 0 }}" /> Discord</label>
-                    <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
-                    <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked data-ready="{{ 1 if platforms_ready.fb_ru else 0 }}" /> Facebook (RU)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="fb_en" checked data-ready="{{ 1 if platforms_ready.fb_en else 0 }}" /> Facebook (EN)</label>
+                    <label><input class="pf" type="checkbox" name="platforms" value="bluesky" checked data-ready="{{ 1 if platforms_ready.bluesky else 0 }}" /> Bluesky</label>
                     <label><input class="pf" type="checkbox" name="platforms" value="reddit" checked data-ready="{{ 1 if platforms_ready.reddit else 0 }}" /> Reddit (EN)</label>
                     <label><input class="pf" type="checkbox" name="platforms" value="tg" checked data-ready="{{ 1 if platforms_ready.tg else 0 }}" /> Telegram (RU)</label>
                 </div>
@@ -374,6 +380,7 @@ const xPrevMedia = document.getElementById('x_preview_media');
 const vkPrevMedia = document.getElementById('vk_preview_media');
 const xCounter = document.getElementById('x_counter');
 const wordCounter = document.getElementById('word_counter');
+const warningBox = document.getElementById('platform_warnings');
 const clearBtn = document.getElementById('clear_draft_btn');
 const xSplitEl = document.getElementById('x_split');
 const rdSentEl = document.getElementById('rd_sentences');
@@ -385,6 +392,8 @@ function setPreview(target, file) {
     if (file.type && file.type.startsWith('image/')) {
         const img = document.createElement('img');
         img.src = url;
+        img.className = 'thumbnail-clickable';
+        img.dataset.lightbox = 'true';
         img.style.maxWidth = '320px';
         img.style.maxHeight = '180px';
         target.appendChild(img);
@@ -446,6 +455,8 @@ function renderGallery(items) {
     card.style.gap = '6px';
     const img = document.createElement('img');
     img.src = '/media/' + rel.split('/').pop();
+    img.className = 'thumbnail-clickable';
+    img.dataset.lightbox = 'true';
     img.style.maxWidth = '100%';
     img.style.maxHeight = '160px';
     img.draggable = true;
@@ -522,6 +533,8 @@ function updatePreviewsFromGallery(items) {
     showX.forEach(rel => {
       const img = document.createElement('img');
       img.src = '/media/' + rel.split('/').pop();
+      img.className = 'thumbnail-clickable';
+      img.dataset.lightbox = 'true';
       img.style.maxWidth = '72px'; img.style.maxHeight='72px'; img.style.borderRadius='6px'; img.style.marginRight='4px';
       xPrevMedia.appendChild(img);
     });
@@ -529,6 +542,8 @@ function updatePreviewsFromGallery(items) {
     showVK.forEach(rel => {
       const img = document.createElement('img');
       img.src = '/media/' + rel.split('/').pop();
+      img.className = 'thumbnail-clickable';
+      img.dataset.lightbox = 'true';
       img.style.maxWidth = '72px'; img.style.maxHeight='72px'; img.style.borderRadius='6px'; img.style.marginRight='4px';
       vkPrevMedia.appendChild(img);
     });
@@ -650,6 +665,54 @@ function updateXCounter() {
   xCounter.style.color = over > 0 ? 'red' : '#666';
   const words = (en.trim().match(/\S+/g) || []).length;
   wordCounter.textContent = `Words: ${words}`;
+  updateWarnings();
+}
+
+function updateWarnings() {
+  if (!warningBox) return;
+  const ru = document.getElementById('text_ru').value || '';
+  const en = document.getElementById('text_en').value || '';
+  const tagsVal = (document.getElementById('tags_input')?.value || '').trim();
+  const xSplit = !!(xSplitEl && xSplitEl.checked);
+  const tgText = (ru + (tagsVal ? '\n' + tagsVal : '')).trim();
+  const xText = (en + (tagsVal ? '\n' + tagsVal : '')).trim();
+  const ruLen = [...ru].length;
+  const enLen = [...en].length;
+  const tgLen = [...tgText].length;
+  const xLen = [...xText].length;
+  const selected = new Set(Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value));
+  const warnings = [];
+
+  if (selected.has('discord')) {
+    if (ruLen > 2000) warnings.push(`Discord RU: ${ruLen}/2000 → split into ${Math.ceil(ruLen / 2000)} messages`);
+    if (enLen > 2000) warnings.push(`Discord EN: ${enLen}/2000 → split into ${Math.ceil(enLen / 2000)} messages`);
+  }
+  if (selected.has('tg')) {
+    const hasMedia = !!hiddenN.value || (galleryOrderHidden.value && galleryOrderHidden.value.split(',').filter(Boolean).length > 0);
+    const limit = hasMedia ? 1024 : 4096;
+    if (tgLen > limit) {
+      const note = hasMedia ? 'caption limit 1024 with media' : 'message limit 4096';
+      warnings.push(`Telegram: ${tgLen}/${limit} → split into ${Math.ceil(tgLen / limit)} messages (${note})`);
+    }
+  }
+  if (selected.has('x') && xLen > 280) {
+    if (xSplit) {
+      warnings.push(`X: ${xLen}/280 → split into thread (${Math.ceil(xLen / 280)} tweets)`);
+    } else {
+      warnings.push(`X: ${xLen}/280 → will be truncated (enable thread split)`);
+    }
+  }
+  if (selected.has('bluesky') && xLen > 300) {
+    warnings.push(`Bluesky: ${xLen}/300 → split into thread (${Math.ceil(xLen / 300)} posts)`);
+  }
+
+  if (warnings.length) {
+    warningBox.style.display = 'block';
+    warningBox.innerHTML = warnings.map(w => `<div>• ${w}</div>`).join('');
+  } else {
+    warningBox.style.display = 'none';
+    warningBox.innerHTML = '';
+  }
 }
 
 ['text_ru','text_en','tags_input','yt_title'].forEach(id => {
@@ -660,6 +723,9 @@ function updateXCounter() {
 document.getElementById('x_split').addEventListener('change', () => { updateTextPreviews(); updateXCounter(); });
 rdSentEl.addEventListener('input', () => { updateTextPreviews(); queueSave(); });
 document.getElementById('yt_title').addEventListener('input', () => { /* title only, keep for future validation */ });
+document.querySelectorAll('input.pf[name="platforms"]').forEach(el => {
+  el.addEventListener('change', updateWarnings);
+});
 
 // Vertical render helper
 const rvVideo = document.getElementById('rv_video');
@@ -1337,7 +1403,43 @@ document.getElementById('toggle_all_btn').addEventListener('click', () => {
 });
 
 // Re-hydrate previews from draft on load if we have server paths
+async function loadProjectTiles() {
+  try {
+    const r = await fetch('/api/projects');
+    const projects = await r.json();
+    const container = document.getElementById('project_tiles');
+    if (!container) return;
+    if (!projects.length) {
+      container.innerHTML = '<span class="muted" style="font-size:12px;">No projects — <a href="/projects">create one</a></span>';
+      return;
+    }
+    container.innerHTML = '';
+    projects.forEach(p => {
+      const tile = document.createElement('div');
+      tile.className = 'project-tile';
+      const iconHtml = p.icon_url
+        ? `<img src="${p.icon_url}" alt="${p.name}" />`
+        : `<div class="tile-initial">${(p.name || '?')[0].toUpperCase()}</div>`;
+      tile.innerHTML = iconHtml + `<span>${p.name}</span>`;
+      tile.addEventListener('click', () => {
+        document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
+        tile.classList.add('selected');
+        const tagsInput = document.getElementById('tags_input');
+        if (tagsInput) {
+          tagsInput.value = p.tags_json || '';
+          tagsInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+      container.appendChild(tile);
+    });
+  } catch (e) {
+    const container = document.getElementById('project_tiles');
+    if (container) container.innerHTML = '';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  loadProjectTiles();
   const norm = hiddenN.value;
   if (norm) {
     const url = '/media/' + norm.split('/').pop();
@@ -1346,6 +1448,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isImg) {
       const img = document.createElement('img');
       img.src = url; img.style.maxWidth='320px'; img.style.maxHeight='180px';
+      img.className = 'thumbnail-clickable';
+      img.dataset.lightbox = 'true';
       prevN.innerHTML=''; prevN.appendChild(img);
     } else {
       const v = document.createElement('video');
@@ -1361,6 +1465,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isImg) {
       const img = document.createElement('img');
       img.src = url; img.style.maxWidth='320px'; img.style.maxHeight='180px';
+      img.className = 'thumbnail-clickable';
+      img.dataset.lightbox = 'true';
       prevV.innerHTML=''; prevV.appendChild(img);
     } else {
       const v = document.createElement('video');

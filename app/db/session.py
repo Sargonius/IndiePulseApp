@@ -89,3 +89,20 @@ def migrate_db() -> None:
             conn.exec_driver_sql("ALTER TABLE briefs ADD COLUMN crop_scale REAL")
         except Exception:
             pass
+
+        # Create projects table if not exists
+        try:
+            conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS projects ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "user_id INTEGER NOT NULL DEFAULT 1, "
+                "name VARCHAR NOT NULL, "
+                "icon_path VARCHAR, "
+                "tags_json VARCHAR, "
+                "platforms_json VARCHAR, "
+                "sort_order INTEGER NOT NULL DEFAULT 0, "
+                "created_at DATETIME, "
+                "updated_at DATETIME)"
+            )
+        except Exception:
+            pass

@@ -5,6 +5,7 @@
   <title>IndiePulse</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#2563eb">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M4 18h6l3-8 5 13 4-9h6' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <link href="https://fonts.googleapis.com/css2?family=Staatliches&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v={{ request.app.state.asset_version if request and request.app and request.app.state and request.app.state.asset_version else '1' }}">
@@ -12,15 +13,17 @@
 <body class="{{ body_class or '' }}">
 	<header>
 		<div class="inner">
-			<h1>IndiePulse</h1>
+			<h1>Indie<span class="accent">Pulse</span></h1>
 			<nav>
 				<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a>
-				<a href="/news" class="{% if request.url.path.startswith('/news') %}active{% endif %}">News</a>
+				<a href="/create/post" class="{% if request.url.path.startswith('/create/post') %}active{% endif %}">📷 Post</a>
+				<a href="/create/video" class="{% if request.url.path.startswith('/create/video') %}active{% endif %}">🎬 Video</a>
+				<a href="/calendar" class="{% if request.url.path.startswith('/calendar') %}active{% endif %}">📅 Calendar</a>
 				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
-				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
-				<a href="/steam" class="{% if request.url.path.startswith('/steam') %}active{% endif %}">Steam Export</a>
 				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>
-				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">Accounts</a>
+				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
+				<a href="/projects" class="{% if request.url.path.startswith('/projects') %}active{% endif %}">Projects</a>
+				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">⚙️</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
 			</nav>
 		</div>
@@ -32,10 +35,130 @@
 		</div>
 	</main>
     <footer>
-		<div class="container" style="padding-top:8px; padding-bottom:16px; font-size:12px; color:#666;">
+		<div class="container">
 			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '1.0.0' }}</span>
-			<span style="margin-left:12px;">Last change: {{ request.app.state.app_last_change if request and request.app and request.app.state and request.app.state.app_last_change else 'Version 1.0.0 - Initial setup' }}</span>
+			<span>Last change: {{ request.app.state.app_last_change if request and request.app and request.app.state and request.app.state.app_last_change else 'Version 1.0.0 - Initial setup' }}</span>
 		</div>
 	</footer>
+
+	<!-- Image Lightbox -->
+	<div id="lightbox" class="lightbox-overlay">
+		<div class="lightbox-content">
+			<button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+			<button class="lightbox-nav prev" onclick="lightboxPrev()">&#8249;</button>
+			<img id="lightbox-img" src="" alt="Preview" />
+			<button class="lightbox-nav next" onclick="lightboxNext()">&#8250;</button>
+		</div>
+	</div>
+
+	<script>
+	// Lightbox functionality
+	let lightboxImages = [];
+	let lightboxIndex = 0;
+
+	function openLightbox(src, gallery) {
+		const overlay = document.getElementById('lightbox');
+		const img = document.getElementById('lightbox-img');
+		
+		if (gallery && gallery.length > 0) {
+			lightboxImages = gallery;
+			lightboxIndex = gallery.indexOf(src);
+			if (lightboxIndex < 0) lightboxIndex = 0;
+		} else {
+			lightboxImages = [src];
+			lightboxIndex = 0;
+		}
+		
+		img.src = lightboxImages[lightboxIndex];
+		overlay.classList.add('active');
+		document.body.style.overflow = 'hidden';
+		
+		// Hide nav buttons if single image
+		const navBtns = overlay.querySelectorAll('.lightbox-nav');
+		navBtns.forEach(btn => {
+			btn.style.display = lightboxImages.length > 1 ? 'flex' : 'none';
+		});
+	}
+
+	function closeLightbox() {
+		const overlay = document.getElementById('lightbox');
+		overlay.classList.remove('active');
+		document.body.style.overflow = '';
+	}
+
+	function lightboxPrev() {
+		if (lightboxImages.length <= 1) return;
+		lightboxIndex = (lightboxIndex - 1 + lightboxImages.length) % lightboxImages.length;
+		document.getElementById('lightbox-img').src = lightboxImages[lightboxIndex];
+	}
+
+	function lightboxNext() {
+		if (lightboxImages.length <= 1) return;
+		lightboxIndex = (lightboxIndex + 1) % lightboxImages.length;
+		document.getElementById('lightbox-img').src = lightboxImages[lightboxIndex];
+	}
+
+	// Close on overlay click (not on image)
+	document.getElementById('lightbox')?.addEventListener('click', function(e) {
+		if (e.target === this) closeLightbox();
+	});
+
+	// Keyboard navigation
+	document.addEventListener('keydown', function(e) {
+		const overlay = document.getElementById('lightbox');
+		if (!overlay || !overlay.classList.contains('active')) return;
+		
+		switch(e.key) {
+			case 'Escape':
+				closeLightbox();
+				break;
+			case 'ArrowLeft':
+				lightboxPrev();
+				break;
+			case 'ArrowRight':
+				lightboxNext();
+				break;
+		}
+	});
+
+	// Auto-attach lightbox to images with data-lightbox attribute or .thumbnail-clickable class
+	function initLightbox() {
+		// Single images
+		document.querySelectorAll('img[data-lightbox], img.thumbnail-clickable').forEach(img => {
+			if (img.dataset.lightboxInit) return;
+			img.dataset.lightboxInit = 'true';
+			img.style.cursor = 'zoom-in';
+			img.addEventListener('click', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				const fullSrc = this.dataset.fullSrc || this.src;
+				openLightbox(fullSrc);
+			});
+		});
+		
+		// Gallery images (data-lightbox-gallery)
+		const galleries = {};
+		document.querySelectorAll('img[data-lightbox-gallery]').forEach(img => {
+			const galleryName = img.dataset.lightboxGallery;
+			if (!galleries[galleryName]) galleries[galleryName] = [];
+			const fullSrc = img.dataset.fullSrc || img.src;
+			galleries[galleryName].push(fullSrc);
+			
+			if (img.dataset.lightboxInit) return;
+			img.dataset.lightboxInit = 'true';
+			img.style.cursor = 'zoom-in';
+			img.addEventListener('click', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				const fullSrc = this.dataset.fullSrc || this.src;
+				openLightbox(fullSrc, galleries[galleryName]);
+			});
+		});
+	}
+
+	// Initialize on load and after htmx swaps
+	document.addEventListener('DOMContentLoaded', initLightbox);
+	document.addEventListener('htmx:afterSwap', initLightbox);
+	</script>
 </body>
 </html>
