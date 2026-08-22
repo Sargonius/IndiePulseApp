@@ -106,3 +106,24 @@ def migrate_db() -> None:
             )
         except Exception:
             pass
+
+        # Add Shorts render-preset columns to projects (idempotent)
+        for _col, _type in [
+            ("crop_x", "INTEGER"), ("crop_y", "INTEGER"), ("crop_scale", "REAL"),
+            ("music_path", "VARCHAR(500)"), ("music_offset_sec", "INTEGER"),
+            ("fade_in_ms", "INTEGER"), ("fade_out_ms", "INTEGER"),
+            ("platforms_csv", "VARCHAR(200)"),
+        ]:
+            try:
+                conn.exec_driver_sql(f"ALTER TABLE projects ADD COLUMN {_col} {_type}")
+            except Exception:
+                pass
+
+        # Add "clip type" preset columns (title/description/music) to presets
+        for _col, _type in [
+            ("title", "VARCHAR(300)"), ("text_en", "TEXT"), ("music_path", "VARCHAR(500)"),
+        ]:
+            try:
+                conn.exec_driver_sql(f"ALTER TABLE presets ADD COLUMN {_col} {_type}")
+            except Exception:
+                pass

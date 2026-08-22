@@ -156,6 +156,7 @@ def accounts(request: Request):
             'request': request,
             'ui_language': cfg.get('ui_language', 'en'),
             'discord_webhook': cfg.get('discord_webhook_url', ''),
+            'discord_bot_token_hint': (('•••' + (cfg.get('discord_bot_token') or '')[-4:]) if (cfg.get('discord_bot_token') or '') else ''),
             'vk_client_id': cfg.get('vk_client_id', ''),
             'vk_client_secret': cfg.get('vk_client_secret', ''),
             'vk_group_id': cfg.get('vk_group_id', ''),
@@ -179,6 +180,8 @@ def accounts(request: Request):
             'fb_en_page_id': cfg.get('fb_en_page_id', ''),
             'fb_ru_page_access_token': cfg.get('fb_ru_page_access_token', ''),
             'fb_en_page_access_token': cfg.get('fb_en_page_access_token', ''),
+            'ig_user_id': cfg.get('ig_user_id', ''),
+            'ig_access_token_hint': (('•••' + (cfg.get('ig_access_token') or '')[-4:]) if (cfg.get('ig_access_token') or '') else ''),
             'bluesky_handle': cfg.get('bluesky_handle', ''),
             'bluesky_service': cfg.get('bluesky_service', 'https://bsky.social'),
             'bluesky_pw_hint': (('•••' + (cfg.get('bluesky_app_password') or '')[-4:]) if (cfg.get('bluesky_app_password') or '') else ''),
@@ -188,6 +191,10 @@ def accounts(request: Request):
             'reddit_subreddit_en': cfg.get('reddit_subreddit_en', ''),
             'openai_api_key': cfg.get('openai_api_key', ''),
             'openai_model': cfg.get('openai_model', ''),
+            'tiktok_client_key': cfg.get('tiktok_client_key', ''),
+            'tiktok_secret_hint': (('•••' + (cfg.get('tiktok_client_secret') or '')[-4:]) if (cfg.get('tiktok_client_secret') or '') else ''),
+            'tiktok_redirect_uri': cfg.get('tiktok_redirect_uri', 'http://127.0.0.1:8000/api/accounts/callback/tiktok'),
+            'tiktok_token_hint': (('•••' + (cfg.get('tiktok_access_token') or '')[-4:]) if (cfg.get('tiktok_access_token') or '') else ''),
         },
     )
 
@@ -292,7 +299,7 @@ def analytics_list(request: Request, session: Session = Depends(get_session)):
     rows = session.exec(select(Post).order_by(Post.created_at.desc()).limit(100)).all()
     data = _enrich_posts(rows)
     cfg = load_settings()
-    return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
+    return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'body_class': 'page-analytics', 'ui_language': cfg.get('ui_language', 'en')})
 
 
 @router.get('/calendar', response_class=HTMLResponse)
@@ -576,9 +583,15 @@ def submit_post(
     session: Session = Depends(get_session),
 ):
     """Process image post submission."""
+    # Unified screenshots field: the FIRST uploaded image is the "main" image
+    # that goes to every platform; the rest ride along as a gallery where the
+    # platform API supports multiple images. Deriving main from gallery[0] here
+    # is what stops a gallery-only post from publishing with no image at all.
+    glist = [x.strip() for x in (gallery_order or '').split(',') if x.strip()]
+    main_rel = (media_normal or '').strip() or (glist[0] if glist else None)
     media_path = None
-    if media_normal:
-        media_path = f"media/{media_normal}" if not media_normal.startswith('media/') else media_normal
+    if main_rel:
+        media_path = f"media/{main_rel}" if not main_rel.startswith('media/') else main_rel
 
     # Weekday auto-tags
     tags_final = (tags or '').strip()
@@ -635,12 +648,10 @@ def submit_post(
     for post in created_posts:
         import json as _json
         payload = {"post_id": post.id}
-        if gallery_order:
-            glist = [x.strip() for x in gallery_order.split(',') if x.strip()]
-            if glist:
-                payload["gallery"] = glist
-        if media_normal:
-            payload["media_rel"] = media_normal
+        if glist:
+            payload["gallery"] = glist
+        if main_rel:
+            payload["media_rel"] = main_rel
         if str(post.platform) in (str(PlatformEnum.x), 'x'):
             payload["x_thread"] = bool(x_split)
         if str(post.platform) in (str(PlatformEnum.reddit), 'reddit'):
@@ -665,6 +676,239 @@ def submit_post(
         'num_posts': len(created_posts),
         'skipped': [],
     })
+
+
+@router.get('/shorts', response_class=HTMLResponse)
+def shorts_form(request: Request):
+    """The Shorts Factory: batch-queue vertical short videos."""
+    cfg = load_settings()
+    return templates.TemplateResponse('shorts.html', {
+        'request': request,
+        'ui_language': cfg.get('ui_language', 'en'),
+    })
+
+
+def _safe_filename(name: str) -> str:
+    import re
+    base = (name or 'clip.mp4').replace('\\', '/').split('/')[-1]
+    base = re.sub(r'[^A-Za-z0-9._-]+', '_', base).strip('_') or 'clip.mp4'
+    return base[:80]
+
+
+@router.post('/shorts')
+def submit_shorts(
+    request: Request,
+    files: List[UploadFile] = File(default=[]),
+    meta: str = Form('[]'),
+    session: Session = Depends(get_session),
+):
+    """Accept a batch of clips + per-card metadata, save sources, and enqueue a
+    render_short job per clip. Posts are created later by render_short (post-render)."""
+    import json as _json, os as _os
+    from uuid import uuid4
+    from app.jobs.tasks import render_short
+
+    try:
+        metas = _json.loads(meta or '[]') or []
+    except Exception:
+        metas = []
+
+    def _num(v, default=0.0):
+        try:
+            return float(v)
+        except Exception:
+            return float(default)
+
+    _os.makedirs('media', exist_ok=True)
+    created = 0
+    for i, up in enumerate(files or []):
+        m = metas[i] if i < len(metas) else {}
+        try:
+            raw = up.file.read()
+        except Exception:
+            raw = b''
+        if not raw:
+            continue
+        fname = f"short_{uuid4().hex[:12]}_{_safe_filename(up.filename or f'clip_{i}.mp4')}"
+        with open(_os.path.join('media', fname), 'wb') as fh:
+            fh.write(raw)
+
+        brief = Brief(
+            user_id=1,
+            type='video',
+            text_ru=(m.get('text_ru') or ''),
+            text_en=(m.get('text_en') or ''),
+            title=(m.get('title') or '').strip() or None,
+            tags_json=(m.get('tags') or '').strip(),
+            media_path=fname,
+            vertical_916=True,  # marks this Brief as a Shorts-Factory item
+            crop_x=int(_num(m.get('crop_x'), 50)),
+            crop_y=int(_num(m.get('crop_y'), 50)),
+            crop_scale=_num(m.get('zoom'), 1.0),
+            music_path=(m.get('music_path') or None),
+            music_offset_sec=int(_num(m.get('music_offset'), 0)),
+            fade_in_ms=int(_num(m.get('fade_in'), 0) * 1000),
+            fade_out_ms=int(_num(m.get('fade_out'), 0) * 1000),
+        )
+        session.add(brief)
+        session.commit()
+        session.refresh(brief)
+
+        platforms = [p for p in (m.get('platforms') or []) if p]
+        payload = {
+            'brief_id': brief.id,
+            'platforms': platforms,
+            'scheduled_at': (m.get('scheduled_at') or None),
+        }
+        rjob = Job(kind=JobKindEnum.render, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
+        session.add(rjob)
+        session.commit()
+        session.refresh(rjob)
+        render_short.schedule(args=(rjob.id, brief.id), delay=0)
+        created += 1
+
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('/shorts/board', status_code=303)
+
+
+@router.get('/shorts/board', response_class=HTMLResponse)
+def shorts_board(request: Request):
+    """Preview/status board for the Shorts Factory."""
+    cfg = load_settings()
+    return templates.TemplateResponse('shorts_board.html', {
+        'request': request,
+        'ui_language': cfg.get('ui_language', 'en'),
+    })
+
+
+@router.get('/shorts/board/partial', response_class=HTMLResponse)
+def shorts_board_partial(request: Request, session: Session = Depends(get_session)):
+    """The auto-refreshing board content (mirrors the /jobs/partial pattern)."""
+    from sqlmodel import select
+    import json as _json, os as _os
+    briefs = session.exec(
+        select(Brief).where(Brief.vertical_916 == True).order_by(Brief.id.desc()).limit(50)
+    ).all()
+    # Map the latest render job per brief_id (single pass, avoids N+1).
+    render_jobs = session.exec(
+        select(Job).where(Job.kind == JobKindEnum.render).order_by(Job.id.desc()).limit(300)
+    ).all()
+    rj_by_brief = {}
+    for j in render_jobs:
+        try:
+            bid = (_json.loads(j.payload_json or '{}') or {}).get('brief_id')
+            if bid and bid not in rj_by_brief:
+                rj_by_brief[bid] = j
+        except Exception:
+            pass
+
+    def _first(d, *keys):
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                return v
+        return None
+
+    def _human(n):
+        try:
+            n = int(n)
+        except Exception:
+            return None
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f}M".replace('.0M', 'M')
+        if n >= 1_000:
+            return f"{n/1_000:.1f}K".replace('.0K', 'K')
+        return str(n)
+
+    cards = []
+    total_views = 0
+    published_count = 0
+    for b in briefs:
+        posts = session.exec(select(Post).where(Post.brief_id == b.id)).all()
+        poster_url = None
+        if b.media_path:
+            base = _os.path.splitext(str(b.media_path).replace('\\', '/').split('/')[-1])[0]
+            if _os.path.exists(_os.path.join('media', f"{base}_poster.jpg")):
+                poster_url = f"/media/{base}_poster.jpg"
+        vertical_url = None
+        if b.media_vertical_path:
+            vname = str(b.media_vertical_path).replace('\\', '/').split('/')[-1]
+            vertical_url = f"/media/{vname}"
+        rj = rj_by_brief.get(b.id)
+        render_status = None
+        if rj is not None:
+            render_status = rj.status.value if hasattr(rj.status, 'value') else str(rj.status)
+        render_error = (getattr(rj, 'last_error', None) or '') if rj is not None else ''
+        # Full caption for the TikTok copy button: title + description + tags
+        _parts = [b.title or '', (b.text_en or b.text_ru or '')]
+        caption = '\n'.join(p.strip() for p in _parts if p and p.strip()).strip()
+        if b.tags_json:
+            caption = (caption + '\n' + b.tags_json).strip()
+        chips = []
+        for p in posts:
+            mj = {}
+            if p.metrics_json:
+                try:
+                    mj = _json.loads(p.metrics_json) or {}
+                except Exception:
+                    mj = {}
+            views = _first(mj, 'views', 'view', 'viewCount')
+            likes = _first(mj, 'likes', 'like', 'likeCount')
+            st = (p.status.value if hasattr(p.status, 'value') else str(p.status))
+            if st == 'done':
+                published_count += 1
+                try:
+                    total_views += int(views or 0)
+                except Exception:
+                    pass
+            chips.append({
+                'platform': (p.platform.value if hasattr(p.platform, 'value') else str(p.platform)),
+                'status': st,
+                'url': p.platform_url,
+                'error': (p.error_text or ''),
+                'views_fmt': _human(views),
+                'likes_fmt': _human(likes),
+            })
+        cards.append({
+            'brief_id': b.id,
+            'title': b.title or '',
+            'poster_url': poster_url,
+            'vertical_url': vertical_url,
+            'render_status': render_status,
+            'render_error': render_error,
+            'rendered': bool(b.media_vertical_path),
+            'caption': caption,
+            'chips': chips,
+        })
+    cfg = load_settings()
+    return templates.TemplateResponse('partials/shorts_board.html', {
+        'request': request,
+        'cards': cards,
+        'total_views': total_views,
+        'total_views_fmt': (_human(total_views) or '0'),
+        'published_count': published_count,
+        'ui_language': cfg.get('ui_language', 'en'),
+    })
+
+
+@router.post('/shorts/board/refresh_metrics', response_class=HTMLResponse)
+def shorts_board_refresh_metrics(request: Request, session: Session = Depends(get_session)):
+    """Kick a metrics refresh for all published shorts, then re-render the board."""
+    from sqlmodel import select
+    briefs = session.exec(
+        select(Brief).where(Brief.vertical_916 == True).order_by(Brief.id.desc()).limit(50)
+    ).all()
+    bids = [b.id for b in briefs]
+    if bids:
+        posts = session.exec(
+            select(Post).where(Post.brief_id.in_(bids), Post.status == PostStatusEnum.done)
+        ).all()
+        for p in posts:
+            try:
+                refresh_metrics_for_post.schedule(args=(p.id,), delay=0)
+            except Exception:
+                pass
+    return shorts_board_partial(request, session)
 
 
 @router.get('/create/video', response_class=HTMLResponse)

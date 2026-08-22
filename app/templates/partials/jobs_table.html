@@ -24,7 +24,9 @@
 			{% else %}<span class="badge default">{{ s }}</span>{% endif %}
 		</td>
 		<td>{{ (item.job or item).attempt }}</td>
-		<td>{{ (item.job or item).last_error or '' }}</td>
+		<td class="muted">
+			<div title="{{ (item.job or item).last_error or '' }}" style="max-width:340px; overflow:hidden; overflow-wrap:anywhere; word-break:break-word; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">{{ (item.job or item).last_error or '' }}</div>
+		</td>
 		<td>{{ (item.job or item).created_at }}</td>
 		<td>{{ (item.job or item).updated_at }}</td>
 		<td>{{ item.platform or '' }}</td>

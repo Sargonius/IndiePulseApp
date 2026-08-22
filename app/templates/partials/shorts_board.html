@@ -1,0 +1,68 @@
+{% if not cards %}
+<div class="muted" style="padding:30px; text-align:center;">
+	Пока пусто. <a href="/shorts">Загрузи пачку клипов →</a>
+</div>
+{% else %}
+<div class="sf-summary">
+	<span><b>{{ total_views_fmt }}</b> просмотров</span>
+	<span><b>{{ published_count }}</b> опубликовано</span>
+	<span class="muted">{{ cards|length }} шортсов</span>
+</div>
+<div class="sf-board">
+	{% for c in cards %}
+	{% set ns = namespace(tt=false) %}
+	{% for ch in c.chips %}{% if ch.platform == 'tiktok' and ch.status == 'awaiting_finish' %}{% set ns.tt = true %}{% endif %}{% endfor %}
+	<div class="sf-bcard">
+		<div class="sf-bthumb">
+			{% if c.poster_url %}
+				<img src="{{ c.poster_url }}" alt="poster" />
+			{% elif c.vertical_url %}
+				<video src="{{ c.vertical_url }}" muted playsinline preload="metadata"></video>
+			{% else %}
+				<span class="sf-rendering">⏳ рендер…</span>
+			{% endif %}
+		</div>
+
+		<div class="sf-btitle" title="{{ c.title }}">{{ c.title or ('Клип #' ~ c.brief_id) }}</div>
+
+		<div>
+			{% if c.render_status == 'error' %}
+				<span class="badge error" title="{{ c.render_error }}">рендер ✗</span>
+			{% elif c.rendered %}
+				<span class="badge success">рендер ✓</span>
+			{% else %}
+				<span class="badge running">рендер…</span>
+			{% endif %}
+		</div>
+
+		<div class="sf-chips">
+			{% for ch in c.chips %}
+			<div class="sf-chip">
+				<span class="platform-badge platform-{{ ch.platform }}">{{ ch.platform }}</span>
+				{% if ch.status == 'done' %}
+					{% if ch.url %}<a class="badge success" href="{{ ch.url }}" target="_blank" rel="noopener">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</a>
+					{% else %}<span class="badge success">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</span>{% endif %}
+				{% elif ch.status == 'awaiting_finish' %}
+					<span class="badge sf-await" title="Открой приложение и опубликуй">📲 доделать</span>
+				{% elif ch.status == 'error' %}
+					<span class="badge error" title="{{ ch.error }}">✗ ошибка</span>
+				{% elif ch.status == 'running' %}
+					<span class="badge running">↑ выкладываю</span>
+				{% elif ch.status == 'canceled' %}
+					<span class="badge default">отменён</span>
+				{% else %}
+					<span class="badge default">⏳ в очереди</span>
+				{% endif %}
+			</div>
+			{% endfor %}
+			{% if not c.chips %}<span class="muted" style="font-size:12px;">посты появятся после рендера</span>{% endif %}
+		</div>
+
+		{% if ns.tt %}
+		<button type="button" class="btn btn-sm" data-caption="{{ c.caption|e }}"
+			onclick="navigator.clipboard.writeText(this.dataset.caption); this.textContent='Скопировано ✓';">📋 Подпись для TikTok</button>
+		{% endif %}
+	</div>
+	{% endfor %}
+</div>
+{% endif %}

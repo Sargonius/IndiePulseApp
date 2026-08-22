@@ -72,7 +72,7 @@
 					<span style="color:#999;">—</span>
 				{% endif %}
 			</td>
-			<td class="muted" style="max-width:300px; white-space:pre-wrap; overflow:hidden; text-overflow:ellipsis;">{{ p.preview[:100] if p.preview else '' }}{% if p.preview and p.preview|length > 100 %}...{% endif %}</td>
+			<td class="muted"><div class="analytics-preview">{{ p.preview if p.preview else '' }}</div></td>
 			<td class="metric-cell">
 				{% if p.m_like is not none and p.m_like >= 0 %}
 					<span class="metric-value">{{ p.m_like }}</span>
@@ -120,7 +120,7 @@
 			</td>
 			<td>
 				<div class="row" style="gap:4px;flex-wrap:nowrap;">
-					<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-vals='{"id": {{ p.id }} }' hx-target="#analytics_table" hx-swap="outerHTML">⟳</button>
+					<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/analytics/refresh_one" hx-vals='{"id": {{ p.id }} }' hx-target="#analytics_table" hx-swap="outerHTML">⟳</button>
 					{% if p.status_text == 'done' and p.platform_url %}
 						<button class="btn btn-icon btn-red" title="Delete from platform" onclick="deleteRemote({{ p.id }})">🗑</button>
 					{% endif %}
@@ -180,6 +180,18 @@
 .metric-pending {
 	color: #999;
 	font-size: 11px;
+}
+
+/* Clamp the post preview to 2 lines so rows stay compact and more fit on screen */
+.analytics-preview {
+	max-width: 340px;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	line-clamp: 2;
+	overflow: hidden;
+	line-height: 1.4;
+	white-space: normal;
 }
 
 #analytics_table thead th {

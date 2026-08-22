@@ -61,6 +61,21 @@ def analytics_refresh(request: Request, session: Session = Depends(get_session))
     return analytics_table(request, session)
 
 
+@router.post("/analytics/refresh_one", response_class=HTMLResponse)
+def analytics_refresh_one(request: Request, id: Optional[int] = Form(None), id_q: Optional[int] = None, session: Session = Depends(get_session)):
+    pid = id or id_q
+    if not pid:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    # Refresh this single post's metrics synchronously so fresh data is visible
+    # immediately, then re-render the analytics table (NOT the posts table).
+    try:
+        from app.jobs.tasks import refresh_metrics_for_post as _refresh
+        _refresh.call_local(pid)
+    except Exception:
+        pass
+    return analytics_table(request, session)
+
+
 def _render_autoreload_button_html(enabled: bool) -> str:
     cls = "icon-btn" + (" active" if enabled else "")
     title = "Автообновление включено" if enabled else "Включить автообновление"
@@ -714,12 +729,17 @@ def save_settings_endpoint(
 	yt_client_secret: str = Form(""),
 	yt_access_token: str = Form(""),
 	yt_refresh_token: str = Form(""),
+	tiktok_client_key: str = Form(""),
+	tiktok_client_secret: str = Form(""),
+	tiktok_redirect_uri: str = Form(""),
 	fb_app_id: str = Form(""),
 	fb_app_secret: str = Form(""),
 	fb_ru_page_id: str = Form(""),
 	fb_en_page_id: str = Form(""),
 	fb_ru_page_access_token: str = Form(""),
 	fb_en_page_access_token: str = Form(""),
+	ig_user_id: str = Form(""),
+	ig_access_token: str = Form(""),
 	bluesky_handle: str = Form(""),
 	bluesky_app_password: str = Form(""),
 	bluesky_service: str = Form(""),
@@ -734,6 +754,8 @@ def save_settings_endpoint(
 	# Telegram
 	tg_bot_token: str = Form(""),
 	tg_chat_id_ru: str = Form(""),
+	# Discord (bot token for reading message reactions into analytics)
+	discord_bot_token: str = Form(""),
 	# UI
 	ui_language: str = Form(""),
 ):
@@ -773,6 +795,12 @@ def save_settings_endpoint(
 		updates["yt_access_token"] = yt_access_token.strip()
 	if yt_refresh_token.strip():
 		updates["yt_refresh_token"] = yt_refresh_token.strip()
+	if tiktok_client_key.strip():
+		updates["tiktok_client_key"] = tiktok_client_key.strip()
+	if tiktok_client_secret.strip():
+		updates["tiktok_client_secret"] = tiktok_client_secret.strip()
+	if tiktok_redirect_uri.strip():
+		updates["tiktok_redirect_uri"] = tiktok_redirect_uri.strip()
 	if fb_app_id.strip():
 		updates["fb_app_id"] = fb_app_id.strip()
 	if fb_app_secret.strip():
@@ -791,6 +819,10 @@ def save_settings_endpoint(
 		updates["fb_ru_page_access_token"] = fb_ru_page_access_token.strip()
 	if fb_en_page_access_token.strip():
 		updates["fb_en_page_access_token"] = fb_en_page_access_token.strip()
+	if ig_user_id.strip():
+		updates["ig_user_id"] = ig_user_id.strip()
+	if ig_access_token.strip():
+		updates["ig_access_token"] = ig_access_token.strip()
 	if reddit_client_id.strip():
 		updates["reddit_client_id"] = reddit_client_id.strip()
 	if reddit_client_secret.strip():
@@ -809,6 +841,8 @@ def save_settings_endpoint(
 		updates["tg_bot_token"] = tg_bot_token.strip()
 	if tg_chat_id_ru.strip():
 		updates["tg_chat_id_ru"] = tg_chat_id_ru.strip()
+	if discord_bot_token.strip():
+		updates["discord_bot_token"] = discord_bot_token.strip()
 	# UI language
 	if ui_language.strip():
 		lang = ui_language.strip().lower()
@@ -1041,31 +1075,31 @@ def x_test_tweet(text: str = Form("Hello from IndiePulse")):
 
 
 # TikTok OAuth 2.0
+_TIKTOK_OAUTH_STATE = "tiktok_oauth_state"  # constant: local single-user app
+
+
 @router.get("/accounts/connect/tiktok")
 def tiktok_connect_start():
-    """Start TikTok OAuth flow."""
+    """Start TikTok OAuth flow (inbox/draft mode → only video.upload scope)."""
     cfg = load_settings()
     client_key = (cfg.get("tiktok_client_key") or "").strip()
     if not client_key:
-        return HTMLResponse("<span style='color:orange'>Configure TikTok Client Key in settings</span>")
-    
-    # TikTok OAuth URL (adjust redirect_uri as needed)
-    redirect_uri = "http://127.0.0.1:8000/api/accounts/callback/tiktok"
-    scope = "user.info.basic,video.publish,video.upload"
-    state = "tiktok_oauth_state"  # In production, use random state and store it
-    
-    # Save state for verification
-    save_settings({"tiktok_oauth_state": state})
-    
+        return HTMLResponse("<span style='color:orange'>Сначала сохрани TikTok Client Key ниже</span>")
+
+    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    # NOTE: no video.publish here — that scope needs a passed TikTok app audit
+    # and requesting it for an unaudited app fails the whole authorize screen.
+    scope = "user.info.basic,video.upload"
+
     auth_url = (
         f"https://www.tiktok.com/v2/auth/authorize?"
         f"client_key={quote_plus(client_key)}&"
         f"response_type=code&"
         f"scope={quote_plus(scope)}&"
         f"redirect_uri={quote_plus(redirect_uri)}&"
-        f"state={state}"
+        f"state={_TIKTOK_OAUTH_STATE}"
     )
-    
+
     return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Open TikTok Authorization</a>")
 
 
@@ -1075,18 +1109,17 @@ def tiktok_callback(code: str, state: str = ""):
     cfg = load_settings()
     client_key = cfg.get("tiktok_client_key", "")
     client_secret = cfg.get("tiktok_client_secret", "")
-    
+
     if not client_key or not client_secret:
         return HTMLResponse("<span style='color:red'>TikTok credentials not configured</span>", status_code=400)
-    
+
     # Verify state (basic check)
-    saved_state = cfg.get("tiktok_oauth_state", "")
-    if state != saved_state:
+    if state != _TIKTOK_OAUTH_STATE:
         return HTMLResponse("<span style='color:red'>Invalid OAuth state</span>", status_code=400)
-    
+
     # Exchange code for access token
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
-    redirect_uri = "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or "http://127.0.0.1:8000/api/accounts/callback/tiktok"
     
     payload = {
         "client_key": client_key,
@@ -1127,9 +1160,10 @@ def tiktok_callback(code: str, state: str = ""):
 @router.post("/tiktok/test")
 def tiktok_test():
     """Test TikTok API connection (check token validity)."""
+    from app.services.tiktok_client import get_valid_access_token
     cfg = load_settings()
-    access_token = (cfg.get("tiktok_access_token") or "").strip()
-    
+    access_token = get_valid_access_token(cfg)
+
     if not access_token:
         return HTMLResponse("<span style='color:orange'>TikTok not connected</span>")
     
@@ -1441,6 +1475,72 @@ def yt_save(
         return Response(content="", headers={"HX-Redirect": "/accounts"})
     else:
         return RedirectResponse(url="/accounts", status_code=302)
+
+
+# YouTube OAuth (browser consent flow; re-run it whenever Google returns
+# invalid_grant — an expired/revoked refresh token)
+_YT_REDIRECT_URI = "http://127.0.0.1:8000/api/accounts/callback/youtube"
+_YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube"
+
+
+@router.get("/accounts/connect/youtube")
+def youtube_connect_start():
+    """Return a Google consent link that yields a fresh refresh token."""
+    cfg = load_settings()
+    client_id = (cfg.get("yt_client_id") or "").strip()
+    if not client_id:
+        return HTMLResponse("<span style='color:orange'>Сначала сохрани YouTube Client ID и Secret</span>")
+    auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth?"
+        f"client_id={quote_plus(client_id)}&"
+        f"redirect_uri={quote_plus(_YT_REDIRECT_URI)}&"
+        "response_type=code&"
+        f"scope={quote_plus(_YT_SCOPES)}&"
+        "access_type=offline&"
+        "prompt=consent"  # force re-issue of the refresh token
+    )
+    return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Open Google Authorization</a>")
+
+
+@router.get("/accounts/callback/youtube")
+def youtube_callback(code: str = "", error: str = ""):
+    """Exchange the consent code for access+refresh tokens and store them."""
+    if error:
+        return HTMLResponse(f"<span style='color:red'>Google OAuth error: {error}</span>", status_code=400)
+    cfg = load_settings()
+    client_id = (cfg.get("yt_client_id") or "").strip()
+    client_secret = (cfg.get("yt_client_secret") or "").strip()
+    if not client_id or not client_secret:
+        return HTMLResponse("<span style='color:red'>YouTube client credentials not configured</span>", status_code=400)
+    try:
+        with httpx.Client(timeout=20) as client:
+            r = client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": _YT_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+            )
+            data = r.json()
+        access_token = (data.get("access_token") or "").strip()
+        refresh_token = (data.get("refresh_token") or "").strip()
+        if not access_token:
+            return HTMLResponse(f"<span style='color:red'>No access token: {data}</span>", status_code=400)
+        updates = {"yt_access_token": access_token}
+        if refresh_token:
+            updates["yt_refresh_token"] = refresh_token
+        save_settings(updates)
+        return HTMLResponse(
+            "<span style='color:green'>YouTube connected! Refresh token сохранён"
+            + ("" if refresh_token else " (Google не вернул refresh token — отзови доступ в myaccount.google.com/permissions и повтори)")
+            + ". Можно закрыть вкладку.</span>"
+        )
+    except Exception as exc:
+        return HTMLResponse(f"<span style='color:red'>YouTube OAuth error: {exc}</span>", status_code=500)
+
 
 @router.post("/steam/export")
 def steam_export(
@@ -2860,6 +2960,22 @@ def delete_post_remote(post_id: int, session: Session = Depends(get_session)):
 
 # ── Projects ─────────────────────────────────────────────────────────────────
 
+def _pi(v):
+    """Parse an optional int from a form value ('' -> None)."""
+    try:
+        return int(v) if (v is not None and str(v).strip() != "") else None
+    except Exception:
+        return None
+
+
+def _pf(v):
+    """Parse an optional float from a form value ('' -> None)."""
+    try:
+        return float(v) if (v is not None and str(v).strip() != "") else None
+    except Exception:
+        return None
+
+
 def _projects_list_html(request: Request, session: Session) -> HTMLResponse:
     rows = session.exec(
         select(Project).where(Project.user_id == 1).order_by(Project.sort_order, Project.id)
@@ -2872,6 +2988,14 @@ def _projects_list_html(request: Request, session: Session) -> HTMLResponse:
             "tags_json": p.tags_json or "",
             "platforms_json": p.platforms_json or "{}",
             "sort_order": p.sort_order,
+            "crop_x": p.crop_x,
+            "crop_y": p.crop_y,
+            "crop_scale": p.crop_scale,
+            "music_path": p.music_path or "",
+            "music_offset_sec": p.music_offset_sec,
+            "fade_in_ms": p.fade_in_ms,
+            "fade_out_ms": p.fade_out_ms,
+            "platforms_csv": p.platforms_csv or "",
         }
         for p in rows
     ]
@@ -2894,9 +3018,80 @@ def list_projects(session: Session = Depends(get_session)):
             "tags_json": p.tags_json or "",
             "platforms_json": p.platforms_json or "{}",
             "sort_order": p.sort_order,
+            "crop_x": p.crop_x,
+            "crop_y": p.crop_y,
+            "crop_scale": p.crop_scale,
+            "music_path": p.music_path or "",
+            "music_offset_sec": p.music_offset_sec,
+            "fade_in_ms": p.fade_in_ms,
+            "fade_out_ms": p.fade_out_ms,
+            "platforms_csv": p.platforms_csv or "",
         }
         for p in rows
     ]
+
+
+# ---- Shorts-Factory "clip type" presets (title + desc + tags + music) --------
+def _preset_dict(p) -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "title": getattr(p, "title", None) or "",
+        "text_en": getattr(p, "text_en", None) or "",
+        "tags": p.tags_json or "",
+        "music_path": getattr(p, "music_path", None) or "",
+    }
+
+
+@router.get("/shorts/presets")
+def shorts_presets_list(session: Session = Depends(get_session)):
+    from app.models.models import Preset
+    rows = session.exec(
+        select(Preset).where(Preset.user_id == 1).order_by(Preset.id)
+    ).all()
+    return [_preset_dict(p) for p in rows]
+
+
+@router.post("/shorts/presets")
+def shorts_presets_save(
+    id: str = Form(""),
+    name: str = Form(""),
+    title: str = Form(""),
+    text_en: str = Form(""),
+    tags: str = Form(""),
+    music_path: str = Form(""),
+    session: Session = Depends(get_session),
+):
+    from app.models.models import Preset
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    try:
+        pid = int(id) if str(id).strip() else None
+    except Exception:
+        pid = None
+    obj = session.get(Preset, pid) if pid else None
+    if obj is None:
+        obj = Preset(user_id=1, name=name, tags_json="")
+    obj.name = name
+    obj.title = (title or "").strip()
+    obj.text_en = (text_en or "").strip()
+    obj.tags_json = (tags or "").strip()
+    obj.music_path = (music_path or "").strip()
+    session.add(obj)
+    session.commit()
+    session.refresh(obj)
+    return _preset_dict(obj)
+
+
+@router.delete("/shorts/presets/{preset_id}")
+def shorts_presets_delete(preset_id: int, session: Session = Depends(get_session)):
+    from app.models.models import Preset
+    obj = session.get(Preset, preset_id)
+    if obj is not None:
+        session.delete(obj)
+        session.commit()
+    return {"ok": True}
 
 
 @router.get("/projects/partial", response_class=HTMLResponse)
@@ -2911,6 +3106,14 @@ def create_project(
     tags_json: Optional[str] = Form(""),
     platforms_json: Optional[str] = Form("{}"),
     sort_order: Optional[int] = Form(0),
+    crop_x: Optional[str] = Form(None),
+    crop_y: Optional[str] = Form(None),
+    crop_scale: Optional[str] = Form(None),
+    music_path: Optional[str] = Form(""),
+    music_offset_sec: Optional[str] = Form(None),
+    fade_in_ms: Optional[str] = Form(None),
+    fade_out_ms: Optional[str] = Form(None),
+    platforms_csv: Optional[str] = Form(""),
     icon: Optional[UploadFile] = File(None),
     session: Session = Depends(get_session),
 ):
@@ -2929,6 +3132,14 @@ def create_project(
         tags_json=(tags_json or "").strip(),
         platforms_json=(platforms_json or "{}").strip(),
         sort_order=sort_order or 0,
+        crop_x=_pi(crop_x),
+        crop_y=_pi(crop_y),
+        crop_scale=_pf(crop_scale),
+        music_path=(music_path or "").strip() or None,
+        music_offset_sec=_pi(music_offset_sec),
+        fade_in_ms=_pi(fade_in_ms),
+        fade_out_ms=_pi(fade_out_ms),
+        platforms_csv=(platforms_csv or "").strip() or None,
     )
     session.add(p)
     session.commit()
@@ -2943,6 +3154,14 @@ def update_project(
     tags_json: Optional[str] = Form(None),
     platforms_json: Optional[str] = Form(None),
     sort_order: Optional[int] = Form(None),
+    crop_x: Optional[str] = Form(None),
+    crop_y: Optional[str] = Form(None),
+    crop_scale: Optional[str] = Form(None),
+    music_path: Optional[str] = Form(None),
+    music_offset_sec: Optional[str] = Form(None),
+    fade_in_ms: Optional[str] = Form(None),
+    fade_out_ms: Optional[str] = Form(None),
+    platforms_csv: Optional[str] = Form(None),
     icon: Optional[UploadFile] = File(None),
     session: Session = Depends(get_session),
 ):
@@ -2957,6 +3176,22 @@ def update_project(
         p.platforms_json = platforms_json.strip()
     if sort_order is not None:
         p.sort_order = sort_order
+    if crop_x is not None:
+        p.crop_x = _pi(crop_x)
+    if crop_y is not None:
+        p.crop_y = _pi(crop_y)
+    if crop_scale is not None:
+        p.crop_scale = _pf(crop_scale)
+    if music_path is not None:
+        p.music_path = (music_path or "").strip() or None
+    if music_offset_sec is not None:
+        p.music_offset_sec = _pi(music_offset_sec)
+    if fade_in_ms is not None:
+        p.fade_in_ms = _pi(fade_in_ms)
+    if fade_out_ms is not None:
+        p.fade_out_ms = _pi(fade_out_ms)
+    if platforms_csv is not None:
+        p.platforms_csv = (platforms_csv or "").strip() or None
     if icon and icon.filename:
         os.makedirs("media", exist_ok=True)
         safe_name = icon.filename.replace("..", "").replace("/", "_").replace("\\", "_")

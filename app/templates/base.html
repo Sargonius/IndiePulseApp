@@ -18,6 +18,7 @@
 				<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a>
 				<a href="/create/post" class="{% if request.url.path.startswith('/create/post') %}active{% endif %}">📷 Post</a>
 				<a href="/create/video" class="{% if request.url.path.startswith('/create/video') %}active{% endif %}">🎬 Video</a>
+				<a href="/shorts" class="{% if request.url.path.startswith('/shorts') %}active{% endif %}">🎞️ Shorts</a>
 				<a href="/calendar" class="{% if request.url.path.startswith('/calendar') %}active{% endif %}">📅 Calendar</a>
 				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
 				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>

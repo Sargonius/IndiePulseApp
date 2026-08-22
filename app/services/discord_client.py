@@ -51,6 +51,9 @@ def _split_by_sentences(text: str, max_length: int) -> list[str]:
 class DiscordClient:
     def __init__(self, webhook_url: str) -> None:
         self.webhook_url = webhook_url.strip()
+        # Populated after a successful send so callers can read reactions later.
+        self.last_message_id: Optional[str] = None
+        self.last_channel_id: Optional[str] = None
 
     async def send_message_async(self, content: str, file_path: Optional[str] = None, file_paths: Optional[list[str]] = None) -> tuple[Optional[str], Optional[str]]:
         """Send a message to the webhook. Returns (message_id, message_url)."""
@@ -121,9 +124,50 @@ class DiscordClient:
                 message_id = data.get("id")
                 channel_id = data.get("channel_id")
                 guild_id = data.get("guild_id")
+                # Remember channel/message so analytics can read reactions later. The
+                # webhook response carries id + channel_id but usually omits guild_id,
+                # so don't depend on the constructed URL for this.
+                if message_id:
+                    self.last_message_id = message_id
+                if channel_id:
+                    self.last_channel_id = channel_id
                 if message_id and channel_id and guild_id:
                     message_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
             return message_id, message_url
+
+    @staticmethod
+    def get_message_reactions(bot_token: str, channel_id: str, message_id: str) -> dict:
+        """Read reaction counts for one message via the Bot REST API.
+
+        Webhooks are write-only, so reactions can only be read with a bot token whose
+        bot is a member of the server and has View Channel + Read Message History on
+        the channel. No gateway/websocket connection is needed — a single GET is enough.
+
+        Returns {"like": <total reactions>, "reactions": {emoji_name: count, ...}}.
+        Raises RuntimeError on an API error so the caller can record it.
+        """
+        token = (bot_token or "").strip()
+        ch = str(channel_id or "").strip()
+        msg = str(message_id or "").strip()
+        if not (token and ch and msg):
+            return {}
+        url = f"https://discord.com/api/v10/channels/{ch}/messages/{msg}"
+        headers = {"Authorization": f"Bot {token}", "User-Agent": "IndiePulse/1.0"}
+        with httpx.Client(timeout=15) as client:
+            r = client.get(url, headers=headers)
+            if r.status_code >= 400:
+                raise RuntimeError(f"discord_fetch_error status={r.status_code} body={r.text[:200]}")
+            data = r.json()
+        reactions = data.get("reactions") or []
+        breakdown: dict[str, int] = {}
+        total = 0
+        for rc in reactions:
+            emoji = rc.get("emoji") or {}
+            name = emoji.get("name") or "?"
+            count = int(rc.get("count") or 0)
+            breakdown[name] = breakdown.get(name, 0) + count
+            total += count
+        return {"like": total, "reactions": breakdown}
 
     def send_message(self, content: str, file_path: Optional[str] = None, file_paths: Optional[list[str]] = None) -> tuple[Optional[str], Optional[str]]:
         # Use synchronous requests for reliability with multipart + embed
@@ -182,6 +226,13 @@ class DiscordClient:
                 message_id = data.get("id")
                 channel_id = data.get("channel_id")
                 guild_id = data.get("guild_id")
+                # Remember channel/message so analytics can read reactions later. The
+                # webhook response carries id + channel_id but usually omits guild_id,
+                # so don't depend on the constructed URL for this.
+                if message_id:
+                    self.last_message_id = message_id
+                if channel_id:
+                    self.last_channel_id = channel_id
                 if message_id and channel_id and guild_id:
                     message_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
             return message_id, message_url

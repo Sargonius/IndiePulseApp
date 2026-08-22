@@ -8,6 +8,55 @@ from huey import crontab
 
 @huey.task()
 def publish_news_post(job_id: int, post_id: int) -> str:
+    """Publish one post to one platform; auto-retry ONCE on transient failure."""
+    result = _publish_news_post_impl(job_id, post_id)
+    try:
+        _maybe_retry_publish(job_id, post_id, result)
+    except Exception:
+        pass
+    return result
+
+
+def _maybe_retry_publish(job_id: int, post_id: int, result: str) -> None:
+    """Requeue a failed publish one time. Guards against duplicates:
+    - skips if the post already has a platform_post_id (publish reached the
+      platform, so re-running would double-post);
+    - skips if this job already spent its single retry (tracked in the payload's
+      'publish_attempt').
+    Covers the common VK case where a connect/timeout blip fails the first try
+    but a manual re-run succeeds — now that re-run happens automatically once.
+    """
+    import json as _json
+    from app.models.models import Post, PostStatusEnum, Job, JobStatusEnum
+    with Session(engine) as session:
+        post = session.get(Post, post_id)
+        job = session.get(Job, job_id)
+        if post is None or post.status != PostStatusEnum.error:
+            return
+        if getattr(post, 'platform_post_id', None):
+            return  # already landed on the platform — don't double-post
+        payload = {}
+        if job is not None and job.payload_json:
+            try:
+                payload = _json.loads(job.payload_json) or {}
+            except Exception:
+                payload = {}
+        if int(payload.get('publish_attempt') or 0) >= 1:
+            return  # one retry only
+        payload['publish_attempt'] = 1
+        post.status = PostStatusEnum.queued
+        session.add(post)
+        if job is not None:
+            job.status = JobStatusEnum.queued
+            job.payload_json = _json.dumps(payload, ensure_ascii=False)
+            job.last_error = ((job.last_error or '') + ' | auto-retry #1').strip()
+            session.add(job)
+        session.commit()
+    from app.jobs.tasks import publish_news_post as _pub
+    _pub.schedule(args=(job_id, post_id), delay=20)
+
+
+def _publish_news_post_impl(job_id: int, post_id: int) -> str:
     from app.models.models import Post, PostStatusEnum, Job, JobStatusEnum
     from app.services.discord_client import DiscordClient
     from app.services.settings import load_settings
@@ -138,6 +187,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 targets.append((settings.get('discord_webhook_url'), fallback_text))
 
             last_url = None
+            msg_refs: list[str] = []
             for wh_url, content in targets:
                 try:
                     client = DiscordClient(wh_url)
@@ -164,6 +214,16 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         _, sent_url = client.send_message(content)
                     murl = sent_url
                     last_url = murl or last_url
+                    # Capture channel_id/message_id so we can read reactions later via the
+                    # bot REST API (webhooks can't read them back). Taken from the client,
+                    # since webhook responses usually omit guild_id and build no URL.
+                    try:
+                        ch_id = getattr(client, 'last_channel_id', None)
+                        msg_id = getattr(client, 'last_message_id', None)
+                        if ch_id and msg_id:
+                            msg_refs.append(f"{ch_id}/{msg_id}")
+                    except Exception:
+                        pass
                 except Exception as exc:
                     # continue to next target but record error on post/job
                     post.status = PostStatusEnum.error
@@ -177,6 +237,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.commit()
                     return 'error'
             post.platform_url = last_url
+            if msg_refs:
+                post.platform_post_id = ','.join(msg_refs)
         elif str(post.platform) == 'PlatformEnum.x' or str(post.platform) == 'x':
             from app.services.x_client import XClient
             from app.services.x_media import XMediaUploader
@@ -668,7 +730,7 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                         "v": "5.199",
                         "access_token": token,
                     }
-                    with httpx.Client(timeout=20) as h:
+                    with httpx.Client(timeout=httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=60.0)) as h:
                         r = h.post("https://api.vk.com/method/wall.post", data=params)
                         d = r.json()
                         if "error" in d:
@@ -781,10 +843,14 @@ def publish_news_post(job_id: int, post_id: int) -> str:
             except Exception as exc:
                 _logger.error(f"yt.upload error: {exc}")
                 post.status = PostStatusEnum.error
-                post.error_text = str(exc)
+                err_text = str(exc)
+                if 'invalid_grant' in err_text:
+                    err_text = ("yt_reauth_needed: refresh token протух/отозван — "
+                                "нажми Connect YouTube в настройках аккаунтов. " + err_text)
+                post.error_text = err_text
                 if job is not None:
                     job.status = JobStatusEnum.error
-                    job.last_error = str(exc)
+                    job.last_error = err_text
                 session.add(post)
                 if job is not None:
                     session.add(job)
@@ -1080,13 +1146,93 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     session.add(job)
                 session.commit()
                 return 'error'
+        elif str(post.platform) in ('PlatformEnum.ig_reels', 'ig_reels'):
+            # Instagram Reels via Graph API resumable upload; export fallback if unconfigured.
+            from app.services.settings import load_settings
+            from app.models.models import Brief
+            cfg = load_settings()
+            ig_user_id = (cfg.get('ig_user_id') or '').strip()
+            ig_token = (cfg.get('ig_access_token') or '').strip()
+            brief = session.get(Brief, post.brief_id)
+            media_rel = getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
+            if not media_rel:
+                post.status = PostStatusEnum.error
+                post.error_text = 'ig_no_media'
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = 'ig_no_media'
+                session.add(post)
+                if job is not None:
+                    session.add(job)
+                session.commit()
+                return 'error'
+            import os as _os
+            p = media_rel.replace('\\', '/')
+            if not p.startswith('media/'):
+                p = f"media/{p}"
+            video_path = _os.path.abspath(p)
+            caption = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or getattr(brief, 'title', None) or '')
+            if brief and getattr(brief, 'tags_json', None):
+                try:
+                    caption = (caption + '\n' + brief.tags_json).strip()
+                except Exception:
+                    pass
+            if ig_user_id and ig_token:
+                try:
+                    from app.services.instagram_client import InstagramClient
+                    ig = InstagramClient(ig_user_id, ig_token)
+                    media_id, permalink = ig.upload_reel(video_path, caption=caption, share_to_feed=True)
+                    post.platform_post_id = media_id
+                    post.platform_url = permalink
+                except Exception as exc:
+                    post.status = PostStatusEnum.error
+                    post.error_text = f"ig_reels_failed: {exc}"
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = post.error_text
+                    session.add(post)
+                    if job is not None:
+                        session.add(job)
+                    session.commit()
+                    return 'error'
+            else:
+                # Not configured / not yet approved by Meta: export for manual upload.
+                import shutil as _sh
+                export_dir = (cfg.get('tiktok_export_dir') or 'render').strip() or 'render'
+                _os.makedirs(export_dir, exist_ok=True)
+                try:
+                    dst = _os.path.join(export_dir, _os.path.basename(video_path))
+                    _sh.copy2(video_path, dst)
+                    with open(_os.path.splitext(dst)[0] + '_caption.txt', 'w', encoding='utf-8') as _cf:
+                        _cf.write(caption or '')
+                    post.platform_url = None
+                    post.status = PostStatusEnum.awaiting_finish
+                    if job is not None:
+                        job.status = JobStatusEnum.done
+                        session.add(job)
+                    session.add(post)
+                    session.commit()
+                    return 'ok'
+                except Exception as exc:
+                    post.status = PostStatusEnum.error
+                    post.error_text = f"ig_export_failed: {exc}"
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = post.error_text
+                    session.add(post)
+                    if job is not None:
+                        session.add(job)
+                    session.commit()
+                    return 'error'
         else:
             # TikTok: try API first, fallback to export
             if str(post.platform) in ('PlatformEnum.tiktok', 'tiktok'):
                 from app.services.settings import load_settings
+                from app.services.tiktok_client import get_valid_access_token
                 from app.models.models import Brief
                 cfg = load_settings()
-                access_token = (cfg.get('tiktok_access_token') or '').strip()
+                # Auto-refreshes the 24h TikTok access token via the refresh token
+                access_token = get_valid_access_token(cfg)
                 brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
                 
                 # Use vertical video
@@ -1119,16 +1265,24 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     try:
                         from app.services.tiktok_client import TikTokClient
                         title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'New Video')[:150]
-                        
+
                         client = TikTokClient(access_token)
-                        publish_id, share_url = client.upload_video(
-                            file_path=video_path,
-                            title=title,
-                            privacy_level="PUBLIC_TO_EVERYONE",
-                        )
-                        
+                        # Draft/inbox upload: the clip lands in the creator's TikTok
+                        # inbox. They open the app, add a native/trending sound, write
+                        # the caption and publish in one tap. (Public Direct Post needs
+                        # a passed app audit — see TikTokClient.direct_post_public.)
+                        publish_id, _share = client.upload_to_inbox(video_path, title=title)
+
                         post.platform_post_id = publish_id
-                        post.platform_url = share_url
+                        post.platform_url = None
+                        # Not "done": it sits in the inbox awaiting the manual finish.
+                        post.status = PostStatusEnum.awaiting_finish
+                        if job is not None:
+                            job.status = JobStatusEnum.done
+                            session.add(job)
+                        session.add(post)
+                        session.commit()
+                        return 'ok'
                     except Exception as exc:
                         post.status = PostStatusEnum.error
                         post.error_text = f"tiktok_api_failed: {exc}"
@@ -1149,6 +1303,15 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                     try:
                         _sh.copy2(video_path, dst)
                         post.platform_url = None
+                        # Exported to a folder for manual upload — same "awaiting the
+                        # user's manual finish" state as the inbox flow.
+                        post.status = PostStatusEnum.awaiting_finish
+                        if job is not None:
+                            job.status = JobStatusEnum.done
+                            session.add(job)
+                        session.add(post)
+                        session.commit()
+                        return 'ok'
                     except Exception as exc:
                         post.status = PostStatusEnum.error
                         post.error_text = f"tiktok_export_failed: {exc}"
@@ -1175,13 +1338,8 @@ def publish_news_post(job_id: int, post_id: int) -> str:
                 brief = session.get(Brief, post.brief_id)
                 if not (bot and chat_id and brief):
                     raise RuntimeError('tg_not_configured')
+                # No hashtags on Telegram — post the body text as-is, keeping its formatting.
                 text = (brief.text_ru or brief.text_en or '')
-                # Include hashtags for TG
-                if brief and getattr(brief, 'tags_json', None):
-                    try:
-                        text = (text + '\n' + brief.tags_json).strip()
-                    except Exception:
-                        pass
                 client = TelegramClient(bot)
                 # Prefer image/video if available (use normal/horizontal media)
                 media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
@@ -1287,6 +1445,139 @@ def enqueue_due_posts() -> str:
             publish_news_post.schedule(args=(job.id, post.id), delay=0)
             scheduled += 1
         return f"scheduled={scheduled}"
+
+
+@huey.task()
+def render_short(job_id: int, brief_id: int) -> str:
+    """Render a batched short (9:16 vertical + poster frame), then create the
+    per-platform Posts and schedule their publish jobs.
+
+    Posts are created *after* the render (not at submit time) so the per-minute
+    enqueue_due_posts cron can never publish a not-yet-rendered clip.
+    """
+    from app.models.models import Brief, Post, Job, PostStatusEnum, JobKindEnum, JobStatusEnum, PlatformEnum
+    from app.services.video_editor import render_vertical_with_music, extract_poster_frame
+    from loguru import logger
+    import os, json
+    from datetime import datetime as _dt
+    with Session(engine) as session:
+        job = session.get(Job, job_id)
+        brief = session.get(Brief, brief_id)
+        if brief is None:
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = 'brief_not_found'
+                session.add(job)
+                session.commit()
+            return 'not_found'
+
+        platforms: list = []
+        scheduled_iso = None
+        try:
+            payload = json.loads(job.payload_json) if (job and job.payload_json) else {}
+            platforms = payload.get('platforms') or []
+            scheduled_iso = payload.get('scheduled_at')
+        except Exception:
+            platforms = []
+        if job is not None:
+            job.status = JobStatusEnum.running
+            session.add(job)
+            session.commit()
+
+        # --- 1. Render the vertical clip (skip if already rendered) ---
+        vertical_rel = getattr(brief, 'media_vertical_path', None)
+        try:
+            src = (brief.media_path or '').replace('\\', '/')
+            if not src:
+                raise RuntimeError('brief has no source media_path')
+            if not src.startswith('media/'):
+                src = f"media/{src}"
+            src_abs = os.path.abspath(src)
+            base = os.path.splitext(os.path.basename(src_abs))[0]
+            out_rel = f"{base}_vertical.mp4"
+            out_abs = os.path.abspath(os.path.join('media', out_rel))
+            already = bool(vertical_rel) and os.path.exists(
+                os.path.abspath(os.path.join('media', os.path.basename(vertical_rel)))
+            )
+            if not already:
+                music_abs = None
+                mp = getattr(brief, 'music_path', None)
+                if mp and os.path.exists(mp):
+                    music_abs = mp
+                render_vertical_with_music(
+                    src_abs, out_abs,
+                    crop_x_pct=(brief.crop_x if brief.crop_x is not None else 50) / 100.0,
+                    crop_y_pct=(brief.crop_y if brief.crop_y is not None else 50) / 100.0,
+                    music_path=music_abs,
+                    music_offset_s=float(brief.music_offset_sec or 0),
+                    fade_in_s=float(brief.fade_in_ms or 0) / 1000.0,
+                    fade_out_s=float(brief.fade_out_ms or 0) / 1000.0,
+                    zoom=float(brief.crop_scale or 1.0),
+                )
+                vertical_rel = out_rel
+                brief.media_vertical_path = vertical_rel
+                session.add(brief)
+                session.commit()
+            # Poster frame for the board (best-effort)
+            try:
+                poster_abs = os.path.abspath(os.path.join('media', f"{base}_poster.jpg"))
+                extract_poster_frame(out_abs, poster_abs, at_sec=1.0)
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.error(f"render_short render failed brief={brief_id}: {exc}")
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = f'render_failed: {exc}'
+                session.add(job)
+                session.commit()
+            return 'error'
+
+        # --- 2. Create Posts + schedule publishes per platform ---
+        when_dt = None
+        if scheduled_iso:
+            try:
+                when_dt = _dt.fromisoformat(scheduled_iso)
+                if getattr(when_dt, 'tzinfo', None) is not None:
+                    when_dt = when_dt.replace(tzinfo=None)
+            except Exception:
+                when_dt = None
+        made = 0
+        for plat in platforms:
+            try:
+                pf = PlatformEnum(plat)
+            except Exception:
+                logger.warning(f"render_short: unknown platform {plat}")
+                continue
+            try:
+                post = Post(user_id=1, brief_id=brief.id, platform=pf,
+                            status=PostStatusEnum.queued, scheduled_at=when_dt)
+                session.add(post)
+                session.commit()
+                session.refresh(post)
+                pjob = Job(
+                    kind=JobKindEnum.publish,
+                    payload_json=json.dumps({"post_id": post.id, "media_rel": vertical_rel}, ensure_ascii=False),
+                    status=JobStatusEnum.queued,
+                )
+                session.add(pjob)
+                session.commit()
+                session.refresh(pjob)
+                delay_s = 0
+                if when_dt:
+                    delay_s = int(max(0, (when_dt - _dt.now()).total_seconds()))
+                publish_news_post.schedule(args=(pjob.id, post.id), delay=delay_s)
+                made += 1
+            except Exception as exc:
+                logger.error(f"render_short: failed to queue {plat}: {exc}")
+
+        if job is not None:
+            job.status = JobStatusEnum.done
+            session.add(job)
+            session.commit()
+        return f"rendered brief={brief_id} posts={made}"
+
+
 @huey.task()
 def refresh_metrics_for_post(post_id: int) -> str:
     from app.models.models import Post, PostStatusEnum
@@ -1334,12 +1625,25 @@ def refresh_metrics_for_post(post_id: int) -> str:
                             "access_token": token,
                         })
                         data = r.json()
-                    item = ((data.get("response") or [{}])[0])
-                    likes = ((item.get("likes") or {}).get("count"))
-                    reposts = ((item.get("reposts") or {}).get("count"))
-                    comments = ((item.get("comments") or {}).get("count"))
-                    views = ((item.get("views") or {}).get("count"))
-                    metrics = {"likes": likes, "reposts": reposts, "comments": comments, "views": views}
+                    if isinstance(data, dict) and data.get("error"):
+                        err = data.get("error") or {}
+                        metrics = {"error": f"vk:{err.get('error_code')}:{err.get('error_msg')}"}
+                    else:
+                        # v5.199 returns response={"items":[...]}; older versions a bare list.
+                        resp = data.get("response")
+                        if isinstance(resp, dict):
+                            items = resp.get("items") or []
+                        elif isinstance(resp, list):
+                            items = resp
+                        else:
+                            items = []
+                        item = items[0] if items else {}
+                        metrics = {
+                            "likes": ((item.get("likes") or {}).get("count")),
+                            "reposts": ((item.get("reposts") or {}).get("count")),
+                            "comments": ((item.get("comments") or {}).get("count")),
+                            "views": ((item.get("views") or {}).get("count")),
+                        }
             elif platform.endswith('fb_ru') or platform.endswith('fb_en'):
                 # Facebook Page post insights: use summary counts for reactions and comments; shares via 'shares' field
                 cfg = load_settings()
@@ -1371,18 +1675,39 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     except Exception:
                         pass
             elif platform.endswith('reddit') and post.platform_post_id:
-                # Basic Reddit stats via public JSON endpoint to avoid heavy dependencies if PRAW not configured
-                try:
-                    with httpx.Client(timeout=15, headers={"User-Agent": "IndiePulse/1.0"}) as client:
-                        r = client.get(f"https://www.reddit.com/comments/{post.platform_post_id.split('_')[-1]}.json")
-                        arr = r.json()
-                    item = (arr[0].get('data', {}).get('children', [{}])[0].get('data', {})) if isinstance(arr, list) else {}
-                    score = item.get('score')
-                    num_comments = item.get('num_comments')
-                    metrics = {"like": score, "comments": num_comments}
-                except Exception:
-                    # Fallback: try PRAW if configured in environment
-                    metrics = metrics or {"error": "reddit_fetch_failed"}
+                sid = post.platform_post_id.split('_')[-1]
+                cfg = load_settings()
+                cid = (cfg.get('reddit_client_id') or '').strip()
+                csec = (cfg.get('reddit_client_secret') or '').strip()
+                uname = (cfg.get('reddit_username') or '').strip()
+                pwd = (cfg.get('reddit_password') or '').strip()
+                got = False
+                if cid and csec and uname and pwd:
+                    # Authenticated read via PRAW. The public www.reddit.com/*.json endpoint
+                    # is rate-limited/blocked for datacenter IPs (was returning fetch_failed).
+                    try:
+                        from app.services.reddit_client import RedditClient
+                        rc = RedditClient(cid, csec, uname, pwd)
+                        sub = rc.reddit.submission(id=sid)
+                        metrics = {
+                            "like": int(sub.score),
+                            "comments": int(sub.num_comments),
+                            "upvote_ratio": sub.upvote_ratio,
+                        }
+                        got = True
+                    except Exception as exc:
+                        metrics = {"error": f"reddit_praw_failed: {exc}"}
+                if not got:
+                    # Fallback: unauthenticated public JSON (works when not blocked)
+                    try:
+                        with httpx.Client(timeout=15, headers={"User-Agent": "IndiePulse/1.0 (analytics)"}) as client:
+                            r = client.get(f"https://www.reddit.com/comments/{sid}.json")
+                            arr = r.json()
+                        item = (arr[0].get('data', {}).get('children', [{}])[0].get('data', {})) if isinstance(arr, list) else {}
+                        if item:
+                            metrics = {"like": item.get('score'), "comments": item.get('num_comments')}
+                    except Exception:
+                        metrics = metrics or {"error": "reddit_fetch_failed"}
             elif platform.endswith('yt') and post.platform_post_id:
                 # YouTube stats: requires access token
                 cfg = load_settings()
@@ -1420,7 +1745,45 @@ def refresh_metrics_for_post(post_id: int) -> str:
                     views = None
                 metrics = {"views": views} if views is not None else {"status": "sent"}
             elif platform.endswith('discord'):
-                metrics = {"status": "sent"}
+                cfg = load_settings()
+                bot_token = (cfg.get('discord_bot_token') or '').strip()
+                # Message refs are stored as "channel_id/message_id" (comma-separated for
+                # multi-target posts). Older posts predate that, so fall back to parsing
+                # the channel/message out of the stored Discord message URL.
+                refs = (post.platform_post_id or '').strip()
+                if not refs and post.platform_url and '/channels/' in (post.platform_url or ''):
+                    try:
+                        parts = post.platform_url.rstrip('/').split('/')
+                        ch_id, msg_id = parts[-2], parts[-1]
+                        if ch_id.isdigit() and msg_id.isdigit():
+                            refs = f"{ch_id}/{msg_id}"
+                    except Exception:
+                        refs = ''
+                if not bot_token:
+                    metrics = {"status": "sent", "note": "discord_bot_token_not_set"}
+                elif not refs:
+                    metrics = {"status": "sent", "note": "no_message_id"}
+                else:
+                    from app.services.discord_client import DiscordClient
+                    total_like = 0
+                    breakdown: dict = {}
+                    errors = []
+                    for ref in refs.split(','):
+                        ref = ref.strip()
+                        if '/' not in ref:
+                            continue
+                        ch_id, msg_id = ref.split('/', 1)
+                        try:
+                            m = DiscordClient.get_message_reactions(bot_token, ch_id, msg_id)
+                            total_like += int(m.get('like') or 0)
+                            for k, v in (m.get('reactions') or {}).items():
+                                breakdown[k] = breakdown.get(k, 0) + int(v or 0)
+                        except Exception as exc:
+                            errors.append(str(exc))
+                    if errors and total_like == 0 and not breakdown:
+                        metrics = {"error": f"discord: {errors[0]}"}
+                    else:
+                        metrics = {"like": total_like, "reactions": breakdown}
         except Exception as exc:
             metrics = {"error": str(exc)}
         # Backstop: if a platform post id or url exists but status is still running, mark it done

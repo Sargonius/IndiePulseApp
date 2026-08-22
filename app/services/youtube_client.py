@@ -8,6 +8,23 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 
+def _clip_utf8_bytes(text: str, max_bytes: int) -> str:
+    """Trim text so its UTF-8 form fits max_bytes without splitting a character.
+
+    The Data API limits snippet.description by BYTES (5000), not characters —
+    Japanese/CJK text is ~3 bytes per char, so a naive [:N] char slice overflows.
+    """
+    raw = (text or "").encode("utf-8")
+    if len(raw) <= max_bytes:
+        return text or ""
+    return raw[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _sanitize_yt_text(text: str) -> str:
+    # The API rejects '<' and '>' anywhere in title/description.
+    return (text or "").replace("<", "‹").replace(">", "›")
+
+
 class YouTubeClient:
     def __init__(self, access_token: str, refresh_token: Optional[str] = None, client_id: Optional[str] = None, client_secret: Optional[str] = None) -> None:
         self.creds = Credentials(
@@ -29,8 +46,8 @@ class YouTubeClient:
             raise FileNotFoundError(file_path)
         body = {
             "snippet": {
-                "title": title[:100],
-                "description": description[:4900],
+                "title": _sanitize_yt_text(title)[:100],
+                "description": _clip_utf8_bytes(_sanitize_yt_text(description), 4900),
                 "tags": tags or [],
                 "categoryId": "24",
             },

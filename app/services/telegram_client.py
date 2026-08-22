@@ -69,53 +69,42 @@ class TelegramClient:
     def _api(self, method: str) -> str:
         return f"https://api.telegram.org/bot{self.bot_token}/{method}"
 
-    def _split_by_sentences(self, text: str, max_length: int) -> list[str]:
-        """Split text by sentences, keeping each chunk under max_length."""
+    def _split_text(self, text: str, max_length: int) -> list[str]:
+        """Split text into chunks under max_length while preserving newlines and
+        paragraph breaks. Prefers to break on paragraph boundaries, then line
+        breaks, then sentence ends, then spaces, falling back to a hard cut only
+        when a single token is longer than max_length. Whitespace-only chunks are
+        dropped so we never send an empty message."""
         if len(text) <= max_length:
-            return [text]
-        
-        # Find sentence boundaries
-        sentences = re.findall(r'[^.!?]+[.!?]+|[^.!?]+$', text)
-        chunks = []
-        current_chunk = ''
-        
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            
-            # If this sentence alone exceeds max_length, split it by words
-            if len(sentence) > max_length:
-                words = sentence.split()
-                for word in words:
-                    if not current_chunk:
-                        current_chunk = word
-                    elif len(current_chunk) + 1 + len(word) <= max_length:
-                        current_chunk += ' ' + word
-                    else:
-                        chunks.append(current_chunk)
-                        current_chunk = word
-                continue
-            
-            # Try to add sentence to current chunk
-            if not current_chunk:
-                current_chunk = sentence
-            elif len(current_chunk) + 1 + len(sentence) <= max_length:
-                current_chunk += ' ' + sentence
-            else:
-                chunks.append(current_chunk)
-                current_chunk = sentence
-        
-        if current_chunk:
-            chunks.append(current_chunk)
-        
+            return [text] if text.strip() else []
+
+        separators = ('\n\n', '\n', '. ', '! ', '? ', ' ')
+        chunks: list[str] = []
+        remaining = text
+        while len(remaining) > max_length:
+            window = remaining[:max_length]
+            split_at = 0
+            for sep in separators:
+                pos = window.rfind(sep)
+                if pos > 0:
+                    split_at = pos + len(sep)
+                    break
+            if split_at <= 0:
+                split_at = max_length  # no nice boundary in range; hard cut
+            piece = remaining[:split_at]
+            if piece.strip():
+                chunks.append(piece)
+            remaining = remaining[split_at:]
+        if remaining.strip():
+            chunks.append(remaining)
+
         return chunks
 
     def send_message(self, chat_id: str, text: str, disable_web_page_preview: bool = False) -> dict:
         """Send message, splitting into multiple messages if text exceeds 4096 chars."""
-        # Split text if needed (4090 to leave some margin)
-        chunks = self._split_by_sentences(text, 4090)
-        
+        # Split text if needed (4090 to leave some margin), preserving newlines
+        chunks = self._split_text(text, 4090)
+
         last_response = None
         for i, chunk in enumerate(chunks):
             payload = {
@@ -139,9 +128,9 @@ class TelegramClient:
 
     def send_photo(self, chat_id: str, path: str, caption: Optional[str] = None) -> dict:
         """Send photo, splitting caption into follow-up messages if it exceeds 1024 chars."""
-        # Split caption if needed
+        # Split caption if needed, preserving newlines/formatting
         caption_text = (caption or '').strip()
-        chunks = self._split_by_sentences(caption_text, 1020) if caption_text else []
+        chunks = self._split_text(caption_text, 1020) if caption_text else []
         
         with open(path, 'rb') as fh:
             files = {'photo': (os.path.basename(path), fh, mimetypes.guess_type(path)[0] or 'image/jpeg')}
@@ -167,9 +156,9 @@ class TelegramClient:
 
     def send_video(self, chat_id: str, path: str, caption: Optional[str] = None) -> dict:
         """Send video, splitting caption into follow-up messages if it exceeds 1024 chars."""
-        # Split caption if needed
+        # Split caption if needed, preserving newlines/formatting
         caption_text = (caption or '').strip()
-        chunks = self._split_by_sentences(caption_text, 1020) if caption_text else []
+        chunks = self._split_text(caption_text, 1020) if caption_text else []
         
         with open(path, 'rb') as fh:
             files = {'video': (os.path.basename(path), fh, mimetypes.guess_type(path)[0] or 'video/mp4')}

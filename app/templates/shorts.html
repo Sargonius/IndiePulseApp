@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>🎞️ Фабрика шортсов</h2>
+<p class="muted">Кинь пачку вертикальных клипов, задай настройки один раз — приложение отрендерит и расставит по расписанию.</p>
+
+<form id="shorts_form">
+	<!-- Global "apply to all" panel -->
+	<div class="sf-panel">
+		<h3>Общие настройки <span class="muted" style="font-weight:400;">(применяются ко всем клипам)</span></h3>
+
+		<div class="form-group">
+			<label>Проект</label>
+			<div id="project_tiles" class="project-tiles-row"><span class="muted" style="font-size:12px;">Загрузка…</span></div>
+		</div>
+
+		<div class="row">
+			<div class="form-group" style="flex:1;">
+				<label>Теги/хэштеги</label>
+				<input type="text" id="g_tags" placeholder="#Shorts #Gamedev #IndieDev #ゲーム制作" />
+			</div>
+			<div class="form-group" style="flex:1;">
+				<label>🎵 Музыка (опц.)</label>
+				<div class="row">
+					<select id="g_music" style="flex:1;"><option value="">Без музыки</option></select>
+					<button type="button" class="btn" id="refresh_music">↻</button>
+				</div>
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label>Описание <span class="muted" style="font-weight:400;">(общее для всех клипов; уходит в описание YouTube и в подпись TikTok)</span></label>
+			<textarea id="g_desc" rows="3" placeholder="Описание ролика — можно на японском: 夜のシンセウェイブ・ドライブ…" style="width:100%; resize:vertical;"></textarea>
+		</div>
+
+		<div class="form-group">
+			<label>Площадки</label>
+			<div class="platforms-grid" id="g_platforms">
+				<label class="platform-option"><input class="pf" type="checkbox" value="yt" checked /> YouTube Shorts</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="tiktok" checked /> TikTok <span class="muted" style="font-size:11px;">(черновик)</span></label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="ig_reels" checked /> Instagram Reels</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="vk_video" /> VK Видео</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="tg" /> Telegram</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="x" /> X</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="reddit" /> Reddit</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="discord" /> Discord</label>
+			</div>
+		</div>
+
+		<div class="form-group">
+			<label>Авто-расписание (спред)</label>
+			<div class="row" style="flex-wrap:wrap; align-items:flex-end; gap:10px;">
+				<div>
+					<div class="muted" style="font-size:12px;">Первый пост</div>
+					<input type="datetime-local" id="sch_start" />
+				</div>
+				<div>
+					<div class="muted" style="font-size:12px;">Интервал</div>
+					<div class="row">
+						<input type="number" id="sch_every" value="1" min="1" style="width:70px;" />
+						<select id="sch_unit">
+							<option value="hours">часов</option>
+							<option value="days" selected>дней</option>
+							<option value="minutes">минут</option>
+						</select>
+					</div>
+				</div>
+				<button type="button" class="btn" id="apply_schedule">Разложить по времени</button>
+				<button type="button" class="btn" id="apply_meta">Применить теги/площадки ко всем</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Clip-type presets: one click fills a card's title + desc + tags + music -->
+	<div class="sf-panel" style="margin-top:16px;">
+		<h3>🎛️ Пресеты типа клипа <span class="muted" style="font-weight:400;">(заголовок + описание + теги + музыка — клик подставляет в клип)</span></h3>
+		<div id="preset_chips" class="preset-manager"><span class="muted" style="font-size:12px;">Загрузка…</span></div>
+		<div id="preset_form" class="preset-form" style="display:none;">
+			<input type="hidden" id="pf_id" />
+			<div class="row" style="flex-wrap:wrap; gap:10px;">
+				<div class="form-group" style="flex:1; min-width:160px;">
+					<label>Название пресета <span class="muted">(видно только тебе)</span></label>
+					<input type="text" id="pf_name" placeholder="レベルデザイン / UI作業 / カメラワーク" />
+				</div>
+				<div class="form-group" style="flex:2; min-width:220px;">
+					<label>🎵 Музыка (опц.)</label>
+					<select id="pf_music"><option value="">Без музыки</option></select>
+				</div>
+			</div>
+			<div class="form-group">
+				<label>Заголовок</label>
+				<input type="text" id="pf_title" placeholder="レベルデザイン作業中！新エリアを設計しています" />
+			</div>
+			<div class="form-group">
+				<label>Описание</label>
+				<textarea id="pf_desc" rows="2" placeholder="新しいエリアのレイアウトを作っています。ネオンが映える街並みを目指して…" style="width:100%; resize:vertical;"></textarea>
+			</div>
+			<div class="form-group">
+				<label>Теги/хэштеги</label>
+				<input type="text" id="pf_tags" placeholder="#Shorts #ゲーム制作 #レベルデザイン #インディーゲーム" />
+			</div>
+			<div class="btn-row">
+				<button type="button" class="btn btn-primary btn-sm" id="pf_save">Сохранить пресет</button>
+				<button type="button" class="btn btn-sm" id="pf_cancel">Отмена</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Live platform preview: how the caption/description will look + limits -->
+	<div class="sf-panel" style="margin-top:16px;">
+		<h3>👁 Превью подписи <span class="muted" id="pv_source" style="font-weight:400; font-size:12px;"></span></h3>
+		<div class="pv-grid">
+			<!-- YouTube -->
+			<div class="pv-card">
+				<div class="pv-head pv-head-yt">▶ YouTube Shorts <span class="muted" style="font-weight:400;">(авто-публикация)</span></div>
+				<div class="pv-label">Заголовок</div>
+				<div class="pv-title" id="pv_yt_title"></div>
+				<div class="pv-meter"><div class="pv-bar" id="pv_yt_title_bar"></div></div>
+				<div class="pv-count" id="pv_yt_title_count"></div>
+				<div class="pv-label">Как видно в плеере</div>
+				<div class="pv-player">
+					<div class="pv-player-handle">👤 @SargoniusGames</div>
+					<div class="pv-player-title" id="pv_yt_player"></div>
+				</div>
+				<div class="pv-count">в плеере видна <b>1 строка</b> (моб. ~2) — ключевое ставь в первые ~20 знаков</div>
+				<div class="pv-count" id="pv_yt_music"></div>
+				<div class="pv-label">Описание <span class="muted">(описание + теги)</span></div>
+				<div class="pv-body" id="pv_yt_desc"></div>
+				<div class="pv-meter"><div class="pv-bar" id="pv_yt_desc_bar"></div></div>
+				<div class="pv-count" id="pv_yt_desc_count"></div>
+				<div class="pv-note">Лимит описания — <b>5000 байт</b> (яп. знак = 3 байта, латиница = 1). Хэштеги из описания <b>в плеере Shorts не видны</b> — работают только на поиск/алгоритм; видимый хэштег — только в самом заголовке. Заголовок — 100 симв. (фабрика режет до 90).</div>
+			</div>
+			<!-- TikTok -->
+			<div class="pv-card">
+				<div class="pv-head pv-head-tt">♪ TikTok <span class="muted" style="font-weight:400;">(черновик — подпись вставишь в приложении)</span></div>
+				<div class="pv-label">Подпись <span class="muted">(заголовок + описание + теги — кнопка «📋» на борде)</span></div>
+				<div class="pv-body" id="pv_tt_caption"></div>
+				<div class="pv-meter"><div class="pv-bar" id="pv_tt_bar"></div></div>
+				<div class="pv-count" id="pv_tt_count"></div>
+				<div class="pv-note">Лимит подписи в приложении — <b>4000 символов</b>, хэштеги входят в лимит. Звук добавишь в приложении при публикации черновика.</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Drop zone -->
+	<div id="drop_zone" class="drop-zone" style="margin:16px 0;">
+		<span>🎥 Перетащи сюда клипы (можно много) или кликни</span>
+	</div>
+	<input type="file" id="file_input" accept="video/*" multiple style="display:none;" />
+
+	<div class="sf-toolbar">
+		<span id="card_count" class="muted">Клипов: 0</span>
+		<button type="button" class="btn btn-sm" id="select_all">Выделить все</button>
+		<button type="button" class="btn btn-sm" id="select_none" style="display:none;">Снять выделение</button>
+		<button type="button" class="btn btn-sm" id="clear_all">Очистить</button>
+	</div>
+
+	<!-- Multi-select apply bar (shown only when ≥1 card is checked) -->
+	<div id="bulk_bar" class="bulk-bar" style="display:none;">
+		<span class="muted"><b id="bulk_count">0</b> выделено — применить пресет:</span>
+		<div id="bulk_preset_chips" class="preset-manager" style="margin:0;"></div>
+	</div>
+
+	<!-- Cards -->
+	<div id="cards" class="sf-cards"></div>
+
+	<div class="actions-section" style="margin-top:20px;">
+		<button type="submit" class="btn btn-primary btn-lg" id="submit_btn" disabled>В очередь на фабрику →</button>
+		<span id="submit_status" class="muted"></span>
+	</div>
+</form>
+
+<style>
+.sf-panel { background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:18px; }
+.sf-panel h3 { margin:0 0 14px 0; }
+.sf-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+.sf-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:14px; }
+.sf-card { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:8px; }
+.sf-card video { width:100%; aspect-ratio:9/16; max-height:280px; object-fit:cover; background:#000; border-radius:8px; }
+.sf-card .sf-name { font-size:11px; color:#64748b; word-break:break-all; }
+.sf-card input[type="text"], .sf-card input[type="datetime-local"] { width:100%; }
+.sf-card .sf-remove { align-self:flex-end; }
+.sf-card textarea { width:100%; resize:vertical; font-family:inherit; font-size:13px; }
+.sf-card select { width:100%; }
+.sf-card.sf-selected { border-color:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,.25); }
+.sf-cardhead { display:flex; align-items:center; gap:6px; justify-content:space-between; }
+.sf-cardhead label { display:flex; align-items:center; gap:5px; font-size:11px; color:#64748b; cursor:pointer; }
+.sf-card .sf-applied { font-size:11px; color:#2563eb; min-height:14px; }
+/* Clip-type preset chips */
+.preset-manager { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+.preset-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:16px; font-size:13px; cursor:pointer; }
+.preset-chip:hover { background:#e0e7ff; }
+.preset-chip .pc-edit, .preset-chip .pc-del { cursor:pointer; opacity:.5; font-size:11px; }
+.preset-chip .pc-edit:hover, .preset-chip .pc-del:hover { opacity:1; }
+.preset-chip-mini { padding:3px 9px; font-size:12px; background:#f1f5f9; border-color:var(--border); border-radius:14px; }
+.preset-add { background:#fff; border:1px dashed var(--border); color:#2563eb; }
+.preset-form { background:#fff; border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:8px; }
+.bulk-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; margin-bottom:10px; }
+.sf-card-chips { display:flex; gap:6px; flex-wrap:wrap; }
+.pv-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; }
+.pv-card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+.pv-head { font-weight:600; padding-bottom:8px; border-bottom:1px solid var(--border); margin-bottom:4px; }
+.pv-head-yt { color:#cc0000; }
+.pv-head-tt { color:#111; }
+.pv-label { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; margin-top:6px; }
+.pv-title { font-weight:600; font-size:14px; min-height:20px; word-break:break-word; white-space:pre-wrap; }
+.pv-body { font-size:13px; color:#334155; min-height:40px; max-height:180px; overflow-y:auto; word-break:break-word; white-space:pre-wrap; background:#f8fafc; border-radius:6px; padding:8px 10px; }
+.pv-body .pv-tag, .pv-title .pv-tag { color:#2563eb; }
+.pv-placeholder { color:#94a3b8; font-style:italic; }
+.pv-meter { height:4px; background:#e2e8f0; border-radius:2px; overflow:hidden; }
+.pv-bar { height:100%; width:0%; background:#22c55e; border-radius:2px; transition:width .15s ease, background .15s ease; }
+.pv-count { font-size:12px; color:#64748b; }
+.pv-count b.over { color:#dc2626; }
+.pv-count b.warn { color:#d97706; }
+.pv-count b.ok { color:#16a34a; }
+.pv-note { font-size:11px; color:#94a3b8; border-top:1px dashed var(--border); padding-top:6px; margin-top:auto; }
+.pv-player { background:#0f0f0f; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; gap:4px; }
+.pv-player-handle { color:#f1f1f1; font-size:11px; opacity:.85; }
+.pv-player-title { color:#fff; font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.platforms-grid { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+.platform-option { display:flex; align-items:center; gap:6px; padding:6px 12px; background:#fff; border:1px solid var(--border); border-radius:6px; cursor:pointer; }
+.platform-option:has(input:checked) { background:#fef3c7; border-color:#f59e0b; }
+.platform-option:has(input:disabled) { opacity:.55; cursor:not-allowed; }
+</style>
+
+<script>
+const fileInput = document.getElementById('file_input');
+const dropZone = document.getElementById('drop_zone');
+const cardsEl = document.getElementById('cards');
+const submitBtn = document.getElementById('submit_btn');
+let cards = []; // {file, root, titleEl, tagsEl, descEl, musicEl, schedEl, selEl, chipsEl, appliedEl, selected}
+let selectedPreset = null; // render preset from the picked project
+let presets = [];          // clip-type presets (title+desc+tags+music) from /api/shorts/presets
+let musicTracks = [];      // cached track list from /api/music/list
+
+function fmtLocal(dt) {
+	const pad = n => String(n).padStart(2, '0');
+	return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+function refreshCount() {
+	document.getElementById('card_count').textContent = `Клипов: ${cards.length}`;
+	submitBtn.disabled = cards.length === 0;
+}
+function globalTags() { return document.getElementById('g_tags').value || ''; }
+function globalDesc() { return document.getElementById('g_desc').value || ''; }
+function globalMusic() { return document.getElementById('g_music').value || ''; }
+const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// Build <option> list for a music <select>, marking `selected` (adds it if the
+// path isn't in the scanned list — e.g. it came from a project/preset).
+function musicOptionsHtml(selected) {
+	let html = '<option value="">Без музыки</option>';
+	let found = false;
+	musicTracks.forEach(t => {
+		const sel = t.path === selected ? ' selected' : '';
+		if (sel) found = true;
+		html += `<option value="${escAttr(t.path)}"${sel}>${escHtml(t.name)}</option>`;
+	});
+	if (selected && !found) {
+		html += `<option value="${escAttr(selected)}" selected>${escHtml(String(selected).split(/[\\/]/).pop())}</option>`;
+	}
+	return html;
+}
+function musicName(path) {
+	if (!path) return '';
+	const t = musicTracks.find(t => t.path === path);
+	return t ? t.name : String(path).split(/[\\/]/).pop();
+}
+
+// ---- Live platform preview (mirrors what tasks.py actually sends) ----
+const PV = {
+	ytTitleFactory: 90,   // tasks.py режет title[:90]
+	ytTitleMax: 100,      // жёсткий лимит YouTube
+	ytDescBytes: 5000,    // лимит YouTube API — БАЙТЫ utf-8 (клиент режет до 4900)
+	ytHashtagsMax: 60,    // >60 хэштегов — YouTube игнорирует все
+	ttCaptionMax: 4000,   // лимит подписи в приложении TikTok
+};
+const _enc = new TextEncoder();
+const chars = s => [...s].length;
+const bytes = s => _enc.encode(s).length;
+const nHashtags = s => (s.match(/#[^\s#]+/g) || []).length;
+const escHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const markTags = s => escHtml(s).replace(/(^|\s)(#[^\s#<]+)/g, '$1<span class="pv-tag">$2</span>');
+
+function pvSetMeter(barEl, value, limit) {
+	const pct = Math.min(100, (value / limit) * 100);
+	barEl.style.width = pct + '%';
+	barEl.style.background = value > limit ? '#dc2626' : (pct > 85 ? '#d97706' : '#22c55e');
+}
+function pvCountHtml(value, limit, unit) {
+	const cls = value > limit ? 'over' : (value > limit * 0.85 ? 'warn' : 'ok');
+	return `<b class="${cls}">${value}</b> / ${limit} ${unit}`;
+}
+
+function updatePreview() {
+	const first = cards[0];
+	const title = ((first && first.titleEl.value) || '').trim();
+	const tags = (first ? first.tagsEl.value : globalTags()).trim();
+	const desc = (first ? first.descEl.value : globalDesc()).trim();
+	const music = first ? first.musicEl.value : globalMusic();
+	document.getElementById('pv_source').textContent = cards.length
+		? '— по первому клипу' : '— пример (добавь клипы, превью оживёт)';
+	// Music is baked into the render → shown on the YouTube card only. TikTok
+	// gets its sound added in-app when the creator publishes the draft.
+	document.getElementById('pv_yt_music').innerHTML = music
+		? `🎵 <b>${escHtml(musicName(music))}</b> — вшивается при рендере`
+		: '🎵 <span class="pv-placeholder">без музыки</span>';
+
+	// YouTube: title = заголовок карточки (пусто → 'IndiePulse Short'), режется до 90
+	const ytTitleFull = title || 'IndiePulse Short';
+	const ytTitle = [...ytTitleFull].slice(0, PV.ytTitleFactory).join('');
+	const tEl = document.getElementById('pv_yt_title');
+	tEl.innerHTML = markTags(ytTitle) + (title ? '' : ' <span class="pv-placeholder">(заголовок пуст — уйдёт заглушка)</span>');
+	const tLen = chars(ytTitleFull);
+	pvSetMeter(document.getElementById('pv_yt_title_bar'), tLen, PV.ytTitleFactory);
+	document.getElementById('pv_yt_title_count').innerHTML =
+		pvCountHtml(tLen, PV.ytTitleFactory, 'симв.') + (tLen > PV.ytTitleFactory ? ' — будет обрезан' : '');
+	// Плашка «как в плеере»: одна строка с CSS-ellipsis, как в реальном UI
+	document.getElementById('pv_yt_player').textContent = ytTitle;
+
+	// YouTube: описание = desc (пусто → 'Uploaded via IndiePulse') + перенос + теги
+	const ytDesc = ((desc || 'Uploaded via IndiePulse') + (tags ? '\n' + tags : '')).trim();
+	const dEl = document.getElementById('pv_yt_desc');
+	dEl.innerHTML = markTags(ytDesc) || '<span class="pv-placeholder">пусто</span>';
+	const dBytes = bytes(ytDesc), dChars = chars(ytDesc), dTags = nHashtags(ytDesc);
+	pvSetMeter(document.getElementById('pv_yt_desc_bar'), dBytes, PV.ytDescBytes);
+	let dExtra = ` · ${dChars} симв. · ${dTags} хэштегов`;
+	if (dTags > PV.ytHashtagsMax) dExtra += ` <b class="over">— больше ${PV.ytHashtagsMax}, YouTube проигнорирует ВСЕ</b>`;
+	document.getElementById('pv_yt_desc_count').innerHTML = pvCountHtml(dBytes, PV.ytDescBytes, 'байт') + dExtra;
+
+	// TikTok: подпись = заголовок + описание + теги (копируется кнопкой на борде)
+	const ttCaption = [title, desc, tags].filter(Boolean).join('\n').trim();
+	const ttEl = document.getElementById('pv_tt_caption');
+	ttEl.innerHTML = markTags(ttCaption) || '<span class="pv-placeholder">пусто — заполни заголовок/описание/теги</span>';
+	const ttLen = chars(ttCaption);
+	pvSetMeter(document.getElementById('pv_tt_bar'), ttLen, PV.ttCaptionMax);
+	document.getElementById('pv_tt_count').innerHTML =
+		pvCountHtml(ttLen, PV.ttCaptionMax, 'симв.') + ` · ${nHashtags(ttCaption)} хэштегов`;
+}
+
+function addFiles(fileList) {
+	[...fileList].forEach(file => {
+		if (!file.type.startsWith('video/')) return;
+		const root = document.createElement('div');
+		root.className = 'sf-card';
+		const url = URL.createObjectURL(file);
+		root.innerHTML = `
+			<div class="sf-cardhead">
+				<label><input type="checkbox" class="sf-sel" /> выбрать</label>
+				<button type="button" class="btn btn-sm sf-remove">Убрать</button>
+			</div>
+			<video src="${url}" muted playsinline preload="metadata"></video>
+			<div class="sf-name">${escHtml(file.name)}</div>
+			<div class="sf-card-chips"></div>
+			<div class="sf-applied"></div>
+			<input type="text" class="sf-title" placeholder="Заголовок…" />
+			<textarea class="sf-desc" rows="2" placeholder="Описание…"></textarea>
+			<input type="text" class="sf-tags" placeholder="Теги…" />
+			<select class="sf-music"></select>
+			<input type="datetime-local" class="sf-sched" />
+		`;
+		cardsEl.appendChild(root);
+		const card = {
+			file,
+			root,
+			titleEl: root.querySelector('.sf-title'),
+			tagsEl: root.querySelector('.sf-tags'),
+			descEl: root.querySelector('.sf-desc'),
+			musicEl: root.querySelector('.sf-music'),
+			schedEl: root.querySelector('.sf-sched'),
+			selEl: root.querySelector('.sf-sel'),
+			chipsEl: root.querySelector('.sf-card-chips'),
+			appliedEl: root.querySelector('.sf-applied'),
+			selected: false,
+		};
+		// Seed the card from the global "apply to all" defaults.
+		card.tagsEl.value = globalTags();
+		card.descEl.value = globalDesc();
+		card.musicEl.innerHTML = musicOptionsHtml(globalMusic());
+		root.querySelector('.sf-remove').addEventListener('click', () => {
+			cards = cards.filter(c => c !== card);
+			root.remove();
+			refreshCount();
+			updateBulkBar();
+			updatePreview();
+		});
+		card.selEl.addEventListener('change', () => {
+			card.selected = card.selEl.checked;
+			root.classList.toggle('sf-selected', card.selected);
+			updateBulkBar();
+		});
+		cards.push(card);
+		renderCardChips(card);
+	});
+	refreshCount();
+	updateBulkBar();
+	updatePreview();
+}
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = ''; });
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor=''; addFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+document.getElementById('clear_all').addEventListener('click', () => {
+	cards.forEach(c => c.root.remove());
+	cards = [];
+	refreshCount();
+	updatePreview();
+});
+
+// Copy the global "apply to all" fields (tags + description + music) into every card
+document.getElementById('apply_meta').addEventListener('click', () => {
+	cards.forEach(c => {
+		c.tagsEl.value = globalTags();
+		c.descEl.value = globalDesc();
+		setCardMusic(c, globalMusic());
+	});
+	updatePreview();
+});
+
+// Multi-select controls
+function setAllSelected(v) {
+	cards.forEach(c => { c.selected = v; c.selEl.checked = v; c.root.classList.toggle('sf-selected', v); });
+	updateBulkBar();
+}
+document.getElementById('select_all').addEventListener('click', () => setAllSelected(true));
+document.getElementById('select_none').addEventListener('click', () => setAllSelected(false));
+
+function updateBulkBar() {
+	const n = cards.filter(c => c.selected).length;
+	const bar = document.getElementById('bulk_bar');
+	bar.style.display = n ? 'flex' : 'none';
+	document.getElementById('bulk_count').textContent = n;
+	document.getElementById('select_none').style.display = n ? '' : 'none';
+	document.getElementById('select_all').style.display = (cards.length && n < cards.length) ? '' : 'none';
+}
+
+// Preview reacts to typing: global fields + per-card title/desc/tags/music edits
+document.getElementById('g_tags').addEventListener('input', updatePreview);
+document.getElementById('g_desc').addEventListener('input', updatePreview);
+document.getElementById('g_music').addEventListener('change', updatePreview);
+cardsEl.addEventListener('input', updatePreview);
+cardsEl.addEventListener('change', updatePreview);
+
+// Spread schedule across cards
+document.getElementById('apply_schedule').addEventListener('click', () => {
+	const startVal = document.getElementById('sch_start').value;
+	const start = startVal ? new Date(startVal) : new Date();
+	const every = Math.max(1, parseInt(document.getElementById('sch_every').value || '1', 10));
+	const unit = document.getElementById('sch_unit').value;
+	const stepMs = every * (unit === 'minutes' ? 60000 : unit === 'hours' ? 3600000 : 86400000);
+	cards.forEach((c, i) => {
+		const t = new Date(start.getTime() + i * stepMs);
+		c.schedEl.value = fmtLocal(t);
+	});
+});
+
+function selectedPlatforms() {
+	return [...document.querySelectorAll('#g_platforms .pf:checked')].map(el => el.value);
+}
+
+// Apply a project's render preset (crop/zoom/music/fades) + default platforms
+function applyPreset(p) {
+	selectedPreset = {
+		crop_x: (p.crop_x != null ? p.crop_x : 50),
+		crop_y: (p.crop_y != null ? p.crop_y : 50),
+		zoom: (p.crop_scale != null ? p.crop_scale : 1.0),
+		music_offset: (p.music_offset_sec != null ? p.music_offset_sec : 0),
+		fade_in: (p.fade_in_ms != null ? p.fade_in_ms / 1000 : 0),
+		fade_out: (p.fade_out_ms != null ? p.fade_out_ms / 1000 : 0),
+	};
+	if (p.platforms_csv) {
+		const want = p.platforms_csv.split(',').map(s => s.trim()).filter(Boolean);
+		document.querySelectorAll('#g_platforms .pf').forEach(el => {
+			if (!el.disabled) el.checked = want.includes(el.value);
+		});
+	}
+	if (p.music_path) {
+		const sel = document.getElementById('g_music');
+		let opt = [...sel.options].find(o => o.value === p.music_path);
+		if (!opt) { sel.add(new Option(p.music_path.split(/[\\/]/).pop(), p.music_path)); }
+		sel.value = p.music_path;
+	}
+}
+
+// Set a card's music select to `path`, keeping the option list in sync.
+function setCardMusic(card, path) {
+	card.musicEl.innerHTML = musicOptionsHtml(path || '');
+	card.musicEl.value = path || '';
+}
+
+// Music list — caches tracks, then rebuilds every select (global, preset form, cards)
+async function loadMusic() {
+	try {
+		const r = await fetch('/api/music/list');
+		const j = await r.json();
+		musicTracks = j.tracks || [];
+	} catch (e) { musicTracks = []; }
+	const g = document.getElementById('g_music'); g.innerHTML = musicOptionsHtml(g.value);
+	const pf = document.getElementById('pf_music'); pf.innerHTML = musicOptionsHtml(pf.value);
+	cards.forEach(c => { c.musicEl.innerHTML = musicOptionsHtml(c.musicEl.value); });
+	updatePreview();
+}
+document.getElementById('refresh_music').addEventListener('click', loadMusic);
+
+// Project tiles → fill global tags
+(async function loadProjects() {
+	try {
+		const r = await fetch('/api/projects');
+		const projects = await r.json();
+		const c = document.getElementById('project_tiles');
+		if (!projects.length) { c.innerHTML = '<span class="muted" style="font-size:12px;">Нет проектов — <a href="/projects">создать</a></span>'; return; }
+		c.innerHTML = '';
+		projects.forEach(p => {
+			const tile = document.createElement('div');
+			tile.className = 'project-tile';
+			tile.innerHTML = (p.icon_url ? `<img src="${p.icon_url}" alt="${p.name}" />` : `<div class="tile-initial">${(p.name||'?')[0].toUpperCase()}</div>`) + `<span>${p.name}</span>`;
+			tile.addEventListener('click', () => {
+				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
+				tile.classList.add('selected');
+				document.getElementById('g_tags').value = p.tags_json || '';
+				applyPreset(p);
+				updatePreview();
+			});
+			c.appendChild(tile);
+		});
+	} catch (e) {}
+})();
+
+// ---- Clip-type presets: apply / manage --------------------------------------
+// Apply a preset to one card. Only non-empty preset fields overwrite the card,
+// so a partial preset (e.g. just title+tags) won't wipe the card's other fields.
+function applyPresetToCard(card, p) {
+	if (p.title) card.titleEl.value = p.title;
+	if (p.text_en) card.descEl.value = p.text_en;
+	if (p.tags) card.tagsEl.value = p.tags;
+	if (p.music_path) setCardMusic(card, p.music_path);
+	card.appliedEl.textContent = '✓ ' + p.name;
+	updatePreview();
+}
+
+// Mini chips on a single card (apply to that card)
+function renderCardChips(card) {
+	card.chipsEl.innerHTML = '';
+	presets.forEach(p => {
+		const b = document.createElement('span');
+		b.className = 'preset-chip preset-chip-mini';
+		b.textContent = p.name;
+		b.title = 'Применить пресет к этому клипу';
+		b.addEventListener('click', () => applyPresetToCard(card, p));
+		card.chipsEl.appendChild(b);
+	});
+}
+
+// Manager chips (edit/delete + add) and the bulk "apply to selected" chips
+function renderPresetManager() {
+	const host = document.getElementById('preset_chips');
+	host.innerHTML = '';
+	presets.forEach(p => {
+		const chip = document.createElement('span');
+		chip.className = 'preset-chip';
+		chip.innerHTML = '<span class="pc-name"></span><span class="pc-edit" title="Редактировать">✎</span><span class="pc-del" title="Удалить">✕</span>';
+		chip.querySelector('.pc-name').textContent = p.name;
+		chip.title = [p.title, p.text_en, p.tags].filter(Boolean).join('\n') || 'пустой пресет';
+		chip.querySelector('.pc-edit').addEventListener('click', (e) => { e.stopPropagation(); openPresetForm(p); });
+		chip.querySelector('.pc-del').addEventListener('click', (e) => { e.stopPropagation(); deletePreset(p); });
+		host.appendChild(chip);
+	});
+	const add = document.createElement('span');
+	add.className = 'preset-chip preset-add';
+	add.textContent = '＋ Новый пресет';
+	add.addEventListener('click', () => openPresetForm(null));
+	host.appendChild(add);
+	if (!presets.length) {
+		const hint = document.createElement('span');
+		hint.className = 'muted'; hint.style.fontSize = '12px';
+		hint.textContent = 'создай типы клипов (レベルデザイン / UI作業 / カメラワーク) один раз — дальше подставляй в клипы одной кнопкой';
+		host.appendChild(hint);
+	}
+	const bulk = document.getElementById('bulk_preset_chips');
+	bulk.innerHTML = '';
+	presets.forEach(p => {
+		const b = document.createElement('span');
+		b.className = 'preset-chip preset-chip-mini';
+		b.textContent = p.name;
+		b.addEventListener('click', () => cards.filter(c => c.selected).forEach(c => applyPresetToCard(c, p)));
+		bulk.appendChild(b);
+	});
+	cards.forEach(renderCardChips);
+}
+
+function openPresetForm(p) {
+	document.getElementById('pf_id').value = p ? p.id : '';
+	document.getElementById('pf_name').value = p ? p.name : '';
+	document.getElementById('pf_title').value = p ? (p.title || '') : '';
+	document.getElementById('pf_desc').value = p ? (p.text_en || '') : '';
+	document.getElementById('pf_tags').value = p ? (p.tags || '') : '';
+	document.getElementById('pf_music').innerHTML = musicOptionsHtml(p ? (p.music_path || '') : '');
+	document.getElementById('preset_form').style.display = 'block';
+	document.getElementById('pf_name').focus();
+}
+document.getElementById('pf_cancel').addEventListener('click', () => {
+	document.getElementById('preset_form').style.display = 'none';
+});
+document.getElementById('pf_save').addEventListener('click', async () => {
+	const nameEl = document.getElementById('pf_name');
+	const name = nameEl.value.trim();
+	if (!name) { nameEl.focus(); return; }
+	const fd = new FormData();
+	fd.append('id', document.getElementById('pf_id').value || '');
+	fd.append('name', name);
+	fd.append('title', document.getElementById('pf_title').value || '');
+	fd.append('text_en', document.getElementById('pf_desc').value || '');
+	fd.append('tags', document.getElementById('pf_tags').value || '');
+	fd.append('music_path', document.getElementById('pf_music').value || '');
+	try {
+		const r = await fetch('/api/shorts/presets', { method: 'POST', body: fd });
+		if (!r.ok) { alert('Не удалось сохранить пресет'); return; }
+		document.getElementById('preset_form').style.display = 'none';
+		await loadPresets();
+	} catch (e) { alert('Ошибка: ' + e.message); }
+});
+async function deletePreset(p) {
+	if (!confirm(`Удалить пресет «${p.name}»?`)) return;
+	try { await fetch('/api/shorts/presets/' + p.id, { method: 'DELETE' }); } catch (e) {}
+	await loadPresets();
+}
+async function loadPresets() {
+	try {
+		const r = await fetch('/api/shorts/presets');
+		presets = await r.json();
+		if (!Array.isArray(presets)) presets = [];
+	} catch (e) { presets = []; }
+	renderPresetManager();
+}
+
+// Submit
+document.getElementById('shorts_form').addEventListener('submit', async (e) => {
+	e.preventDefault();
+	if (!cards.length) return;
+	const platforms = selectedPlatforms();
+	if (!platforms.length) { alert('Выбери хотя бы одну площадку'); return; }
+	const fd = new FormData();
+	const meta = [];
+	const pr = selectedPreset || { crop_x: 50, crop_y: 50, zoom: 1.0, music_offset: 0, fade_in: 0, fade_out: 0 };
+	cards.forEach(c => {
+		fd.append('files', c.file, c.file.name);
+		meta.push({
+			title: c.titleEl.value || '',
+			tags: c.tagsEl.value || '',
+			text_en: c.descEl.value || '',
+			platforms: platforms,
+			scheduled_at: c.schedEl.value || null,
+			music_path: c.musicEl.value || '',
+			crop_x: pr.crop_x, crop_y: pr.crop_y, zoom: pr.zoom,
+			music_offset: pr.music_offset, fade_in: pr.fade_in, fade_out: pr.fade_out,
+		});
+	});
+	fd.append('meta', JSON.stringify(meta));
+	submitBtn.disabled = true;
+	document.getElementById('submit_status').textContent = 'Загрузка…';
+	try {
+		const r = await fetch('/shorts', { method: 'POST', body: fd });
+		if (r.redirected) { window.location = r.url; return; }
+		if (r.ok) { window.location = '/shorts/board'; return; }
+		document.getElementById('submit_status').textContent = 'Ошибка отправки';
+		submitBtn.disabled = false;
+	} catch (err) {
+		document.getElementById('submit_status').textContent = 'Ошибка: ' + err.message;
+		submitBtn.disabled = false;
+	}
+});
+
+// init
+document.getElementById('sch_start').value = fmtLocal(new Date(Date.now() + 3600000));
+loadMusic();
+loadPresets();
+refreshCount();
+updateBulkBar();
+updatePreview();
+</script>
+{% endblock %}

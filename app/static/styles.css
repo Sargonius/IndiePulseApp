@@ -180,6 +180,20 @@ tbody tr:hover { background: var(--surface-3); }
 .badge.error { background: #fee2e2; color: #991b1b; }
 .badge.running { background: #fff7ed; color: #9a3412; }
 .badge.default { background: #e5e7eb; color: #374151; }
+.badge.sf-await { background: #ede9fe; color: #5b21b6; }
+
+/* Platform color chips (shared by analytics + shorts board) */
+.platform-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; background: #64748b; color: #fff; }
+.platform-badge.platform-vk, .platform-badge.platform-vk_video { background: #4a76a8; }
+.platform-badge.platform-x { background: #1da1f2; }
+.platform-badge.platform-yt { background: #ff0000; }
+.platform-badge.platform-tiktok { background: #000000; }
+.platform-badge.platform-tg { background: #0088cc; }
+.platform-badge.platform-reddit { background: #ff4500; }
+.platform-badge.platform-discord { background: #5865f2; }
+.platform-badge.platform-fb_ru, .platform-badge.platform-fb_en { background: #1877f2; }
+.platform-badge.platform-bluesky { background: #0085ff; }
+.platform-badge.platform-ig_reels { background: #e1306c; }
 
 /* Dropzones */
 #drop_zone_normal, #drop_zone_vertical {

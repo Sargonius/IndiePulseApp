@@ -7,22 +7,17 @@
 	<div class="post-layout">
 		<!-- Left: Media -->
 		<div class="post-media">
-			<label>Main Image / Video</label>
-			<div id="drop_zone_normal" class="drop-zone">
-				<span>📷 Drag & drop image or video here or click</span>
+			<label>Скриншоты <span class="muted" style="font-weight:400;">(первый = основной, идёт во все соцсети; остальные — галереей, где API позволяет)</span></label>
+			<div id="drop_zone_shots" class="drop-zone">
+				<span>📸 Перетащи скриншоты (можно несколько) или кликни</span>
 			</div>
-			<input type="file" id="media_input_normal" accept="image/*,video/*" style="display:none;" />
-			<div id="preview_normal" class="preview-container"></div>
-			<input type="hidden" name="media_normal" id="media_normal_hidden" value="{{ draft.media_normal_path if draft else '' }}" />
+			<input type="file" id="media_input_shots" accept="image/*,video/*" multiple style="display:none;" />
+			<div id="shots_wrap" class="gallery-grid"></div>
+			<div id="no_shot_warning" class="warnings-panel danger" style="display:none;"></div>
+			<input type="hidden" name="media_normal" id="media_normal_hidden" value="" />
 
-			<div style="height:16px;"></div>
-			
-			<label>Image Gallery (up to 10)</label>
-			<div id="drop_zone_gallery" class="drop-zone drop-zone-small">
-				<span>📸 Drop multiple images here</span>
-			</div>
-			<input type="file" id="media_input_gallery" accept="image/*" multiple style="display:none;" />
-			<div id="gallery_wrap" class="gallery-grid"></div>
+			<!-- gallery merged into the unified Скриншоты field above; this hidden
+			     field still carries the full ordered list to /create/post -->
 			<input type="hidden" name="gallery_order" id="gallery_order_hidden" value="{{ (draft.gallery_normal | join(',')) if draft and draft.gallery_normal else '' }}" />
 		</div>
 
@@ -211,6 +206,45 @@
 	font-size: 12px;
 }
 
+.gallery-item .star-btn {
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	width: 20px;
+	height: 20px;
+	background: rgba(0,0,0,0.55);
+	color: #fbbf24;
+	border: none;
+	border-radius: 50%;
+	cursor: pointer;
+	font-size: 12px;
+	line-height: 1;
+}
+.gallery-item .star-btn:hover { background: rgba(0,0,0,0.8); }
+
+.gallery-item.is-main {
+	outline: 2px solid var(--primary);
+	outline-offset: 1px;
+}
+.gallery-item .main-badge {
+	position: absolute;
+	top: 4px;
+	left: 4px;
+	padding: 1px 6px;
+	background: var(--primary);
+	color: #fff;
+	font-size: 10px;
+	font-weight: 600;
+	border-radius: 10px;
+}
+.gallery-item video { width: 100%; height: 80px; object-fit: cover; }
+
+.warnings-panel.danger {
+	border-color: #fca5a5;
+	background: #fef2f2;
+	color: #991b1b;
+}
+
 .post-content textarea {
 	width: 100%;
 }
@@ -351,117 +385,108 @@ function queueSave() {
 form.addEventListener('input', queueSave);
 form.addEventListener('change', queueSave);
 
-// Drop zone functionality
-function setupDropZone(dropEl, inputEl, previewEl, slot, hiddenField) {
-	dropEl.addEventListener('click', () => inputEl.click());
-	dropEl.addEventListener('dragover', (e) => { e.preventDefault(); dropEl.style.borderColor = '#2563eb'; });
-	dropEl.addEventListener('dragleave', () => { dropEl.style.borderColor = '#94a3b8'; });
-	dropEl.addEventListener('drop', (e) => {
-		e.preventDefault();
-		dropEl.style.borderColor = '#94a3b8';
-		if (e.dataTransfer.files[0]) {
-			handleFile(e.dataTransfer.files[0], previewEl, slot, hiddenField);
-		}
-	});
-	inputEl.addEventListener('change', () => {
-		if (inputEl.files[0]) {
-			handleFile(inputEl.files[0], previewEl, slot, hiddenField);
-		}
-	});
+// ---- Unified screenshots field: shots[0] is the main image, rest is gallery ----
+const shotsWrap = document.getElementById('shots_wrap');
+const dzShots = document.getElementById('drop_zone_shots');
+const inShots = document.getElementById('media_input_shots');
+const noShotWarn = document.getElementById('no_shot_warning');
+const submitBtn = form.querySelector('button[type="submit"]');
+const SUBMIT_LABEL = submitBtn ? submitBtn.textContent : 'Save and Queue';
+let shots = [];          // ordered rel paths; shots[0] goes to every platform
+let allowNoShot = false; // armed after the first "publish without screenshot" click
+
+function isVideoRel(rel) { return /\.(mp4|mov|webm|avi|mkv)$/i.test(rel); }
+
+function syncShotsFields() {
+	hiddenN.value = shots[0] || '';
+	galleryOrderHidden.value = shots.join(',');
 }
 
-function handleFile(file, previewEl, slot, hiddenField) {
-	const url = URL.createObjectURL(file);
-	previewEl.innerHTML = '';
-	if (file.type.startsWith('image/')) {
-		const img = document.createElement('img');
-		img.src = url;
-		img.className = 'thumbnail-clickable';
-		img.dataset.lightbox = 'true';
-		previewEl.appendChild(img);
-	} else if (file.type.startsWith('video/')) {
-		const vid = document.createElement('video');
-		vid.src = url;
-		vid.controls = true;
-		previewEl.appendChild(vid);
-	}
-	
-	const fd = new FormData();
-	fd.append('media', file);
-	fd.append('slot', slot);
-	fetch('/api/uploads/draft_media', { method: 'POST', body: fd })
-		.then(r => r.json())
-		.then(j => { if (j.media_path) hiddenField.value = j.media_path; });
-}
-
-setupDropZone(
-	document.getElementById('drop_zone_normal'),
-	document.getElementById('media_input_normal'),
-	document.getElementById('preview_normal'),
-	'normal',
-	hiddenN
-);
-
-// Gallery functionality
-const galleryWrap = document.getElementById('gallery_wrap');
-const dzG = document.getElementById('drop_zone_gallery');
-const inG = document.getElementById('media_input_gallery');
-
-function renderGallery(items) {
-	galleryWrap.innerHTML = '';
-	items.forEach((rel, idx) => {
+function renderShots() {
+	shotsWrap.innerHTML = '';
+	shots.forEach((rel, idx) => {
 		const div = document.createElement('div');
-		div.className = 'gallery-item';
-		const img = document.createElement('img');
-		img.src = '/media/' + rel.split('/').pop();
-		img.className = 'thumbnail-clickable';
-		img.dataset.lightbox = 'true';
-		img.className = 'thumbnail-clickable';
-		const btn = document.createElement('button');
-		btn.className = 'remove-btn';
-		btn.textContent = '×';
-		btn.onclick = () => { items.splice(idx, 1); syncGallery(items); };
-		div.appendChild(img);
-		div.appendChild(btn);
-		galleryWrap.appendChild(div);
+		div.className = 'gallery-item' + (idx === 0 ? ' is-main' : '');
+		const url = '/media/' + rel.split('/').pop();
+		let media;
+		if (isVideoRel(rel)) {
+			media = document.createElement('video');
+			media.src = url; media.muted = true;
+		} else {
+			media = document.createElement('img');
+			media.src = url; media.className = 'thumbnail-clickable'; media.dataset.lightbox = 'true';
+		}
+		div.appendChild(media);
+		if (idx === 0) {
+			const badge = document.createElement('span');
+			badge.className = 'main-badge';
+			badge.textContent = 'Основной';
+			div.appendChild(badge);
+		} else {
+			const star = document.createElement('button');
+			star.type = 'button'; star.className = 'star-btn'; star.title = 'Сделать основным';
+			star.textContent = '★';
+			star.onclick = () => { const it = shots.splice(idx, 1)[0]; shots.unshift(it); afterShotsChange(); };
+			div.appendChild(star);
+		}
+		const rm = document.createElement('button');
+		rm.type = 'button'; rm.className = 'remove-btn'; rm.title = 'Убрать';
+		rm.textContent = '×';
+		rm.onclick = () => { shots.splice(idx, 1); afterShotsChange(); };
+		div.appendChild(rm);
+		shotsWrap.appendChild(div);
 	});
-	galleryOrderHidden.value = items.join(',');
+	syncShotsFields();
+}
+
+function resetNoShotWarning() {
+	allowNoShot = false;
+	noShotWarn.style.display = 'none';
+	noShotWarn.innerHTML = '';
+	if (submitBtn) submitBtn.textContent = SUBMIT_LABEL;
+}
+
+function afterShotsChange() {
+	renderShots();
+	if (shots.length) resetNoShotWarning();
+	// keep the server-side draft gallery in sync (add / remove / reorder)
+	const fd = new FormData();
+	fd.append('order', shots.join(','));
+	fetch('/api/gallery/reorder', { method: 'POST', body: fd });
 	updatePreviews();
 }
 
-function syncGallery(items) {
-	renderGallery(items);
-	const fd = new FormData();
-	fd.append('order', items.join(','));
-	fetch('/api/gallery/reorder', { method: 'POST', body: fd });
-}
-
-function addToGallery(files) {
-	const list = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
+function addShots(files) {
 	Array.from(files).forEach(async (f) => {
+		if (!f.type.startsWith('image/') && !f.type.startsWith('video/')) return;
 		const fd = new FormData();
 		fd.append('media', f);
 		fd.append('slot', 'gallery');
 		try {
 			const r = await fetch('/api/uploads/draft_media', { method: 'POST', body: fd });
 			const j = await r.json();
-			if (j.media_path) {
-				list.push(j.media_path);
-				renderGallery(list);
-			}
+			if (j.media_path) { shots.push(j.media_path); afterShotsChange(); }
 		} catch (e) {}
 	});
 }
 
-dzG.addEventListener('click', () => inG.click());
-dzG.addEventListener('dragover', (e) => { e.preventDefault(); dzG.style.borderColor = '#2563eb'; });
-dzG.addEventListener('dragleave', () => { dzG.style.borderColor = '#94a3b8'; });
-dzG.addEventListener('drop', (e) => {
-	e.preventDefault();
-	dzG.style.borderColor = '#94a3b8';
-	if (e.dataTransfer.files.length) addToGallery(e.dataTransfer.files);
-});
-inG.addEventListener('change', () => { if (inG.files.length) addToGallery(inG.files); });
+dzShots.addEventListener('click', () => inShots.click());
+dzShots.addEventListener('dragover', (e) => { e.preventDefault(); dzShots.style.borderColor = '#2563eb'; });
+dzShots.addEventListener('dragleave', () => { dzShots.style.borderColor = '#94a3b8'; });
+dzShots.addEventListener('drop', (e) => { e.preventDefault(); dzShots.style.borderColor = '#94a3b8'; if (e.dataTransfer.files.length) addShots(e.dataTransfer.files); });
+inShots.addEventListener('change', () => { if (inShots.files.length) addShots(inShots.files); });
+
+// Require a screenshot: block submit once, show a warning, allow on the 2nd click
+form.addEventListener('submit', (e) => {
+	if (shots.length === 0 && !allowNoShot) {
+		e.preventDefault();
+		allowNoShot = true;
+		noShotWarn.style.display = 'block';
+		noShotWarn.innerHTML = '⚠️ <b>Пост без скриншота.</b> Соцсети заметно лучше заходят с картинкой — добавь хотя бы один скрин. Чтобы всё равно опубликовать без картинки, нажми кнопку ещё раз.';
+		if (submitBtn) submitBtn.textContent = 'Опубликовать без скриншота →';
+		noShotWarn.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}
+}, true);
 
 // Text previews
 function updatePreviews() {
@@ -574,10 +599,9 @@ document.getElementById('clear_draft_btn').addEventListener('click', async () =>
 	document.getElementById('text_en').value = '';
 	document.getElementById('tags_input').value = '';
 	document.getElementById('scheduled_at').value = '';
-	document.getElementById('preview_normal').innerHTML = '';
-	hiddenN.value = '';
-	galleryOrderHidden.value = '';
-	galleryWrap.innerHTML = '';
+	shots = [];
+	renderShots();
+	resetNoShotWarning();
 	updatePreviews();
 	await fetch('/api/draft/clear', { method: 'POST' });
 });
@@ -645,28 +669,9 @@ async function loadProjectTiles() {
 // Hydrate on load
 document.addEventListener('DOMContentLoaded', () => {
 	loadProjectTiles();
-	const norm = hiddenN.value;
-	if (norm) {
-		const url = '/media/' + norm.split('/').pop();
-		const previewNorm = document.getElementById('preview_normal');
-		const isVideo = /\.(mp4|mov|webm|avi|mkv)$/i.test(norm);
-		if (isVideo) {
-			const vid = document.createElement('video');
-			vid.src = url;
-			vid.controls = true;
-			previewNorm.appendChild(vid);
-		} else {
-			const img = document.createElement('img');
-			img.src = url;
-			img.className = 'thumbnail-clickable';
-			img.dataset.lightbox = 'true';
-			previewNorm.appendChild(img);
-		}
-	}
-	
-	const gallery = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
-	if (gallery.length) renderGallery(gallery);
-	
+	// Hydrate screenshots from the saved draft (full ordered list; first = main)
+	shots = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
+	renderShots();
 	updatePreviews();
 });
 

@@ -15,6 +15,9 @@ DEFAULTS: Dict[str, Any] = {
 	"discord_webhook_en": "",
 	# Discord upload settings
 	"discord_max_upload_mb": 50,
+	# Discord bot token (read-only) — required to collect message reactions for analytics.
+	# Webhooks are write-only and cannot read reactions back.
+	"discord_bot_token": "",
 	# UI
 	"ui_language": "en",
 	"vk_client_id": "",
@@ -66,13 +69,19 @@ DEFAULTS: Dict[str, Any] = {
     # Telegram
     "tg_bot_token": "",
     "tg_chat_id_ru": "",
-    # TikTok (placeholder for export-based workflow)
+    # TikTok — Content Posting API in inbox/draft mode (video.upload scope).
+    # tiktok_export_dir is the fallback folder when no token is configured.
     "tiktok_export_dir": "render",
     "tiktok_client_key": "",
     "tiktok_client_secret": "",
+    "tiktok_redirect_uri": "http://127.0.0.1:8000/api/accounts/callback/tiktok",
     "tiktok_access_token": "",
     "tiktok_refresh_token": "",
     "tiktok_token_expires_at": 0,
+    # Instagram Reels (Graph API; reuses the fb app). ig_user_id = IG business
+    # account id; ig_access_token = the linked Facebook Page's access token.
+    "ig_user_id": "",
+    "ig_access_token": "",
     # OpenAI (optional for translation)
     "openai_api_key": "",
     "openai_model": "gpt-4o-mini",

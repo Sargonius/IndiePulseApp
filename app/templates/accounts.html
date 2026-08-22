@@ -23,6 +23,19 @@
 						<button type="button" class="btn" hx-post="/api/discord/test" hx-target="#discord_status" hx-swap="innerHTML">Test</button>
 					</div>
 				</form>
+				<form hx-post="/api/settings/save" hx-target="#discord_status" hx-swap="innerHTML" style="margin-top:12px;">
+					<div class="form-group">
+						<label>
+							Bot Token <span style="opacity:.6">(для сбора реакций в аналитику)</span>
+							{% if discord_bot_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ discord_bot_token_hint }}</span>{% endif %}
+						</label>
+						<input type="password" name="discord_bot_token" value="" autocomplete="off"
+							placeholder="{% if discord_bot_token_hint %}Токен сохранён — вставь новый, чтобы заменить{% else %}Bot token из Discord Developer Portal{% endif %}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save bot token</button>
+					</div>
+				</form>
 				<div id="discord_status" class="status-msg"></div>
 			</div>
 			<div class="settings-right">
@@ -34,6 +47,13 @@
 						<li>Copy the <b>Webhook URL</b></li>
 						<li>Paste URL and click "Save"</li>
 						<li>Click "Test" to verify</li>
+					</ol>
+					<h4>Reactions analytics (optional)</h4>
+					<ol>
+						<li><a href="https://discord.com/developers/applications" target="_blank">Developer Portal</a> → New Application → Bot → Reset/Copy <b>Token</b></li>
+						<li>OAuth2 → URL Generator → scope <b>bot</b>, permissions <b>View Channel</b> + <b>Read Message History</b></li>
+						<li>Open the generated link, add the bot to your server</li>
+						<li>Paste the <b>Bot Token</b> above and click "Save bot token"</li>
 					</ol>
 				</div>
 			</div>
@@ -236,6 +256,7 @@
 					</div>
 					<div class="btn-row">
 						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-get="/api/accounts/connect/youtube" hx-target="#yt_status" hx-swap="innerHTML">Connect YouTube</button>
 					</div>
 				</form>
 				<div id="yt_status" class="status-msg"></div>
@@ -246,9 +267,15 @@
 					<ol>
 						<li>Open <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
 						<li>Create project, enable <b>YouTube Data API v3</b></li>
-						<li>Create OAuth 2.0 Client (Desktop app)</li>
-						<li>Get tokens via OAuth flow or script</li>
+						<li>Create OAuth 2.0 Client, добавь redirect URI <code>http://127.0.0.1:8000/api/accounts/callback/youtube</code></li>
+						<li>Сохрани Client ID + Secret → <b>Connect YouTube</b> (токены заполнятся сами)</li>
 					</ol>
+					<div class="info-box">
+						Ошибка <b>invalid_grant</b> при загрузке = refresh token протух или отозван — просто нажми
+						<b>Connect YouTube</b> ещё раз. Если OAuth-приложение в Google Console стоит в статусе
+						<b>Testing</b>, refresh token живёт всего <b>7 дней</b> — переключи консент-скрин в
+						<b>In production</b> (аудит не нужен), и токен станет вечным.
+					</div>
 				</div>
 			</div>
 		</div>
@@ -372,6 +399,50 @@
 		</div>
 	</div>
 
+	<!-- Instagram Reels -->
+	<div class="settings-section" id="section_instagram">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Instagram Reels</h3>
+					<span class="status-badge">{% if ig_user_id and ig_access_token_hint %}✓{% else %}—{% endif %}</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#ig_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>IG Business Account ID</label>
+						<input type="text" name="ig_user_id" value="{{ ig_user_id or '' }}" placeholder="17841400000000000" />
+					</div>
+					<div class="form-group">
+						<label>
+							Access Token (Page-токен страницы, к которой привязан IG)
+							{% if ig_access_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ ig_access_token_hint }}</span>{% endif %}
+						</label>
+						<input type="password" name="ig_access_token" value="" autocomplete="off"
+							placeholder="{% if ig_access_token_hint %}Токен сохранён — вставь новый, чтобы заменить{% else %}EAAB...{% endif %}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+				<div id="ig_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup (требует App Review Meta)</h4>
+					<ol>
+						<li>IG-аккаунт должен быть <b>Business/Creator</b> и привязан к Facebook-странице (секция Facebook выше).</li>
+						<li>Разрешение <b>instagram_business_content_publish</b> проходит App Review Meta (~2–4 недели).</li>
+						<li>Возьми <b>IG Business Account ID</b>: Graph API Explorer → <code>GET /{page-id}?fields=instagram_business_account</code>.</li>
+						<li>В качестве токена используй <b>Page Access Token</b> привязанной страницы.</li>
+					</ol>
+					<div class="info-box">
+						До прохождения review Reels выгружаются в папку экспорта (ручная заливка с телефона). После аппрува — полный авто-постинг.
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
 	<!-- Reddit -->
 	<div class="settings-section" id="section_reddit">
 		<div class="settings-row">
@@ -431,25 +502,52 @@
 					<span class="status-badge" id="status_tiktok">Loading...</span>
 				</div>
 				<div class="info-box" style="margin-bottom:12px;">
-					TikTok currently works in <b>export mode</b> - videos are saved for manual upload.
-					API publishing requires TikTok developer approval.
+					Работает в режиме <b>черновиков (inbox)</b>: фабрика заливает видео прямо в инбокс TikTok,
+					дальше в приложении добавляешь звук/подпись и публикуешь. Аудит TikTok для этого не нужен.
 				</div>
-				<div class="btn-row">
-					<button type="button" class="btn" hx-get="/api/accounts/connect/tiktok" hx-target="#tiktok_status" hx-swap="innerHTML">Connect TikTok</button>
-					<button type="button" class="btn" hx-post="/api/tiktok/test" hx-target="#tiktok_status" hx-swap="innerHTML">Test</button>
-				</div>
+				<form hx-post="/api/settings/save" hx-target="#tiktok_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Client Key</label>
+						<input type="text" name="tiktok_client_key" value="{{ tiktok_client_key or '' }}" placeholder="sbaw..." />
+					</div>
+					<div class="form-group">
+						<label>
+							Client Secret
+							{% if tiktok_secret_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ tiktok_secret_hint }}</span>{% endif %}
+						</label>
+						<input type="password" name="tiktok_client_secret" value="" autocomplete="off"
+							placeholder="{% if tiktok_secret_hint %}Секрет сохранён — вставь новый, чтобы заменить{% else %}...{% endif %}" />
+					</div>
+					<div class="form-group">
+						<label>Redirect URI (должен 1-в-1 совпадать с настройкой приложения TikTok)</label>
+						<input type="text" name="tiktok_redirect_uri" value="{{ tiktok_redirect_uri or '' }}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-get="/api/accounts/connect/tiktok" hx-target="#tiktok_status" hx-swap="innerHTML">Connect TikTok</button>
+						<button type="button" class="btn" hx-post="/api/tiktok/test" hx-target="#tiktok_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
 				<div id="tiktok_status" class="status-msg"></div>
+				{% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (обновляется автоматически)</div>{% endif %}
 			</div>
 			<div class="settings-right">
 				<div class="instructions">
-					<h4>Setup Instructions</h4>
+					<h4>Setup</h4>
 					<ol>
-						<li>Apply for TikTok Developer access</li>
-						<li>Create app with video.publish scope</li>
-						<li>Complete authorization flow</li>
+						<li>Создай приложение на <a href="https://developers.tiktok.com/" target="_blank">developers.tiktok.com</a></li>
+						<li>Подключи продукты <b>Login Kit</b> и <b>Content Posting API</b></li>
+						<li>Включи скоупы <b>user.info.basic</b> и <b>video.upload</b> (inbox-режим, аудит не нужен)</li>
+						<li>В Login Kit пропиши Redirect URI — тот же, что в поле слева</li>
+						<li>Скопируй Client Key + Secret сюда → Save → <b>Connect TikTok</b></li>
 					</ol>
 					<div class="info-box">
-						Without API access, videos are exported to <code>render/</code> folder for manual upload.
+						TikTok требует <b>HTTPS</b> redirect для прод-приложений — для локалки включи
+						<b>Sandbox</b>-режим приложения и добавь свой TikTok-аккаунт в target users,
+						либо подними https-туннель (ngrok/cloudflared) и укажи его URI.
+					</div>
+					<div class="info-box">
+						Без ключей фабрика продолжит складывать видео в <code>render/</code> для ручной заливки.
 					</div>
 				</div>
 			</div>

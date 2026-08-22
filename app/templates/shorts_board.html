@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="justify-content:space-between; align-items:center;">
+	<h2>🎞️ Доска фабрики</h2>
+	<a href="/shorts" class="btn btn-primary">+ Добавить клипы</a>
+</div>
+<div class="toolbar" style="margin:8px 0;">
+	<button class="btn" hx-get="/shorts/board/partial" hx-target="#shorts_board" hx-swap="innerHTML">Обновить</button>
+	<button class="btn" hx-post="/shorts/board/refresh_metrics" hx-target="#shorts_board" hx-swap="innerHTML">↻ Метрики</button>
+	<label class="row" style="gap:6px;">
+		<input type="checkbox" id="sb_auto" checked /> Авто-обновление (5с)
+	</label>
+</div>
+
+<div id="shorts_board" hx-get="/shorts/board/partial" hx-trigger="load, every 5s" hx-swap="innerHTML">
+	<div class="muted" style="padding:30px; text-align:center;">Загрузка…</div>
+</div>
+
+<style>
+.sf-board { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+.sf-bcard { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:8px; }
+.sf-bthumb { width:100%; aspect-ratio:9/16; max-height:300px; background:#0b1220; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+.sf-bthumb img, .sf-bthumb video { width:100%; height:100%; object-fit:cover; }
+.sf-rendering { color:#93c5fd; font-size:13px; }
+.sf-btitle { font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sf-chips { display:flex; flex-direction:column; gap:5px; }
+.sf-chip { display:flex; align-items:center; gap:6px; }
+.sf-chip .platform-badge { min-width:64px; text-align:center; }
+.badge.sf-await { background:#ede9fe; color:#5b21b6; }
+.sf-summary { display:flex; gap:18px; align-items:center; padding:10px 14px; margin-bottom:12px; background:#f8fafc; border:1px solid var(--border); border-radius:10px; font-size:14px; }
+.sf-summary b { font-size:16px; }
+</style>
+
+<script>
+(function () {
+	const box = document.getElementById('shorts_board');
+	const chk = document.getElementById('sb_auto');
+	chk.addEventListener('change', () => {
+		box.setAttribute('hx-trigger', chk.checked ? 'load, every 5s' : 'load');
+		if (window.htmx) htmx.process(box);
+	});
+})();
+</script>
+{% endblock %}

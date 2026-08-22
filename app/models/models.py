@@ -19,6 +19,7 @@ class PlatformEnum(str, Enum):
     reddit = "reddit"
     tg = "tg"
     bluesky = "bluesky"
+    ig_reels = "ig_reels"
 
 class BriefTypeEnum(str, Enum):
     news = "news"
@@ -31,6 +32,9 @@ class PostStatusEnum(str, Enum):
     done = "done"
     error = "error"
     canceled = "canceled"
+    # Uploaded to the platform's drafts/inbox (e.g. TikTok), waiting for the
+    # user to finish & publish manually inside the platform's app.
+    awaiting_finish = "awaiting_finish"
 
 class JobKindEnum(str, Enum):
     render = "render"
@@ -60,11 +64,20 @@ class Connection(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now_ts)
 
 class Preset(SQLModel, table=True):
+    """Shorts-Factory "clip type" preset (e.g. レベルデザイン / UI作業 / カメラワーク).
+
+    Applied PER CLIP (unlike Project, which is a whole-batch preset). One click
+    fills a card's title + description + tags + music. Orthogonal to Project:
+    a Project is "which game", a Preset is "what kind of clip".
+    """
     __tablename__ = "presets"
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(index=True, foreign_key="users.id")
+    user_id: int = Field(default=1, index=True)
     name: str = Field(index=True)
-    tags_json: str
+    tags_json: str = Field(default="")
+    title: Optional[str] = Field(default=None)
+    text_en: Optional[str] = Field(default=None)  # description (any language)
+    music_path: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=now_ts)
 
 class Project(SQLModel, table=True):
@@ -76,6 +89,15 @@ class Project(SQLModel, table=True):
     tags_json: Optional[str] = Field(default=None)
     platforms_json: Optional[str] = Field(default=None)
     sort_order: int = Field(default=0)
+    # Shorts-Factory render preset (applied to every clip when the project is picked)
+    crop_x: Optional[int] = Field(default=None)
+    crop_y: Optional[int] = Field(default=None)
+    crop_scale: Optional[float] = Field(default=None)
+    music_path: Optional[str] = Field(default=None)
+    music_offset_sec: Optional[int] = Field(default=None)
+    fade_in_ms: Optional[int] = Field(default=None)
+    fade_out_ms: Optional[int] = Field(default=None)
+    platforms_csv: Optional[str] = Field(default=None)  # e.g. "yt,tiktok,ig_reels"
     created_at: datetime = Field(default_factory=now_ts)
     updated_at: datetime = Field(default_factory=now_ts)
 

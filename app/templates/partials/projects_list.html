@@ -55,6 +55,21 @@
             <textarea name="platforms_json" rows="3"
                       style="max-width:480px; font-family:monospace; font-size:12px;">{{ p.platforms_json }}</textarea>
           </div>
+          <details style="margin-bottom:12px;">
+            <summary style="cursor:pointer; font-weight:600; font-size:13px;">🎞️ Пресет рендера шортсов</summary>
+            <div style="padding-top:8px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-width:480px;">
+              <div class="form-group"><label style="font-size:12px;">Площадки</label>
+                <input type="text" name="platforms_csv" value="{{ p.platforms_csv or '' }}" placeholder="yt,tiktok,ig_reels" /></div>
+              <div class="form-group"><label style="font-size:12px;">Музыка</label>
+                <select class="preset-music" name="music_path" data-current="{{ p.music_path or '' }}"><option value="">Без музыки</option></select></div>
+              <div class="form-group"><label style="font-size:12px;">Кроп X %</label><input type="number" name="crop_x" value="{{ p.crop_x if p.crop_x is not none else 50 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Кроп Y %</label><input type="number" name="crop_y" value="{{ p.crop_y if p.crop_y is not none else 50 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Зум ×</label><input type="number" name="crop_scale" value="{{ p.crop_scale if p.crop_scale is not none else 1.0 }}" step="0.1" /></div>
+              <div class="form-group"><label style="font-size:12px;">Смещение, с</label><input type="number" name="music_offset_sec" value="{{ p.music_offset_sec if p.music_offset_sec is not none else 0 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Fade in, мс</label><input type="number" name="fade_in_ms" value="{{ p.fade_in_ms if p.fade_in_ms is not none else 0 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Fade out, мс</label><input type="number" name="fade_out_ms" value="{{ p.fade_out_ms if p.fade_out_ms is not none else 0 }}" /></div>
+            </div>
+          </details>
           <div style="display:flex; gap:8px;">
             <button type="submit" class="btn btn-primary btn-sm">Save</button>
             <button type="button" class="btn btn-sm" onclick="toggleProjectEdit({{ p.id }})">Cancel</button>

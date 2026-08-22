@@ -576,6 +576,45 @@ def render_horizontal_with_music(
         raise RuntimeError(f"ffmpeg failed: {proc.stderr[-1000:]}")
 
 
+def extract_poster_frame(video_path: str, out_path: str, at_sec: float = 1.0) -> Optional[str]:
+    """Grab a single JPEG frame from a video for use as a thumbnail/poster.
+
+    Returns the output path on success, or None on failure.
+    """
+    try:
+        ffmpeg = _ffmpeg_path()
+        info = _probe_video_info(video_path)
+        dur = float(info.get("duration") or 0.0)
+        # Clamp the timestamp to inside the clip.
+        ts = at_sec if (dur <= 0 or at_sec < dur) else max(0.0, dur / 2.0)
+        out_dir = os.path.dirname(os.path.abspath(out_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", str(ts),
+            "-i", video_path,
+            "-frames:v", "1",
+            "-q:v", "3",
+            out_path,
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            return None
+        return out_path
+    except Exception:
+        return None
+
+
+def is_already_vertical(video_path: str) -> bool:
+    """True if the source video is already portrait (height > width), so the
+    9:16 crop is effectively a centered pass-through."""
+    info = _probe_video_info(video_path)
+    w = int(info.get("width") or 0)
+    h = int(info.get("height") or 0)
+    return h > 0 and w > 0 and h > w
+
+
 def render_vertical_with_music(
     input_video: str,
     output_video: str,

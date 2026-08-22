@@ -16,7 +16,7 @@ requests
 google-api-python-client
 google-auth
 google-auth-oauthlib
-praw
+praw>=7.8,<8  # 8.0 removed submit_image/submit_video (merged into submit()) — would break reddit_client
 deep-translator
 requests-oauthlib
 pillow
