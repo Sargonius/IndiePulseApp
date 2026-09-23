@@ -135,9 +135,9 @@ def test_x_keeps_first_tweet_when_thread_reply_fails(make_post, monkeypatch):
             return FakeResp(201, {"data": {"id": "111"}})
 
     import httpx
-    import app.routers.api as api
+    import app.services.tokens as tokens
     monkeypatch.setattr(httpx, "Client", FakeClient)
-    monkeypatch.setattr(api, "_x_ensure_token", lambda: "tok")
+    monkeypatch.setattr(tokens, "x_ensure_token", lambda: "tok")
     long_text = ". ".join(["Sentence number %d is here" % i for i in range(30)]) + "."
     post_id, job_id = make_post("x", {"x_thread": True}, text_en=long_text)
 
@@ -169,9 +169,9 @@ def test_x_long_text_falls_back_to_thread_on_403(make_post, monkeypatch):
             return FakeResp(201, {"data": {"id": str(len(posted))}})
 
     import httpx
-    import app.routers.api as api
+    import app.services.tokens as tokens
     monkeypatch.setattr(httpx, "Client", FakeClient)
-    monkeypatch.setattr(api, "_x_ensure_token", lambda: "tok")
+    monkeypatch.setattr(tokens, "x_ensure_token", lambda: "tok")
     long_text = " ".join(["Word%d." % i for i in range(120)])
     post_id, job_id = make_post("x", text_en=long_text)
     assert tasks._publish_news_post_impl(job_id, post_id) == "ok"

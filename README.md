@@ -24,7 +24,10 @@ successful publish and errors since. Run it after the app has been idle for a wh
 - FFmpeg (auto-detected; `vendor/ffmpeg/ffmpeg.exe` preferred)
 
 ## Layout
-- `app/` — code (`routers/` web + API, `jobs/tasks.py` publishing, `services/` platform clients)
+- `app/routers/` — pages (`pages.py`) and the JSON/htmx API (`api/`, one module per area)
+- `app/platforms/` — per-platform `publish()` / `fetch_metrics()` (one module per network)
+- `app/jobs/tasks.py` — Huey tasks: publish dispatcher, scheduling watchdog, metrics refresh
+- `app/services/` — low-level API clients, settings, tokens, health check
 - `media/` uploads, `render/` rendered videos, `logs/` logs
 - `.settings.json` — all credentials (local only, git-ignored)
 
