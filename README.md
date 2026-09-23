@@ -1,38 +1,46 @@
-﻿# IndiePulse (MVP)
+# IndiePulse
 
-Local-first Windows app to generate, schedule, and cross-post news and short videos with AI assistance.
+Local-first Windows app to write, schedule and cross-post news posts and short videos
+(Telegram, Discord, VK, X, YouTube, Facebook, Instagram Reels, Reddit, TikTok, Bluesky).
 
 ## Quick start (Windows)
 
-1. Configure environment:
-   - Copy `.env.example` to `.env` and fill in keys as needed
-2. Start the web app:
-   - Double-click `start.bat` (or run in terminal)
-3. Start the job worker (new terminal):
-   - Double-click `run_worker.bat`
+1. Optional: copy `.env.example` to `.env` (host/port, DB path).
+2. Double-click `start.bat`. It creates `.venv`, installs `requirements.txt`, and opens
+   two windows: **IndiePulse Server** and **IndiePulse Worker** (the Huey worker that
+   actually publishes; scheduled posts don't go out while it's closed).
+3. Open http://127.0.0.1:8000, fill in platform credentials on the ⚙️ Settings page.
 
-App runs at http://127.0.0.1:8000
+`restart.bat` (or the ↻ button in the header) restarts both processes.
 
-## Tech (MVP)
-- FastAPI + Jinja2 + htmx
-- SQLite (SQLModel)
-- Huey (SQLite-backed queue)
-- FFmpeg (external binary)
+## Checking the integrations
+
+The 🩺 page (`/status`) checks every configured platform in one click without posting
+anything: token validity, permissions, expiry dates, plus each platform's last
+successful publish and errors since. Run it after the app has been idle for a while.
+
+## Tech
+- FastAPI + Jinja2 + htmx, SQLite (SQLModel, WAL mode), Huey (SQLite-backed queue)
+- FFmpeg (auto-detected; `vendor/ffmpeg/ffmpeg.exe` preferred)
 
 ## Layout
-- app/  application code
-- media/  user-uploaded files
-- render/  rendered videos
-- logs/  logs per job
-- vendor/ffmpeg/  optional local ffmpeg binaries
+- `app/` — code (`routers/` web + API, `jobs/tasks.py` publishing, `services/` platform clients)
+- `media/` uploads, `render/` rendered videos, `logs/` logs
+- `.settings.json` — all credentials (local only, git-ignored)
 
-## Packaging
-- Run via `start.bat` for development
-- PyInstaller packaging will be added later
+## Security notes
+The app has no login and must stay bound to 127.0.0.1. It rejects cross-site POSTs
+and unknown Host headers so other websites can't drive it from your browser.
+
+## Development
+```bash
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest
+```
 
 ## License
-Proprietary  all rights reserved.
-# IndiePulseNew
+Proprietary — all rights reserved.
+
 
 ## Facebook API setup (Page posting)
 

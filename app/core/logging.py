@@ -8,8 +8,22 @@ from typing import Callable
 from loguru import logger
 
 
+def _redact_record(record) -> None:
+	from app.core.redact import redact
+	record["message"] = redact(record["message"])
+	if record["exception"] is not None:
+		# the traceback text is rendered from the exception value — scrub it too
+		exc = record["exception"]
+		try:
+			if exc.value is not None and exc.value.args:
+				exc.value.args = tuple(redact(a) if isinstance(a, str) else a for a in exc.value.args)
+		except Exception:
+			pass
+
+
 def setup_logging() -> None:
 	logger.remove()
+	logger.configure(patcher=_redact_record)
 	# Console
 	logger.add(sys.stdout, level=os.getenv("LOG_LEVEL", "INFO"),
 		format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {message}")

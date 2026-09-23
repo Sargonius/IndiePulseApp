@@ -17,29 +17,36 @@ def _retry_request(
     backoff_base: float = 1.0,
     **kwargs
 ) -> requests.Response:
-    """Execute a request with exponential backoff retry on connection errors."""
-    last_exception = None
-    
+    """Execute a request, retrying only when the connection itself failed.
+
+    A ReadTimeout is NOT retried: the message may already be in the channel, and
+    resending would double-post. Error texts never include the request URL (it
+    carries the bot token).
+    """
+    last_exception: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
             response = func(*args, **kwargs)
-            response.raise_for_status()
+            if response.status_code >= 400:
+                try:
+                    desc = (response.json() or {}).get('description') or response.text[:200]
+                except Exception:
+                    desc = response.text[:200]
+                raise RuntimeError(f"telegram HTTP {response.status_code}: {desc}")
             return response
-        except (ConnectionError, ConnectionResetError, Timeout) as e:
-            last_exception = e
+        except (ConnectionError, ConnectionResetError) as e:
+            if isinstance(e, requests.exceptions.ReadTimeout):
+                raise RuntimeError("telegram read timeout (message may have been sent)") from None
+            last_exception = RuntimeError(f"telegram connection failed: {type(e).__name__}")
             wait_time = backoff_base * (2 ** attempt)  # 1, 2, 4 seconds
-            logger.warning(
-                f"Telegram request failed (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}. "
-                f"Retrying in {wait_time}s..."
-            )
+            logger.warning(f"Telegram connect failed (attempt {attempt + 1}/{max_retries}): {type(e).__name__}. Retrying in {wait_time}s...")
             if attempt < max_retries - 1:
                 time.sleep(wait_time)
+        except Timeout:
+            raise RuntimeError("telegram read timeout (message may have been sent)") from None
         except RequestException as e:
-            # For other request exceptions, log and raise immediately
-            logger.error(f"Telegram request error: {type(e).__name__}: {e}")
-            raise
-    
-    # All retries exhausted
+            logger.error(f"Telegram request error: {type(e).__name__}")
+            raise RuntimeError(f"telegram request error: {type(e).__name__}") from None
     logger.error(f"Telegram request failed after {max_retries} attempts: {last_exception}")
     raise last_exception
 

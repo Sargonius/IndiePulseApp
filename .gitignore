@@ -34,9 +34,16 @@ logs/
 
 # App data (local-only)
 .settings.json
+.settings.json.tmp
 .draft.json
+.draft_news.json
+.locks/
+.autoreload
 queue.db
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 media/
 render/
 cache/

@@ -149,3 +149,30 @@ class Job(SQLModel, table=True):
     last_error: Optional[str] = None
     created_at: datetime = Field(default_factory=now_ts)
     updated_at: datetime = Field(default_factory=now_ts)
+
+
+# ── ORM hooks ────────────────────────────────────────────────────────────────
+# updated_at was never maintained (it always equalled created_at), and error
+# texts often embed API URLs/bodies containing tokens. Handle both centrally.
+from sqlalchemy import event as _event
+
+
+def _scrub_errors(target, field: str) -> None:
+    val = getattr(target, field, None)
+    if val:
+        from app.core.redact import redact
+        setattr(target, field, redact(val))
+
+
+@_event.listens_for(Post, "before_insert")
+@_event.listens_for(Post, "before_update")
+def _post_before_write(mapper, connection, target) -> None:
+    target.updated_at = now_ts()
+    _scrub_errors(target, "error_text")
+
+
+@_event.listens_for(Job, "before_insert")
+@_event.listens_for(Job, "before_update")
+def _job_before_write(mapper, connection, target) -> None:
+    target.updated_at = now_ts()
+    _scrub_errors(target, "last_error")

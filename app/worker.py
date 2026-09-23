@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()  # same .env as the web app (DATABASE_URL, QUEUE_DB, ...)
+
 from huey.consumer import Consumer
 from app.jobs.huey_app import huey
 # Import tasks module to ensure Huey registers all tasks in the registry

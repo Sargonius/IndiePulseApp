@@ -24,6 +24,7 @@
 				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>
 				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
 				<a href="/projects" class="{% if request.url.path.startswith('/projects') %}active{% endif %}">Projects</a>
+				<a href="/status" title="API health check" class="{% if request.url.path.startswith('/status') %}active{% endif %}">🩺</a>
 				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">⚙️</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
 			</nav>

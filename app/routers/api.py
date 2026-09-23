@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, Form, Request
 from fastapi.responses import HTMLResponse, Response, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional
@@ -12,20 +12,45 @@ import httpx
 from urllib.parse import quote_plus
 from app.services.draft_store import save_draft, load_draft
 from fastapi import UploadFile, File
-from typing import Optional, List
 from loguru import logger
 import os, time
-import os
 import base64
-import io, zipfile
+import io
 from app.services.video_editor import render_vertical_with_music
 from app.services.video_editor import _ffmpeg_path, install_ffmpeg_win
-from app.core.config import STEAM_APP_ID
+from app.core.config import STEAM_APP_ID, APP_BASE_URL as _BASE_URL
 from app.services.facebook_client import FacebookClient
 from fastapi.templating import Jinja2Templates
 from fastapi import Query
 
 router = APIRouter(prefix="/api")
+
+
+def _oauth_new_state(provider: str) -> str:
+    """Random one-time `state` for an OAuth connect flow (stops forged callbacks
+    from swapping in someone else's account)."""
+    import secrets as _secrets
+    state = _secrets.token_urlsafe(24)
+    save_settings({f"oauth_state_{provider}": state})
+    return state
+
+
+def _oauth_check_state(provider: str, state: str) -> bool:
+    import hmac as _hmac
+    expected = (load_settings().get(f"oauth_state_{provider}") or "").strip()
+    ok = bool(expected) and _hmac.compare_digest(expected, (state or "").strip())
+    if ok:
+        save_settings({f"oauth_state_{provider}": ""})  # single use
+    return ok
+
+
+def _e(value) -> str:
+    """Escape anything interpolated into an HTML snippet (API error bodies, query
+    params, exception texts) and strip credentials from it."""
+    import html as _h
+    from app.core.redact import redact
+    return _h.escape(redact(str(value)), quote=True)
+
 templates_api = Jinja2Templates(directory='app/templates')
 @router.get("/analytics/table", response_class=HTMLResponse)
 def analytics_table(request: Request, session: Session = Depends(get_session)):
@@ -233,7 +258,7 @@ def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form
         logger.info(f"translate provider={info} in_len={len(src)} out_len={len(en)}")
     except Exception:
         pass
-    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\" data-translator=\"{info}\">{en}</textarea><!-- provider: {info} -->"
+    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\" data-translator=\"{_e(info)}\">{_e(en)}</textarea><!-- provider: {_e(info)} -->"
     return HTMLResponse(html)
 
 @router.post("/hashtags/suggest")
@@ -258,7 +283,7 @@ def suggest_hashtags(text: str = Form("")):
     save_draft({"tags": tag_str})
     # Return an input prefilled so htmx can swap it in place
     return HTMLResponse(
-        f"<input id=\"tags_input\" type=\"text\" name=\"tags\" value=\"{tag_str}\" style=\"width: 520px;\" />"
+        f"<input id=\"tags_input\" type=\"text\" name=\"tags\" value=\"{_e(tag_str)}\" style=\"width: 520px;\" />"
     )
 
 
@@ -601,7 +626,7 @@ def system_restart():
             headers={"HX-Refresh": "true"}
         )
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Restart failed: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Restart failed: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.post("/system/toggle_autoreload")
@@ -621,7 +646,7 @@ def system_toggle_autoreload(enable: Optional[bool] = Form(None)):
                 os.remove(flag)
             return HTMLResponse(_render_autoreload_button_html(False))
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Toggle failed: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Toggle failed: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.get("/system/autoreload_status")
@@ -646,11 +671,11 @@ def telegram_test(message: str = Form("Test from IndiePulse")):
             r = client.post(url, data=data)
             jd = r.json()
         if r.status_code >= 400 or not jd.get("ok"):
-            return HTMLResponse(f"<span style='color:red'>Ошибка Telegram: {jd}</span>")
+            return HTMLResponse(f"<span style='color:red'>Ошибка Telegram: {_e(jd)}</span>")
         mid = ((jd.get("result") or {}).get("message_id"))
-        return HTMLResponse(f"<span style='color:green'>Отправлено (message_id={mid})</span>")
+        return HTMLResponse(f"<span style='color:green'>Отправлено (message_id={_e(mid)})</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.post("/telegram/check")
@@ -666,15 +691,15 @@ def telegram_check():
             me = client.get(f"https://api.telegram.org/bot{token}/getMe")
             mjs = me.json()
             if not mjs.get("ok"):
-                return HTMLResponse(f"<span style='color:red'>getMe: {mjs}</span>")
+                return HTMLResponse(f"<span style='color:red'>getMe: {_e(mjs)}</span>")
             chat_status = ""
             if chat_id:
                 ch = client.get(f"https://api.telegram.org/bot{token}/getChat", params={"chat_id": chat_id})
                 cjs = ch.json()
                 chat_status = " ok" if cjs.get("ok") else f" error: {cjs}"
-        return HTMLResponse(f"<span style='color:green'>Bot OK.{chat_status}</span>")
+        return HTMLResponse(f"<span style='color:green'>Bot OK.{_e(chat_status)}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>")
 
 @router.post("/discord/webhook")
 def save_discord_webhook(url: str = Form(...)):
@@ -704,10 +729,10 @@ def discord_send_test():
     client = DiscordClient(url)
     try:
         mid, murl = client.send_message("Test from IndiePulse")
-        link = f"<a href='{murl}' target='_blank'>сообщение</a>" if murl else ""
+        link = f"<a href='{_e(murl)}' target='_blank'>сообщение</a>" if murl else ""
         return HTMLResponse(f"<span style='color:green'>Отправлено {link}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.post("/settings/save")
@@ -867,7 +892,7 @@ def vk_connect_start():
         f"client_id={quote_plus(client_id)}&display=page&redirect_uri={quote_plus(redirect_uri)}"
         f"&response_type=code&v=5.199&scope={quote_plus(scope)}"
     )
-    return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Открыть VK авторизацию</a>")
+    return HTMLResponse(f"<a href='{_e(auth_url)}' target='_blank'>Открыть VK авторизацию</a>")
 
 
 @router.get("/accounts/callback/vk")
@@ -926,17 +951,17 @@ def vk_test_post(text: str = Form("Test from IndiePulse")):
             r.raise_for_status()
             data = r.json()
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Сетевой сбой: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>Сетевой сбой: {_e(str(exc))}</span>")
     if isinstance(data, dict) and "error" in data:
         err = data.get("error", {})
         msg = err.get("error_msg") or str(err)
         code = err.get("error_code")
-        return HTMLResponse(f"<span style='color:red'>Ошибка VK [{code}]: {msg}</span>")
+        return HTMLResponse(f"<span style='color:red'>Ошибка VK [{_e(code)}]: {_e(msg)}</span>")
     post_id = (data.get("response") or {}).get("post_id") if isinstance(data, dict) else None
     link = f"https://vk.com/wall{owner_id}_{post_id}" if post_id else ""
     if not post_id:
         return HTMLResponse("<span style='color:orange'>Ответ VK без post_id</span>")
-    return HTMLResponse(f"<span style='color:green'>Опубликовано: <a href='{link}' target='_blank'>ссылка</a></span>")
+    return HTMLResponse(f"<span style='color:green'>Опубликовано: <a href='{_e(link)}' target='_blank'>ссылка</a></span>")
 
 
 # X / Twitter OAuth 2.0 (PKCE simplified flow)
@@ -962,13 +987,15 @@ def x_connect_start():
     url = (
         "https://twitter.com/i/oauth2/authorize?"
         f"response_type=code&client_id={quote_plus(client_id)}&redirect_uri={quote_plus(redirect_uri)}"
-        f"&scope={quote_plus(scope)}&state=state&code_challenge={quote_plus(challenge)}&code_challenge_method=S256"
+        f"&scope={quote_plus(scope)}&state={_oauth_new_state('x')}&code_challenge={quote_plus(challenge)}&code_challenge_method=S256"
     )
-    return HTMLResponse(f"<a href='{url}' target='_blank'>Открыть X авторизацию</a>")
+    return HTMLResponse(f"<a href='{_e(url)}' target='_blank'>Открыть X авторизацию</a>")
 
 
 @router.get("/accounts/callback/x")
-def x_callback(code: str):
+def x_callback(code: str, state: str = ""):
+    if not _oauth_check_state("x", state):
+        return HTMLResponse("<span style='color:red'>Invalid OAuth state — start again from Settings → Connect X</span>", status_code=400)
     cfg = load_settings()
     token_url = "https://api.twitter.com/2/oauth2/token"
     data = {
@@ -989,7 +1016,7 @@ def x_callback(code: str):
         r = client.post(token_url, data=data, headers=headers)
         data = r.json()
     if "error" in data:
-        return HTMLResponse(f"<span style='color:red'>X OAuth error: {data}</span>")
+        return HTMLResponse(f"<span style='color:red'>X OAuth error: {_e(data)}</span>")
     from time import time as _now
     save_settings({
         "x_access_token": data.get("access_token", ""),
@@ -1002,46 +1029,9 @@ def x_callback(code: str):
 
 
 def _x_ensure_token() -> str:
-    """Return a valid X access token, refreshing if needed. Raises on failure."""
-    from time import time as _now
-    cfg = load_settings()
-    token = (cfg.get("x_access_token") or "").strip()
-    refresh = (cfg.get("x_refresh_token") or "").strip()
-    client_id = (cfg.get("x_client_id") or "").strip()
-    client_secret = (cfg.get("x_client_secret") or "").strip()
-    exp_ts = int(cfg.get("x_expires_at_ts") or 0)
-    # If token missing or expiring within 60s, refresh
-    if not token or (exp_ts and exp_ts - int(_now()) < 60):
-        if not (refresh and client_id and client_secret):
-            raise RuntimeError("x_refresh_unavailable")
-        token_url = "https://api.twitter.com/2/oauth2/token"
-        data = {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh,
-            "client_id": client_id,
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        import base64 as _b64
-        basic = _b64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-        headers["Authorization"] = f"Basic {basic}"
-        with httpx.Client(timeout=15) as client:
-            r = client.post(token_url, data=data, headers=headers)
-            jd = r.json()
-        if r.status_code >= 400:
-            raise RuntimeError(f"x_refresh_failed: {jd}")
-        new_token = jd.get("access_token", "")
-        new_refresh = jd.get("refresh_token", refresh)
-        expires_in = int(jd.get("expires_in", 0))
-        from time import time as _now2
-        save_settings({
-            "x_access_token": new_token,
-            "x_refresh_token": new_refresh,
-            "x_token_type": jd.get("token_type", cfg.get("x_token_type")),
-            "x_expires_at": expires_in,
-            "x_expires_at_ts": int(_now2()) + expires_in,
-        })
-        token = new_token
-    return token
+    """Kept for existing callers; the implementation lives in services/tokens.py."""
+    from app.services.tokens import x_ensure_token
+    return x_ensure_token()
 
 
 @router.post("/x/test_tweet")
@@ -1050,7 +1040,7 @@ def x_test_tweet(text: str = Form("Hello from IndiePulse")):
     try:
         token = _x_ensure_token()
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>X token error: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>X token error: {_e(str(exc))}</span>")
     if not token:
         return HTMLResponse("<span style='color:orange'>X не подключён</span>")
     # Validate token scopes and status
@@ -1059,23 +1049,22 @@ def x_test_tweet(text: str = Form("Hello from IndiePulse")):
             me = client.get("https://api.twitter.com/2/users/me", headers={"Authorization": f"Bearer {token}"})
             info = me.json()
             if me.status_code >= 400:
-                return HTMLResponse(f"<span style='color:red'>X token invalid: {info}</span>")
+                return HTMLResponse(f"<span style='color:red'>X token invalid: {_e(info)}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>X check failed: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>X check failed: {_e(str(exc))}</span>")
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     payload = {"text": text[:280]}
     with httpx.Client(timeout=15) as client:
         r = client.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
         data = r.json()
     if r.status_code >= 400:
-        return HTMLResponse(f"<span style='color:red'>Ошибка X: {data}</span>")
+        return HTMLResponse(f"<span style='color:red'>Ошибка X: {_e(data)}</span>")
     tid = (data.get("data") or {}).get("id")
     url = f"https://twitter.com/i/web/status/{tid}" if tid else ""
-    return HTMLResponse(f"<span style='color:green'>Опубликовано: <a href='{url}' target='_blank'>ссылка</a></span>")
+    return HTMLResponse(f"<span style='color:green'>Опубликовано: <a href='{_e(url)}' target='_blank'>ссылка</a></span>")
 
 
 # TikTok OAuth 2.0
-_TIKTOK_OAUTH_STATE = "tiktok_oauth_state"  # constant: local single-user app
 
 
 @router.get("/accounts/connect/tiktok")
@@ -1086,7 +1075,7 @@ def tiktok_connect_start():
     if not client_key:
         return HTMLResponse("<span style='color:orange'>Сначала сохрани TikTok Client Key ниже</span>")
 
-    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or f"{_BASE_URL}/api/accounts/callback/tiktok"
     # NOTE: no video.publish here — that scope needs a passed TikTok app audit
     # and requesting it for an unaudited app fails the whole authorize screen.
     scope = "user.info.basic,video.upload"
@@ -1097,10 +1086,10 @@ def tiktok_connect_start():
         f"response_type=code&"
         f"scope={quote_plus(scope)}&"
         f"redirect_uri={quote_plus(redirect_uri)}&"
-        f"state={_TIKTOK_OAUTH_STATE}"
+        f"state={_oauth_new_state('tiktok')}"
     )
 
-    return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Open TikTok Authorization</a>")
+    return HTMLResponse(f"<a href='{_e(auth_url)}' target='_blank'>Open TikTok Authorization</a>")
 
 
 @router.get("/accounts/callback/tiktok")
@@ -1113,13 +1102,12 @@ def tiktok_callback(code: str, state: str = ""):
     if not client_key or not client_secret:
         return HTMLResponse("<span style='color:red'>TikTok credentials not configured</span>", status_code=400)
 
-    # Verify state (basic check)
-    if state != _TIKTOK_OAUTH_STATE:
+    if not _oauth_check_state("tiktok", state):
         return HTMLResponse("<span style='color:red'>Invalid OAuth state</span>", status_code=400)
 
     # Exchange code for access token
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
-    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or "http://127.0.0.1:8000/api/accounts/callback/tiktok"
+    redirect_uri = (cfg.get("tiktok_redirect_uri") or "").strip() or f"{_BASE_URL}/api/accounts/callback/tiktok"
     
     payload = {
         "client_key": client_key,
@@ -1143,7 +1131,7 @@ def tiktok_callback(code: str, state: str = ""):
         expires_in = int(data.get("expires_in", 0))
         
         if not access_token:
-            return HTMLResponse(f"<span style='color:red'>No access token: {data}</span>", status_code=400)
+            return HTMLResponse(f"<span style='color:red'>No access token: {_e(data)}</span>", status_code=400)
         
         from time import time as _now
         save_settings({
@@ -1154,7 +1142,7 @@ def tiktok_callback(code: str, state: str = ""):
         
         return HTMLResponse("<span style='color:green'>TikTok connected successfully!</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>TikTok OAuth error: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>TikTok OAuth error: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.post("/tiktok/test")
@@ -1180,12 +1168,12 @@ def tiktok_test():
             data = r.json()
         
         if r.status_code >= 400 or data.get("error", {}).get("code") != "ok":
-            return HTMLResponse(f"<span style='color:red'>TikTok API error: {data}</span>")
+            return HTMLResponse(f"<span style='color:red'>TikTok API error: {_e(data)}</span>")
         
         user_info = data.get("data", {}).get("user", {})
-        return HTMLResponse(f"<span style='color:green'>TikTok connected. User: {user_info.get('open_id', 'unknown')}</span>")
+        return HTMLResponse(f"<span style='color:green'>TikTok connected. User: {_e(user_info.get('open_id', 'unknown'))}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>TikTok test failed: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>TikTok test failed: {_e(str(exc))}</span>")
 
 
 @router.get("/vk/implicit_url")
@@ -1205,8 +1193,8 @@ def vk_implicit_url():
     html = (
         f"<div style='padding:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px;'>\n"
         f"<p style='margin:0 0 8px 0; font-weight:600; color:#856404;'>⚠️ ВАЖНО: Токен должен иметь права</p>\n"
-        f"<p style='margin:0 0 12px 0; font-family:monospace; background:#fff; padding:6px; border-radius:3px;'>{scope}</p>\n"
-        f"<a class='btn btn-primary' href='{url}' target='_blank' style='display:inline-block; margin-bottom:8px;'>Открыть ссылку для получения Access Token</a><br/>\n"
+        f"<p style='margin:0 0 12px 0; font-family:monospace; background:#fff; padding:6px; border-radius:3px;'>{_e(scope)}</p>\n"
+        f"<a class='btn btn-primary' href='{_e(url)}' target='_blank' style='display:inline-block; margin-bottom:8px;'>Открыть ссылку для получения Access Token</a><br/>\n"
         f"<p style='margin:8px 0 0 0; font-size:13px; color:#666;'>После авторизации скопируйте значение <b>access_token</b> из адресной строки (после #access_token=...). Вставьте его в поле <b>Access Token</b> и <b>User Access Token</b> (оба поля!) и сохраните.</p>\n"
         f"</div>"
     )
@@ -1227,7 +1215,7 @@ def vk_check_token(token: str = Form("")):
             
             if isinstance(data, dict) and "error" in data:
                 err = data.get("error", {})
-                return HTMLResponse(f"<span style='color:red'>Ошибка VK [{err.get('error_code')}]: {err.get('error_msg')}</span>")
+                return HTMLResponse(f"<span style='color:red'>Ошибка VK [{_e(err.get('error_code'))}]: {_e(err.get('error_msg'))}</span>")
             
             # Проверяем права токена через apps.getScopes
             r2 = client.get("https://api.vk.com/method/apps.getScopes", params={
@@ -1247,15 +1235,15 @@ def vk_check_token(token: str = Form("")):
                 missing = required - has_scopes
                 
                 if missing:
-                    scopes_info = f"<br/><span style='color:#ff9800;'>⚠️ Отсутствуют права: {', '.join(missing)}</span>"
-                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Текущие права: {', '.join(scope_names) if scope_names else 'нет данных'}</span>"
+                    scopes_info = f"<br/><span style='color:#ff9800;'>⚠️ Отсутствуют права: {_e(', '.join(missing))}</span>"
+                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Текущие права: {_e(', '.join(scope_names) if scope_names else 'нет данных')}</span>"
                 else:
                     scopes_info = f"<br/><span style='color:#4caf50;'>✓ Все необходимые права присутствуют</span>"
-                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Права: {', '.join(scope_names)}</span>"
+                    scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Права: {_e(', '.join(scope_names))}</span>"
             
             return HTMLResponse(f"<span style='color:green'>Токен валиден</span>{scopes_info}")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Сетевой сбой: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>Сетевой сбой: {_e(str(exc))}</span>")
 
 
 @router.post("/facebook/test")
@@ -1294,7 +1282,8 @@ def facebook_test():
                     except Exception as _exc:
                         logs.append(f"permalink error: {_exc}")
                         link = ""
-                    blocks.append(f"<div><b>{label}:</b> OK {pid} {('<a href=\'" + link + "\' target=\'_blank\'>link</a>') if link else ''}<br/><pre>" + ("\n".join(logs)) + "</pre></div>")
+                    link_html = f"<a href='{_e(link)}' target='_blank'>link</a>" if link else ''
+                    blocks.append(f"<div><b>{label}:</b> OK {_e(pid)} {link_html}<br/><pre>" + _e("\n".join(logs)) + "</pre></div>")
                 except Exception as exc:
                     try:
                         logger.exception(f"fb.test error label={label}: {exc}")
@@ -1306,9 +1295,9 @@ def facebook_test():
                     if ('"code":190' in low) or ('"error_subcode":463' in low) or ('Error validating access token' in err_str):
                         logs.append("hint: Page Access Token expired. Generate a new Page token and update settings.")
                     logs.append(f"error: {err_str}")
-                    blocks.append(f"<div><b>{label}:</b> ERROR<br/><pre>" + ("\n".join(logs)) + "</pre></div>")
+                    blocks.append(f"<div><b>{_e(label)}:</b> ERROR<br/><pre>" + _e("\n".join(logs)) + "</pre></div>")
             else:
-                blocks.append(f"<div><b>{label}:</b> not configured</div>")
+                blocks.append(f"<div><b>{_e(label)}:</b> not configured</div>")
         html = "".join(blocks)
         return HTMLResponse(f"<div>{html}</div>")
     except Exception as exc:
@@ -1316,7 +1305,7 @@ def facebook_test():
             logger.exception(f"fb.test outer error: {exc}")
         except Exception:
             pass
-        return HTMLResponse(f"<span style='color:red'>FB test failed: {str(exc)}</span>")
+        return HTMLResponse(f"<span style='color:red'>FB test failed: {_e(str(exc))}</span>")
 
 @router.get("/facebook/test")
 def facebook_test_get():
@@ -1479,7 +1468,7 @@ def yt_save(
 
 # YouTube OAuth (browser consent flow; re-run it whenever Google returns
 # invalid_grant — an expired/revoked refresh token)
-_YT_REDIRECT_URI = "http://127.0.0.1:8000/api/accounts/callback/youtube"
+_YT_REDIRECT_URI = f"{_BASE_URL}/api/accounts/callback/youtube"
 _YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube"
 
 
@@ -1497,16 +1486,19 @@ def youtube_connect_start():
         "response_type=code&"
         f"scope={quote_plus(_YT_SCOPES)}&"
         "access_type=offline&"
+        f"state={_oauth_new_state('youtube')}&"
         "prompt=consent"  # force re-issue of the refresh token
     )
-    return HTMLResponse(f"<a href='{auth_url}' target='_blank'>Open Google Authorization</a>")
+    return HTMLResponse(f"<a href='{_e(auth_url)}' target='_blank'>Open Google Authorization</a>")
 
 
 @router.get("/accounts/callback/youtube")
-def youtube_callback(code: str = "", error: str = ""):
+def youtube_callback(code: str = "", error: str = "", state: str = ""):
     """Exchange the consent code for access+refresh tokens and store them."""
     if error:
-        return HTMLResponse(f"<span style='color:red'>Google OAuth error: {error}</span>", status_code=400)
+        return HTMLResponse(f"<span style='color:red'>Google OAuth error: {_e(error)}</span>", status_code=400)
+    if not _oauth_check_state("youtube", state):
+        return HTMLResponse("<span style='color:red'>Invalid OAuth state — start again from Settings → Connect YouTube</span>", status_code=400)
     cfg = load_settings()
     client_id = (cfg.get("yt_client_id") or "").strip()
     client_secret = (cfg.get("yt_client_secret") or "").strip()
@@ -1528,8 +1520,10 @@ def youtube_callback(code: str = "", error: str = ""):
         access_token = (data.get("access_token") or "").strip()
         refresh_token = (data.get("refresh_token") or "").strip()
         if not access_token:
-            return HTMLResponse(f"<span style='color:red'>No access token: {data}</span>", status_code=400)
-        updates = {"yt_access_token": access_token}
+            return HTMLResponse(f"<span style='color:red'>No access token: {_e(data)}</span>", status_code=400)
+        from time import time as _now
+        updates = {"yt_access_token": access_token,
+                   "yt_expires_at": int(_now()) + int(data.get("expires_in") or 3600)}
         if refresh_token:
             updates["yt_refresh_token"] = refresh_token
         save_settings(updates)
@@ -1539,7 +1533,7 @@ def youtube_callback(code: str = "", error: str = ""):
             + ". Можно закрыть вкладку.</span>"
         )
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>YouTube OAuth error: {exc}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>YouTube OAuth error: {_e(exc)}</span>", status_code=500)
 
 
 @router.post("/steam/export")
@@ -1701,7 +1695,7 @@ def steam_export(
             img_path = os.path.join(export_dir, 'main_800x450.jpg')
             img.save(img_path, format='JPEG', quality=92)
         except Exception as exc:
-            return HTMLResponse(f"<span style='color:red'>Image processing failed: {str(exc)}</span>", status_code=400)
+            return HTMLResponse(f"<span style='color:red'>Image processing failed: {_e(str(exc))}</span>", status_code=400)
 
     # Respond with folder details and a helper link
     return {
@@ -1727,7 +1721,7 @@ def steam_open_dir(path: str):
         else:
             return HTMLResponse("<span style='color:orange'>Open folder supported on Windows only</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Open failed: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Open failed: {_e(str(exc))}</span>", status_code=500)
 
 @router.post("/video/preview_frame")
 def video_preview_frame(
@@ -1891,7 +1885,7 @@ def video_install_ffmpeg():
             path = install_ffmpeg_win()
         return {"ok": True, "path": path}
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>FFmpeg install failed: {str(exc)}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>FFmpeg install failed: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.get("/music/list")
@@ -2378,8 +2372,8 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
         # Already published — don't duplicate the post on an accidental retry
         do_schedule = False
     else:
-        if target_post.status not in (_PSE.queued, _PSE.running):
-            target_post.status = _PSE.queued
+        # an explicit retry also un-sticks a 'running' post (the task only starts queued ones)
+        target_post.status = _PSE.queued
         target_post.error_text = None
         # Manual retry means "publish now", drop a stale schedule
         target_post.scheduled_at = None
@@ -2620,6 +2614,26 @@ def calendar_move(req: CalendarMoveRequest, session: Session = Depends(get_sessi
     return {'ok': True}
 
 
+# ==================== API health check (read-only, posts nothing) ====================
+
+@router.post("/health/run")
+def health_run(only: str = Query("")):
+    """Live-check every configured integration (or just `only`). See services/health_check.py."""
+    from app.services.health_check import run_checks
+    return run_checks(only.strip() or None)
+
+
+@router.get("/health/last")
+def health_last():
+    from app.services.health_check import load_last, publish_history
+    last = load_last() or {"ran_at": None, "results": []}
+    try:
+        last["history"] = publish_history()  # always fresh — it's a cheap local DB read
+    except Exception as exc:
+        logger.warning(f"health.history failed: {exc}")
+    return last
+
+
 # ==================== Settings Status & Post Management ====================
 
 @router.get("/settings/status")
@@ -2746,8 +2760,10 @@ def publish_post_now(post_id: int, session: Session = Depends(get_session)):
     post.scheduled_at = None
     session.add(post)
     session.commit()
-    
-    payload = {"post_id": post.id}
+
+    # keep the media/gallery/options chosen at creation time
+    from app.jobs.tasks import publish_payload_for
+    payload = publish_payload_for(session, post.id)
     job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
     session.add(job)
     session.commit()

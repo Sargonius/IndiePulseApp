@@ -1,23 +1,21 @@
-﻿fastapi
-uvicorn[standard]
-jinja2
-python-multipart
-sqlmodel
-sqlalchemy>=2.0
-huey
-tenacity
-httpx
-authlib
-python-dotenv
-cryptography
-keyring
-loguru
-requests
-google-api-python-client
-google-auth
-google-auth-oauthlib
-praw>=7.8,<8  # 8.0 removed submit_image/submit_video (merged into submit()) — would break reddit_client
-deep-translator
-requests-oauthlib
-pillow
-pydub
+# Pinned to the versions this app is tested with (~= allows bugfix releases only).
+# start.bat reinstalls on every launch, so unpinned deps could break the app overnight
+# (e.g. praw 8.0 removed submit_image/submit_video).
+fastapi~=0.116.1
+uvicorn[standard]~=0.35.0
+jinja2~=3.1.6
+python-multipart~=0.0.20
+sqlmodel~=0.0.24
+sqlalchemy~=2.0.43
+huey~=2.5.3
+httpx~=0.28.1
+python-dotenv~=1.1.1
+loguru~=0.7.3
+requests~=2.32.4
+google-api-python-client~=2.179.0
+google-auth~=2.40.3
+praw~=7.8.1
+deep-translator~=1.11.4
+requests-oauthlib~=2.0.0
+pillow~=11.3.0
+pydub~=0.25.1

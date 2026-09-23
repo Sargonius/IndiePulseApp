@@ -193,7 +193,7 @@ def accounts(request: Request):
             'openai_model': cfg.get('openai_model', ''),
             'tiktok_client_key': cfg.get('tiktok_client_key', ''),
             'tiktok_secret_hint': (('•••' + (cfg.get('tiktok_client_secret') or '')[-4:]) if (cfg.get('tiktok_client_secret') or '') else ''),
-            'tiktok_redirect_uri': cfg.get('tiktok_redirect_uri', 'http://127.0.0.1:8000/api/accounts/callback/tiktok'),
+            'tiktok_redirect_uri': cfg.get('tiktok_redirect_uri'),
             'tiktok_token_hint': (('•••' + (cfg.get('tiktok_access_token') or '')[-4:]) if (cfg.get('tiktok_access_token') or '') else ''),
         },
     )
@@ -300,6 +300,12 @@ def analytics_list(request: Request, session: Session = Depends(get_session)):
     data = _enrich_posts(rows)
     cfg = load_settings()
     return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'body_class': 'page-analytics', 'ui_language': cfg.get('ui_language', 'en')})
+
+
+@router.get('/status', response_class=HTMLResponse)
+def health_page(request: Request):
+    cfg = load_settings()
+    return templates.TemplateResponse('health.html', {'request': request, 'body_class': 'page-health', 'ui_language': cfg.get('ui_language', 'en')})
 
 
 @router.get('/calendar', response_class=HTMLResponse)
@@ -1000,8 +1006,8 @@ def submit_video(
                 payload["media_rel"] = media_horizontal
             if title:
                 payload["yt_title"] = title
-            if yt_playlist:
-                payload["yt_playlist"] = yt_playlist
+            # always sent: '' means the user picked "No playlist"
+            payload["yt_playlist"] = (yt_playlist or "").strip()
             if yt_privacy:
                 payload["yt_privacy"] = yt_privacy
         elif str(post.platform) in (str(PlatformEnum.tiktok), 'tiktok'):

@@ -71,8 +71,9 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                 session.add(job)
                 session.commit()
             return "not_found"
-        # Skip if not queued anymore (avoid duplicate publish)
-        if post.status not in (PostStatusEnum.queued, PostStatusEnum.running):
+        # Only a queued post may start. 'running' means another run is in flight or
+        # crashed mid-publish — re-running could double-post (watchdog handles those).
+        if post.status != PostStatusEnum.queued:
             # Close the job too, otherwise it hangs in 'queued' forever
             if job is not None:
                 job.status = JobStatusEnum.done
@@ -178,69 +179,97 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
 
             targets = []
             if text_ru and settings.get('discord_webhook_ru'):
-                targets.append((settings.get('discord_webhook_ru'), text_ru))
+                targets.append(('ru', settings.get('discord_webhook_ru'), text_ru))
             if text_en and settings.get('discord_webhook_en'):
-                targets.append((settings.get('discord_webhook_en'), text_en))
+                targets.append(('en', settings.get('discord_webhook_en'), text_en))
             # Fallback: if no specific webhooks configured, use default once with whichever text available
             if not targets and settings.get('discord_webhook_url'):
                 fallback_text = text_en or text_ru or '[IndiePulse] New post'
-                targets.append((settings.get('discord_webhook_url'), fallback_text))
+                targets.append(('default', settings.get('discord_webhook_url'), fallback_text))
+
+            # Per-target progress lives in the job payload, so a retry (auto or manual)
+            # only sends to webhooks that haven't received the post yet.
+            import json as _json
+            import mimetypes as _m
+            from app.services.discord_client import DiscordSendError
+            payload = {}
+            if job is not None and job.payload_json:
+                try:
+                    payload = _json.loads(job.payload_json) or {}
+                except Exception:
+                    payload = {}
+            sent: dict = dict(payload.get('discord_sent') or {})
+
+            def _save_progress() -> None:
+                if job is not None:
+                    payload['discord_sent'] = sent
+                    job.payload_json = _json.dumps(payload, ensure_ascii=False)
+                    session.add(job)
+                    session.commit()
+
+            chosen_video = None
+            if primary_media and (_m.guess_type(primary_media)[0] or '').startswith('video/'):
+                chosen_video = primary_media
+            else:
+                chosen_video = next((fp for fp in gallery_files if (_m.guess_type(fp)[0] or '').startswith('video/')), None)
 
             last_url = None
-            msg_refs: list[str] = []
-            for wh_url, content in targets:
+            for key, wh_url, content in targets:
+                if key in sent:
+                    continue
+                client = DiscordClient(wh_url)
                 try:
-                    client = DiscordClient(wh_url)
-                    # Prefer single primary video if available; else send images/generic
-                    sent_url = None
                     try:
-                        import mimetypes as _m
-                        # If there is any video in gallery, prefer the first video file
-                        chosen_video = None
-                        if primary_media and (_m.guess_type(primary_media)[0] or '').startswith('video/'):
-                            chosen_video = primary_media
-                        else:
-                            for fp in gallery_files:
-                                if (_m.guess_type(fp)[0] or '').startswith('video/'):
-                                    chosen_video = fp
-                                    break
                         if chosen_video:
                             _, sent_url = client.send_message(content, file_path=chosen_video)
                         elif gallery_files:
                             _, sent_url = client.send_message(content, file_paths=gallery_files)
                         else:
                             _, sent_url = client.send_message(content)
-                    except Exception:
-                        _, sent_url = client.send_message(content)
-                    murl = sent_url
-                    last_url = murl or last_url
-                    # Capture channel_id/message_id so we can read reactions later via the
-                    # bot REST API (webhooks can't read them back). Taken from the client,
-                    # since webhook responses usually omit guild_id and build no URL.
-                    try:
-                        ch_id = getattr(client, 'last_channel_id', None)
-                        msg_id = getattr(client, 'last_message_id', None)
-                        if ch_id and msg_id:
-                            msg_refs.append(f"{ch_id}/{msg_id}")
-                    except Exception:
-                        pass
-                except Exception as exc:
-                    # continue to next target but record error on post/job
+                    except DiscordSendError as exc:
+                        # Fall back to text-only ONLY if Discord definitely rejected the upload
+                        # (e.g. file too large). After a timeout it may have landed already.
+                        if exc.delivered is False and (chosen_video or gallery_files):
+                            _, sent_url = client.send_message(content + "\n[Attachment upload failed]")
+                        else:
+                            raise
+                except DiscordSendError as exc:
+                    if exc.delivered is not False:
+                        # possibly/partly posted: never resend to this webhook automatically
+                        sent[key] = '?'
+                        _save_progress()
                     post.status = PostStatusEnum.error
-                    post.error_text = str(exc)
+                    post.error_text = f"discord[{key}]: {exc}" + (" (may have been posted — check the channel)" if exc.delivered is None else "")
                     if job is not None:
                         job.status = JobStatusEnum.error
-                        job.last_error = str(exc)
-                    session.add(post)
-                    if job is not None:
+                        job.last_error = post.error_text
                         session.add(job)
+                    session.add(post)
                     session.commit()
                     return 'error'
-            post.platform_url = last_url
-            if msg_refs:
-                post.platform_post_id = ','.join(msg_refs)
+                except Exception as exc:
+                    # local failure before anything was sent (bad file, empty URL...)
+                    post.status = PostStatusEnum.error
+                    post.error_text = f"discord[{key}]: {type(exc).__name__}: {exc}"
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = post.error_text
+                        session.add(job)
+                    session.add(post)
+                    session.commit()
+                    return 'error'
+                last_url = sent_url or last_url
+                # channel_id/message_id let analytics read reactions via the bot REST API
+                # (webhook responses usually omit guild_id, so no URL is built).
+                ch_id = getattr(client, 'last_channel_id', None)
+                msg_id = getattr(client, 'last_message_id', None)
+                sent[key] = f"{ch_id}/{msg_id}" if (ch_id and msg_id) else '?'
+                _save_progress()
+            post.platform_url = last_url or post.platform_url
+            refs = [v for v in sent.values() if v and v != '?']
+            if refs:
+                post.platform_post_id = ','.join(refs)
         elif str(post.platform) == 'PlatformEnum.x' or str(post.platform) == 'x':
-            from app.services.x_client import XClient
             from app.services.x_media import XMediaUploader
             cfg = load_settings()
             # Ensure/refresh token
@@ -375,7 +404,6 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                         job.last_error = "x_media_upload_skipped: oauth1_missing"
                         session.add(job)
                         session.commit()
-            client = XClient(token)
             import httpx as _httpx
             from app.services.bluesky_client import _sentence_chunks as _x_chunks
             _x_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -391,11 +419,18 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                     d = r.json()
                 if r.status_code >= 400:
                     raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
-                return (d.get('data') or {}).get('id')
+                tid_ = (d.get('data') or {}).get('id')
+                if tid_ and not reply_to and not post.platform_post_id:
+                    # Persist the main tweet id immediately: if a later thread reply fails,
+                    # the retry guard sees the post already landed and won't double-post.
+                    post.platform_post_id = tid_
+                    post.platform_url = f"https://twitter.com/i/web/status/{tid_}"
+                    session.add(post)
+                    session.commit()
+                return tid_
 
-            def _x_thread_fallback(media: Optional[list] = None) -> Optional[str]:
-                """280-safe thread: first tweet keeps hashtags (+media), the rest go as replies.
-                Used when the account has no Premium and a long single tweet got 403."""
+            def _x_thread(media: Optional[list] = None) -> Optional[str]:
+                """280-safe thread: first tweet keeps hashtags (+media), the rest go as replies."""
                 tags = (hashtags or '').strip()
                 fixed = ('\n' + tags) if tags else ''
                 budget = max(40, 280 - len(fixed))
@@ -408,174 +443,53 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                         break
                     parent = _x_post_v2(seg, reply_to=parent)
                 return first_id
+
+            thread_enabled = False
             try:
-                # Read x_thread option from job payload (default False)
+                import json as _json
+                if job and job.payload_json:
+                    thread_enabled = (_json.loads(job.payload_json) or {}).get('x_thread') is True
+            except Exception:
                 thread_enabled = False
-                try:
-                    import json as _json
-                    if job and job.payload_json:
-                        val = (_json.loads(job.payload_json) or {}).get('x_thread')
-                        thread_enabled = True if val is True else False
-                except Exception:
-                    thread_enabled = False
-                if media_ids:
-                    # Use v2 create tweet with media
-                    import httpx, re
-                    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-                    if not thread_enabled:
-                        # Send full text in one tweet (works with Premium, >280 allowed).
-                        # Without Premium X returns 403 — fall back to a thread automatically.
-                        full_text = (base_text or '').strip()
-                        if hashtags:
-                            full_text = (full_text + '\n' + hashtags).strip()
-                        try:
-                            tid = _x_post_v2(full_text, media=media_ids)
-                        except RuntimeError as exc:
-                            if len(full_text) > 280 and 'status=403' in str(exc):
-                                tid = _x_thread_fallback(media=media_ids)
-                                if job is not None:
-                                    job.last_error = ((job.last_error or '') + ' x_280_limit_fallback_thread').strip()
-                                    session.add(job)
-                                    session.commit()
-                            else:
-                                raise
-                        url = f"https://twitter.com/i/web/status/{tid}" if tid else None
-                    else:
-                        # Split by sentence boundaries; ensure hashtags in first tweet
-                        def _sentence_chunks(text: str, limit: int) -> list[str]:
-                            parts = re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", text)
-                            chunks = []
-                            buf = ''
-                            for s in parts:
-                                s = s.strip()
-                                if not s:
-                                    continue
-                                if not buf:
-                                    buf = s
-                                elif len(buf) + 1 + len(s) <= limit:
-                                    buf += ' ' + s
-                                else:
-                                    chunks.append(buf)
-                                    buf = s
-                            if buf:
-                                chunks.append(buf)
-                            return chunks
-                        # Budget for first tweet includes hashtags
-                        fixed = ('\n' + hashtags) if hashtags else ''
-                        budget = 280 - len(fixed)
-                        chunks = _sentence_chunks((base_text or '').strip(), max(0, budget))
-                        first_body = chunks[0] if chunks else ''
-                        remaining = ' '.join(chunks[1:]).strip()
-                        first_text = (first_body + fixed).strip()
-                        payload = {"text": first_text, "media": {"media_ids": media_ids[:4]}}
-                        with httpx.Client(timeout=20) as h:
-                            r = h.post("https://api.twitter.com/2/tweets", json=payload, headers=headers)
-                            d = r.json()
-                            if r.status_code >= 400:
-                                raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
-                            tid = (d.get('data') or {}).get('id')
-                            url = f"https://twitter.com/i/web/status/{tid}" if tid else None
-                            while thread_enabled and remaining and tid:
-                                segs = _sentence_chunks(remaining, 260)
-                                if not segs:
-                                    break
-                                chunk = segs[0]
-                                from app.services.x_client import XClient as _XC
-                                xc = _XC(token)
-                                tid = xc.reply(tid, chunk)
-                                remaining = remaining[len(chunk):].lstrip()
+            try:
+                if thread_enabled:
+                    _x_thread(media=media_ids or None)
                 else:
-                    # no media
-                    import re
-                    if not thread_enabled:
-                        # Post full text in one tweet (XClient.tweet would silently cut at 280,
-                        # so go through the raw API for long texts and fall back to a thread on 403).
-                        full_text = (base_text or '').strip()
-                        if hashtags:
-                            full_text = (full_text + '\n' + hashtags).strip()
-                        if len(full_text) <= 280:
-                            tid2, url = client.tweet(full_text)
+                    # Full text in one tweet (>280 works with Premium). Without Premium X
+                    # answers 403 for long texts — fall back to a thread automatically.
+                    full_text = (base_text or '').strip()
+                    if hashtags:
+                        full_text = (full_text + '\n' + hashtags).strip()
+                    try:
+                        _x_post_v2(full_text, media=media_ids or None)
+                    except RuntimeError as exc:
+                        if len(full_text) > 280 and 'status=403' in str(exc):
+                            _x_thread(media=media_ids or None)
+                            if job is not None:
+                                job.last_error = ((job.last_error or '') + ' x_280_limit_fallback_thread').strip()
+                                session.add(job)
+                                session.commit()
                         else:
-                            try:
-                                tid2 = _x_post_v2(full_text)
-                            except RuntimeError as exc:
-                                if 'status=403' in str(exc):
-                                    tid2 = _x_thread_fallback()
-                                    if job is not None:
-                                        job.last_error = ((job.last_error or '') + ' x_280_limit_fallback_thread').strip()
-                                        session.add(job)
-                                        session.commit()
-                                else:
-                                    raise
-                            url = f"https://twitter.com/i/web/status/{tid2}" if tid2 else None
-                        if tid2:
-                            post.platform_post_id = tid2
-                    else:
-                        def _sentence_chunks(text: str, limit: int) -> list[str]:
-                            parts = re.findall(r"[^.!?]+[.!?]+|[^.!?]+$", text)
-                            chunks = []
-                            buf = ''
-                            for s in parts:
-                                s = s.strip()
-                                if not s:
-                                    continue
-                                if not buf:
-                                    buf = s
-                                elif len(buf) + 1 + len(s) <= limit:
-                                    buf += ' ' + s
-                                else:
-                                    chunks.append(buf)
-                                    buf = s
-                            if buf:
-                                chunks.append(buf)
-                            return chunks
-                        fixed = ('\n' + hashtags) if hashtags else ''
-                        budget = 280 - len(fixed)
-                        chunks = _sentence_chunks((base_text or '').strip(), max(0, budget))
-                        first_body = chunks[0] if chunks else ''
-                        remaining = ' '.join(chunks[1:]).strip()
-                        first_text = (first_body + fixed).strip()
-                        tid2, url = client.tweet(first_text)
-                        if tid2:
-                            post.platform_post_id = tid2
-                        tid = tid2
-                        while remaining and tid:
-                            segs = _sentence_chunks(remaining, 260)
-                            if not segs:
-                                break
-                            chunk = segs[0]
-                            tid = client.reply(tid, chunk)
-                            remaining = remaining[len(chunk):].lstrip()
-                post.platform_url = url
-                if media_ids and tid:
-                    post.platform_post_id = tid
+                            raise
             except Exception as exc:
-                # Treat common Reddit websocket ingest errors as soft-success if a submission is created
-                # We'll poll later to mark done
-                try:
-                    if 'Websocket error' in str(exc):
-                        from app.jobs.tasks import refresh_metrics_for_post as _refresh
-                        # best-effort: schedule an immediate refresh; status will flip if URL/ID present
-                        _refresh.schedule(args=(post.id,), delay=5)
-                        # keep running status but do not hard error
-                        job.last_error = (job.last_error or '') + ' reddit_ws_softfail'
-                        if job is not None:
-                            session.add(job)
+                if post.platform_post_id:
+                    # Main tweet is live; only a thread reply failed. Keep it 'done'.
+                    if job is not None:
+                        job.last_error = ((job.last_error or '') + f' x_thread_partial: {exc}').strip()
+                        session.add(job)
                         session.commit()
-                        return 'ok'
-                except Exception:
-                    pass
-                post.status = PostStatusEnum.error
-                post.error_text = str(exc)
-                if job is not None:
-                    job.status = JobStatusEnum.error
-                    job.last_error = str(exc)
-                session.add(post)
-                if job is not None:
-                    session.add(job)
-                session.commit()
-                return 'error'
-        elif str(post.platform) == 'PlatformEnum.vk' or str(post.platform) == 'vk':
+                else:
+                    post.status = PostStatusEnum.error
+                    post.error_text = str(exc)
+                    if job is not None:
+                        job.status = JobStatusEnum.error
+                        job.last_error = str(exc)
+                    session.add(post)
+                    if job is not None:
+                        session.add(job)
+                    session.commit()
+                    return 'error'
+        elif str(post.platform) in ('PlatformEnum.vk', 'vk', 'PlatformEnum.vk_video', 'vk_video'):
             from app.services.vk_client import VKClient
             cfg = load_settings()
             token = (cfg.get('vk_access_token') or '').strip()
@@ -818,22 +732,39 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                     desc = (desc + '\n' + brief.tags_json).strip()
                 except Exception:
                     pass
-            yt = YouTubeClient(
-                access_token=(cfg.get('yt_access_token') or '').strip(),
-                refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
-                client_id=(cfg.get('yt_client_id') or '').strip(),
-                client_secret=(cfg.get('yt_client_secret') or '').strip(),
-            )
+            # Per-post options from the Create Video form (absent for Shorts Factory jobs)
+            yt_opts = {}
             try:
-                _logger.info(f"yt.upload start path={path} title_len={len(title or '')} desc_len={len(desc or '')}")
-                vid, url = yt.upload_video(path, title=title, description=desc)
+                import json as _json
+                if job and job.payload_json:
+                    yt_opts = _json.loads(job.payload_json) or {}
+            except Exception:
+                yt_opts = {}
+            privacy = (yt_opts.get('yt_privacy') or 'public').strip().lower()
+            if privacy not in ('public', 'unlisted', 'private'):
+                privacy = 'public'
+            try:
+                from app.services.tokens import yt_access_token
+                access = yt_access_token()
+                yt = YouTubeClient(
+                    access_token=access,
+                    refresh_token=(cfg.get('yt_refresh_token') or '').strip(),
+                    client_id=(cfg.get('yt_client_id') or '').strip(),
+                    client_secret=(cfg.get('yt_client_secret') or '').strip(),
+                )
+                _logger.info(f"yt.upload start path={path} title_len={len(title or '')} desc_len={len(desc or '')} privacy={privacy}")
+                vid, url = yt.upload_video(path, title=title, description=desc, privacy_status=privacy)
                 post.platform_post_id = vid
                 post.platform_url = url
-                # Playlist handling
-                playlist_id = (cfg.get('yt_playlist_id') or '').strip()
-                if not playlist_id:
-                    pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
-                    playlist_id = yt.ensure_playlist(pname) or ''
+                # Playlist: the form's choice wins ('' = "No playlist"); otherwise the settings default
+                if 'yt_playlist' in yt_opts:
+                    pname = (yt_opts.get('yt_playlist') or '').strip()
+                    playlist_id = (yt.ensure_playlist(pname[:1].upper() + pname[1:]) or '') if pname else ''
+                else:
+                    playlist_id = (cfg.get('yt_playlist_id') or '').strip()
+                    if not playlist_id:
+                        pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
+                        playlist_id = yt.ensure_playlist(pname) or ''
                 if playlist_id and vid:
                     try:
                         yt.add_to_playlist(playlist_id, vid)
@@ -1323,9 +1254,17 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                             session.add(job)
                         session.commit()
                         return 'error'
-            else:
-                import time
-                time.sleep(1)
+            elif str(post.platform) not in ('PlatformEnum.tg', 'tg'):
+                # Unknown platform: never fall through to "mark done" without publishing.
+                post.status = PostStatusEnum.error
+                post.error_text = f"unsupported_platform: {post.platform}"
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = post.error_text
+                    session.add(job)
+                session.add(post)
+                session.commit()
+                return 'error'
         # Telegram (RU)
         if str(post.platform) in ('PlatformEnum.tg', 'tg'):
             try:
@@ -1407,15 +1346,86 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
     return "ok"
 
 
+def find_publish_jobs(session, post_id: int) -> list:
+    """Publish jobs for exactly this post, newest first.
+
+    payload_json is plain text, so a bare contains('"post_id": 5') also matched
+    posts 50, 51, ... — pre-filter with LIKE, then confirm by parsing the JSON.
+    """
+    import json as _json
+    from sqlmodel import select
+    from app.models.models import Job, JobKindEnum
+    rows = session.exec(
+        select(Job).where(
+            Job.kind == JobKindEnum.publish,
+            Job.payload_json.contains(f'"post_id": {int(post_id)}'),
+        ).order_by(Job.id.desc())
+    ).all()
+    out = []
+    for j in rows:
+        try:
+            if int((_json.loads(j.payload_json or '{}') or {}).get('post_id') or 0) == int(post_id):
+                out.append(j)
+        except Exception:
+            continue
+    return out
+
+
+def publish_payload_for(session, post_id: int) -> dict:
+    """Payload of the post's latest publish job (media_rel, gallery, yt_* options...),
+    so re-enqueued jobs don't silently drop the media the user picked."""
+    import json as _json
+    for j in find_publish_jobs(session, post_id):
+        try:
+            payload = _json.loads(j.payload_json or '{}') or {}
+        except Exception:
+            continue
+        payload.pop('publish_attempt', None)
+        payload['post_id'] = int(post_id)
+        return payload
+    return {"post_id": int(post_id)}
+
+
+STUCK_RUNNING_MIN = 90   # a publish that "runs" this long has died with the worker
+LOST_QUEUED_MIN = 15     # a due post whose queued job hasn't started in this long was lost
+
+
 @huey.periodic_task(crontab(minute='*'))
 def enqueue_due_posts() -> str:
-    """Every minute, enqueue publish jobs for posts that reached their scheduled time
-    but are still in queued status (useful for posts created before scheduling logic changed)."""
+    """Every minute:
+    - enqueue publish jobs for posts that reached their scheduled time but are still queued;
+    - re-enqueue due posts whose queued job was lost (e.g. queue.db wiped / worker died);
+    - flag posts stuck in 'running' (worker crashed mid-publish) instead of leaving them forever.
+    """
     from app.models.models import Post, PostStatusEnum, Job, JobKindEnum, JobStatusEnum
     from sqlmodel import select
-    from datetime import datetime as _dt
+    from datetime import datetime as _dt, timedelta as _td
     import json as _json
     with Session(engine) as session:
+        utc_now = _dt.utcnow()
+        # Stuck 'running' posts. Never auto-republish: the platform may already have it.
+        stuck = session.exec(
+            select(Post).where(
+                Post.status == PostStatusEnum.running,
+                Post.updated_at < utc_now - _td(minutes=STUCK_RUNNING_MIN),
+            ).limit(100)
+        ).all()
+        for post in stuck:
+            if post.platform_post_id or post.platform_url:
+                post.status = PostStatusEnum.done
+            else:
+                post.status = PostStatusEnum.error
+                post.error_text = ((post.error_text or '') + ' stuck_running: the worker stopped mid-publish — '
+                                   'check the platform before retrying').strip()
+            session.add(post)
+            for j in find_publish_jobs(session, post.id):
+                if j.status == JobStatusEnum.running:
+                    j.status = JobStatusEnum.error
+                    j.last_error = ((j.last_error or '') + ' stuck_running').strip()
+                    session.add(j)
+        if stuck:
+            session.commit()
+
         # Use local naive time to match UI scheduling input
         now = _dt.now()
         rows = session.exec(
@@ -1427,24 +1437,25 @@ def enqueue_due_posts() -> str:
         ).all()
         scheduled = 0
         for post in rows:
-            # Skip if there is already a queued/running job for this post
-            existing = session.exec(
-                select(Job).where(
-                    Job.kind == JobKindEnum.publish,
-                    Job.payload_json.contains(f'"post_id": {post.id}'),
-                    Job.status.in_([JobStatusEnum.queued, JobStatusEnum.running])
-                ).limit(1)
-            ).first()
-            if existing:
+            jobs = find_publish_jobs(session, post.id)
+            active = [j for j in jobs if j.status in (JobStatusEnum.queued, JobStatusEnum.running)]
+            overdue = post.scheduled_at <= now - _td(minutes=LOST_QUEUED_MIN)
+            if active and not (overdue and all(j.status == JobStatusEnum.queued for j in active)):
                 continue
-            payload = {"post_id": post.id}
+            # (a queued job that still hasn't started 15 min after the due time is lost;
+            #  duplicates are harmless — whichever run comes second sees a non-queued post)
+            for j in active:
+                j.status = JobStatusEnum.error
+                j.last_error = ((j.last_error or '') + ' lost_in_queue: re-enqueued').strip()
+                session.add(j)
+            payload = publish_payload_for(session, post.id)
             job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
             session.add(job)
             session.commit()
             session.refresh(job)
             publish_news_post.schedule(args=(job.id, post.id), delay=0)
             scheduled += 1
-        return f"scheduled={scheduled}"
+        return f"scheduled={scheduled} stuck={len(stuck)}"
 
 
 @huey.task()
@@ -1592,17 +1603,21 @@ def refresh_metrics_for_post(post_id: int) -> str:
         metrics = {}
         try:
             if platform.endswith('x') and post.platform_post_id:
-                cfg = load_settings()
-                token = (cfg.get('x_access_token') or '').strip()
-                if not token:
-                    metrics = {"error": "x_not_connected"}
-                else:
+                from app.services.tokens import x_ensure_token
+                try:
+                    token = x_ensure_token()
+                except Exception as exc:
+                    token = ''
+                    metrics = {"error": f"x_token: {exc}"}
+                if token:
                     url = "https://api.twitter.com/2/tweets"
                     params = {"ids": post.platform_post_id, "tweet.fields": "public_metrics"}
                     headers = {"Authorization": f"Bearer {token}"}
                     with httpx.Client(timeout=15) as client:
                         r = client.get(url, params=params, headers=headers)
                         data = r.json()
+                    if r.status_code >= 400:
+                        raise RuntimeError(f"x_metrics status={r.status_code} body={str(data)[:200]}")
                     pm = ((data.get("data") or [{}])[0]).get("public_metrics") or {}
                     metrics = {
                         "retweet": pm.get("retweet_count"),
@@ -1612,7 +1627,7 @@ def refresh_metrics_for_post(post_id: int) -> str:
                         "views": pm.get("impression_count"),
                         "bookmark": pm.get("bookmark_count"),
                     }
-            elif platform.endswith('vk') and post.platform_post_id:
+            elif (platform.endswith('vk') or platform.endswith('vk_video')) and post.platform_post_id:
                 cfg = load_settings()
                 token = (cfg.get('vk_access_token') or '').strip()
                 if not token:
@@ -1656,6 +1671,8 @@ def refresh_metrics_for_post(post_id: int) -> str:
                         fields = "reactions.summary(true),comments.summary(true),shares"
                         r = client.get(f"https://graph.facebook.com/v19.0/{post.platform_post_id}", params={"fields": fields, "access_token": page_token})
                         d = r.json()
+                    if 'error' in d:
+                        raise RuntimeError(f"fb_metrics: {(d.get('error') or {}).get('message')}")
                     likes = (((d.get('reactions') or {}).get('summary') or {}).get('total_count'))
                     comments = (((d.get('comments') or {}).get('summary') or {}).get('total_count'))
                     shares = ((d.get('shares') or {}).get('count'))
@@ -1710,17 +1727,21 @@ def refresh_metrics_for_post(post_id: int) -> str:
                         metrics = metrics or {"error": "reddit_fetch_failed"}
             elif platform.endswith('yt') and post.platform_post_id:
                 # YouTube stats: requires access token
-                cfg = load_settings()
-                access = (cfg.get('yt_access_token') or '').strip()
-                if not access:
-                    metrics = {"error": "yt_not_connected"}
-                else:
+                from app.services.tokens import yt_access_token
+                try:
+                    access = yt_access_token()
+                except Exception as exc:
+                    access = ''
+                    metrics = {"error": str(exc)}
+                if access:
                     with httpx.Client(timeout=15) as client:
                         r = client.get("https://www.googleapis.com/youtube/v3/videos", params={
                             "part": "statistics",
                             "id": post.platform_post_id,
                         }, headers={"Authorization": f"Bearer {access}"})
                         data = r.json()
+                    if r.status_code >= 400:
+                        raise RuntimeError(f"yt_metrics status={r.status_code} body={str(data)[:200]}")
                     stats = ((data.get('items') or [{}])[0].get('statistics') or {})
                     likes = stats.get('likeCount')
                     comments = stats.get('commentCount')
@@ -1786,6 +1807,22 @@ def refresh_metrics_for_post(post_id: int) -> str:
                         metrics = {"like": total_like, "reactions": breakdown}
         except Exception as exc:
             metrics = {"error": str(exc)}
+        # A failed fetch must not wipe good numbers (this runs every 30 min): keep the
+        # previous counters and just attach the error.
+        try:
+            prev = json.loads(post.metrics_json or '{}') or {}
+        except Exception:
+            prev = {}
+
+        def _has_numbers(m: dict) -> bool:
+            return any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in m.values())
+
+        if (metrics.get('error') or not _has_numbers(metrics)) and _has_numbers(prev):
+            kept = {k: v for k, v in prev.items() if k not in ('error', 'stale')}
+            if metrics.get('error'):
+                kept['error'] = metrics['error']
+                kept['stale'] = True
+            metrics = kept
         # Backstop: if a platform post id or url exists but status is still running, mark it done
         try:
             if post.status == PostStatusEnum.running and (post.platform_post_id or post.platform_url):

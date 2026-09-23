@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>🩺 API Status</h2>
+
+<div class="toolbar">
+	<button class="btn btn-primary" id="hc_run_all" type="button">▶ Проверить все</button>
+	<span id="hc_counts" class="hc-counts"></span>
+	<span id="hc_ran_at" class="muted"></span>
+</div>
+<p class="muted hc-note">
+	Проверка ничего не публикует: только read-only запросы (getMe, users/me, debug_token, логин и т.п.).
+	X / YouTube / TikTok при необходимости обновят токены — так же, как при обычной публикации.
+	OpenAI: один запрос на 5 токенов, чтобы поймать закончившийся баланс.
+</p>
+
+<table id="hc_table">
+	<thead>
+		<tr>
+			<th style="width:190px">Сервис</th>
+			<th style="width:110px">Статус</th>
+			<th>Проверка</th>
+			<th style="width:260px">История публикаций (365 дн.)</th>
+			<th style="width:60px"></th>
+		</tr>
+	</thead>
+	<tbody id="hc_body">
+		<tr><td colspan="5" class="muted">Загрузка…</td></tr>
+	</tbody>
+</table>
+
+<style>
+.hc-note { font-size: 12px; margin: 4px 0 12px; }
+.hc-counts { display: inline-flex; gap: 6px; }
+.hc-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.hc-ok { background: #dcfce7; color: #166534; }
+.hc-warn { background: #fef3c7; color: #92400e; }
+.hc-error { background: #fee2e2; color: #991b1b; }
+.hc-off { background: #e5e7eb; color: #4b5563; }
+.hc-pending { background: #e0f2fe; color: #075985; }
+.hc-summary { font-weight: 600; }
+.hc-details { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; line-height: 1.6; color: #334155; }
+.hc-hint { margin-top: 6px; padding: 6px 10px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 12px; }
+.hc-hist { font-size: 12px; line-height: 1.6; }
+.hc-hist .bad { color: #b91c1c; font-weight: 600; }
+.hc-hist .err-text { color: #64748b; word-break: break-word; }
+.hc-meta { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+#hc_table tr.row-error { background: #fff5f5; }
+#hc_table tr.row-warn { background: #fffbeb; }
+#hc_table tr.row-off td { opacity: .65; }
+</style>
+
+<script>
+(function () {
+	const ORDER = ['telegram', 'discord', 'vk', 'x', 'youtube', 'facebook', 'instagram', 'reddit', 'tiktok', 'bluesky', 'openai', 'local'];
+	const LABEL = { ok: 'OK', warn: 'Внимание', error: 'Ошибка', off: 'Не настроен', pending: 'Проверка…' };
+	let state = { results: {}, history: {}, ran_at: null };
+
+	function el(tag, cls, text) {
+		const n = document.createElement(tag);
+		if (cls) n.className = cls;
+		if (text != null) n.textContent = text;  // textContent only: API error bodies never become HTML
+		return n;
+	}
+
+	function ago(iso) {
+		if (!iso) return '';
+		// history timestamps come from the DB as naive UTC
+		const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+		const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+		const date = iso.slice(0, 10);
+		if (days <= 0) return date + ' (сегодня)';
+		return date + ' (' + days + ' дн. назад)';
+	}
+
+	function historyCell(h) {
+		const td = el('td', 'hc-hist');
+		if (!h || !h.total) { td.appendChild(el('span', 'muted', 'нет публикаций')); return td; }
+		td.appendChild(el('div', null, '✓ последний успех: ' + (h.last_ok ? ago(h.last_ok) : 'ни разу')));
+		if (h.errors_since_ok > 0) {
+			td.appendChild(el('div', 'bad', '✗ ошибок после него: ' + h.errors_since_ok + ' (последняя ' + ago(h.last_error) + ')'));
+			if (h.last_error_text) td.appendChild(el('div', 'err-text', h.last_error_text));
+		}
+		return td;
+	}
+
+	function render() {
+		const body = document.getElementById('hc_body');
+		body.innerHTML = '';
+		const ids = ORDER.filter(id => state.results[id] || state.history[id]);
+		if (!ids.length) {
+			const tr = el('tr');
+			const td = el('td', 'muted', 'Ещё не запускалось — нажми «Проверить все».');
+			td.colSpan = 5; tr.appendChild(td); body.appendChild(tr);
+		}
+		const counts = { ok: 0, warn: 0, error: 0, off: 0 };
+		ids.forEach(id => {
+			const r = state.results[id] || { id, name: id, status: 'off', summary: 'ещё не проверялось', details: [] };
+			if (counts[r.status] != null) counts[r.status]++;
+			const tr = el('tr', 'row-' + r.status);
+			tr.appendChild(el('td', null)).appendChild(el('b', null, r.name));
+			tr.appendChild(el('td', null)).appendChild(el('span', 'hc-badge hc-' + r.status, LABEL[r.status] || r.status));
+			const main = el('td');
+			main.appendChild(el('div', 'hc-summary', r.summary || ''));
+			if (r.details && r.details.length && r.status !== 'pending') {
+				const ul = el('ul', 'hc-details');
+				r.details.forEach(d => ul.appendChild(el('li', null, d)));
+				main.appendChild(ul);
+			}
+			if (r.hint && (r.status === 'error' || r.status === 'warn')) main.appendChild(el('div', 'hc-hint', '💡 ' + r.hint));
+			if (r.checked_at) main.appendChild(el('div', 'hc-meta', 'проверено ' + r.checked_at.replace('T', ' ') + (r.ms != null ? ' · ' + r.ms + ' мс' : '')));
+			tr.appendChild(main);
+			tr.appendChild(historyCell(state.history[id]));
+			const act = el('td');
+			const b = el('button', 'btn', '↻');
+			b.type = 'button'; b.title = 'Перепроверить только ' + r.name;
+			b.onclick = () => run(id);
+			act.appendChild(b);
+			tr.appendChild(act);
+			body.appendChild(tr);
+		});
+		const c = document.getElementById('hc_counts');
+		c.innerHTML = '';
+		if (Object.keys(state.results).length) {
+			[['ok', '✓ '], ['warn', '⚠ '], ['error', '✗ '], ['off', '— ']].forEach(([k, p]) => {
+				if (counts[k]) c.appendChild(el('span', 'hc-badge hc-' + k, p + counts[k]));
+			});
+		}
+		document.getElementById('hc_ran_at').textContent = state.ran_at ? 'последний прогон: ' + state.ran_at.replace('T', ' ') : '';
+	}
+
+	function apply(report) {
+		(report.results || []).forEach(r => { state.results[r.id] = r; });
+		state.history = report.history || state.history;
+		state.ran_at = report.ran_at || state.ran_at;
+		render();
+	}
+
+	async function run(only) {
+		const btn = document.getElementById('hc_run_all');
+		const ids = only ? [only] : ORDER;
+		ids.forEach(id => {
+			const prev = state.results[id] || { id, name: id, details: [] };
+			state.results[id] = Object.assign({}, prev, { status: 'pending', summary: 'проверяю…' });
+		});
+		render();
+		btn.disabled = true;
+		try {
+			const resp = await fetch('/api/health/run' + (only ? '?only=' + encodeURIComponent(only) : ''), { method: 'POST' });
+			if (!resp.ok) throw new Error('HTTP ' + resp.status);
+			apply(await resp.json());
+		} catch (e) {
+			ids.forEach(id => { state.results[id] = Object.assign({}, state.results[id], { status: 'error', summary: 'запрос не удался: ' + e.message }); });
+			render();
+		} finally {
+			btn.disabled = false;
+		}
+	}
+
+	document.getElementById('hc_run_all').addEventListener('click', () => run());
+	fetch('/api/health/last').then(r => r.json()).then(apply).catch(() => render());
+})();
+</script>
+{% endblock %}

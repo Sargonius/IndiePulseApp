@@ -48,6 +48,16 @@ def _split_by_sentences(text: str, max_length: int) -> list[str]:
     return chunks or [text]
 
 
+class DiscordSendError(RuntimeError):
+    """Webhook send failed. `delivered` tells the caller whether retrying is safe:
+    False = nothing reached Discord; True = some chunk was posted;
+    None = unknown (response lost after the request was sent)."""
+
+    def __init__(self, msg: str, delivered: Optional[bool]) -> None:
+        super().__init__(msg)
+        self.delivered = delivered
+
+
 class DiscordClient:
     def __init__(self, webhook_url: str) -> None:
         self.webhook_url = webhook_url.strip()
@@ -174,6 +184,8 @@ class DiscordClient:
         if not self.webhook_url:
             raise ValueError("Discord webhook URL is empty")
         url = self.webhook_url + ("&wait=true" if "?" in self.webhook_url else "?wait=true")
+        self.last_message_id = None
+        self.last_channel_id = None
         try:
             sources = (file_paths or [])
             if not sources and file_path:
@@ -236,8 +248,24 @@ class DiscordClient:
                 if message_id and channel_id and guild_id:
                     message_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
             return message_id, message_url
-        except Exception as exc:
-            logger.error(f"discord webhook send error: {exc}")
+        except DiscordSendError:
             raise
+        except requests.HTTPError as exc:
+            # Discord answered with an error: this chunk was NOT posted
+            status = exc.response.status_code if exc.response is not None else '?'
+            body = (exc.response.text[:200] if exc.response is not None else '')
+            msg = f"discord webhook HTTP {status}: {body}"
+            logger.error(msg)
+            raise DiscordSendError(msg, delivered=bool(self.last_message_id)) from None
+        except (requests.ConnectionError, requests.ConnectTimeout) as exc:
+            # (ReadTimeout is not a ConnectionError) — the request never got through
+            msg = f"discord webhook connection failed: {type(exc).__name__}"
+            logger.error(msg)
+            raise DiscordSendError(msg, delivered=bool(self.last_message_id)) from None
+        except Exception as exc:
+            # e.g. ReadTimeout: Discord may have posted it — callers must not blindly resend
+            msg = f"discord webhook send error: {type(exc).__name__}"
+            logger.error(msg)
+            raise DiscordSendError(msg, delivered=True if self.last_message_id else None) from None
 
 

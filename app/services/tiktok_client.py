@@ -12,6 +12,23 @@ _MAX_CHUNK = 64 * 1024 * 1024  # 64 MB
 
 
 def get_valid_access_token(cfg: dict, *, margin_sec: int = 300) -> str:
+    """Locked wrapper: the refresh token rotates on every refresh, so two processes
+    refreshing at once would leave one of them holding a dead token."""
+    from time import time as _now
+    access = (cfg.get('tiktok_access_token') or '').strip()
+    try:
+        expires_at = int(cfg.get('tiktok_token_expires_at') or 0)
+    except Exception:
+        expires_at = 0
+    if access and expires_at and _now() < expires_at - margin_sec:
+        return access  # fast path, no lock needed
+    from app.core.filelock import FileLock
+    from app.services.settings import load_settings
+    with FileLock('tiktok_refresh'):
+        return _get_valid_access_token(load_settings(), margin_sec=margin_sec)
+
+
+def _get_valid_access_token(cfg: dict, *, margin_sec: int = 300) -> str:
     """Return a usable TikTok access token, refreshing it when (nearly) expired.
 
     TikTok access tokens live 24h; the refresh token (~1 year) ROTATES on every
