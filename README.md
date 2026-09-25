@@ -6,12 +6,25 @@ Local-first Windows app to write, schedule and cross-post news posts and short v
 ## Quick start (Windows)
 
 1. Optional: copy `.env.example` to `.env` (host/port, DB path).
-2. Double-click `start.bat`. It creates `.venv`, installs `requirements.txt`, and opens
-   two windows: **IndiePulse Server** and **IndiePulse Worker** (the Huey worker that
-   actually publishes; scheduled posts don't go out while it's closed).
-3. Open http://127.0.0.1:8000, fill in platform credentials on the ⚙️ Settings page.
+2. Double-click `IndiePulse.pyw` (needs Python 3.12 installed). First run creates `.venv`,
+   installs `requirements.txt` and adds **IndiePulse** shortcuts to the Desktop and Start menu.
+3. The browser opens http://127.0.0.1:8000; fill in platform credentials on the ⚙️ Settings page.
 
-`restart.bat` (or the ↻ button in the header) restarts both processes.
+There are no console windows: IndiePulse lives in the tray. The icon runs two processes —
+the web server and the Huey worker (the one that actually publishes; scheduled posts don't
+go out without it) — and its colour shows their state: green ok, amber starting/restarting,
+red broken (hover or open the menu for details). Tray menu: open the UI, restart, logs folder,
+start with Windows, **Выход** (stops both; the worker finishes the task in progress first).
+
+- Launching again while it runs just opens the browser.
+- A crashed process is restarted automatically; a hung server (no `/health` answer for 2 min) too.
+- Closing or killing the tray always takes the server and worker down with it (Windows job
+  object), so the port is never left busy; leftovers of old `start.bat` windows are killed on start.
+- Open pages show a banner while the server is unreachable and reload themselves when it's back.
+- `requirements.txt` changes are installed automatically on the next launch (`logs/pip.log`).
+- Logs: `logs/launcher.log` (tray), `logs/server.log`, `logs/worker.log` (+ `.prev.log` of the
+  previous run), `logs/app.log` (the app itself).
+- Dev: `python -m app.serve` / `python -m app.worker` still run standalone in a console.
 
 ## Checking the integrations
 

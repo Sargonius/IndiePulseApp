@@ -50,6 +50,8 @@ def request_logger():
 		except Exception as exc:
 			logger.exception(f"{request.method} {request.url.path} -> 500 error: {exc}")
 			raise
+		if request.url.path == "/health":
+			return response  # polled by the tray and every open tab
 		elapsed_ms = (time.perf_counter() - start) * 1000
 		logger.info(f"{request.method} {request.url.path} -> {response.status_code} in {elapsed_ms:.1f}ms")
 		return response

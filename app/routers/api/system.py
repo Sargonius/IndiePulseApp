@@ -31,32 +31,18 @@ def _render_autoreload_button_html(enabled: bool) -> str:
 
 @router.post("/system/restart")
 def system_restart():
-    """Request a full app restart by invoking restart.bat (Windows)."""
-    try:
-        import subprocess, os
-        script = os.path.abspath('restart.bat')
-        if not os.path.exists(script):
-            return HTMLResponse("<span style='color:red'>restart.bat not found</span>", status_code=500)
-        # Use PowerShell to detach and hide window
-        cmd = [
-            'powershell', '-NoProfile', '-Command',
-            f"Start-Process -FilePath '{script}' -WorkingDirectory '{os.getcwd()}' -WindowStyle Hidden"
-        ]
-        creationflags = 0
-        try:
-            import subprocess as _sp
-            if hasattr(_sp, 'DETACHED_PROCESS'): creationflags |= _sp.DETACHED_PROCESS
-            if hasattr(_sp, 'CREATE_NEW_PROCESS_GROUP'): creationflags |= _sp.CREATE_NEW_PROCESS_GROUP
-        except Exception:
-            pass
-        subprocess.Popen(cmd, creationflags=creationflags)
-        # Ask htmx to refresh the page so the UI reconnects after the restart
+    """Ask the tray supervisor to restart the server and the worker. The page's
+    connection monitor (base.html) reloads it once the new server answers."""
+    from app.desktop import RESTART_REQUEST_FILE, is_supervised
+    if not is_supervised():
         return HTMLResponse(
-            "<span style='color:orange'>Restarting... (logs in logs/server.* and logs/worker.*)</span>",
-            headers={"HX-Refresh": "true"}
-        )
-    except Exception as exc:
+            "<span style='color:red'>Перезапуск работает, когда IndiePulse запущен через IndiePulse.pyw (значок в трее)</span>",
+            status_code=409)
+    try:
+        RESTART_REQUEST_FILE.touch()
+    except OSError as exc:
         return HTMLResponse(f"<span style='color:red'>Restart failed: {_e(str(exc))}</span>", status_code=500)
+    return HTMLResponse("<span style='color:orange'>Перезапуск…</span>")
 
 
 @router.post("/system/toggle_autoreload")

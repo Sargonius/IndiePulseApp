@@ -87,7 +87,8 @@ templates = Jinja2Templates(directory="app/templates")
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    # "boot" changes on every server start: open pages use it to notice a restart
+    return {"status": "ok", "boot": getattr(app.state, "asset_version", "")}
 
 
 @app.get("/version")

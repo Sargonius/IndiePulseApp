@@ -1,5 +1,5 @@
 # Pinned to the versions this app is tested with (~= allows bugfix releases only).
-# start.bat reinstalls on every launch, so unpinned deps could break the app overnight
+# The launcher (IndiePulse.pyw / tray) reinstalls whenever this file changes; unpinned deps could then break the app
 # (e.g. praw 8.0 removed submit_image/submit_video).
 fastapi~=0.116.1
 uvicorn[standard]~=0.35.0
@@ -19,3 +19,6 @@ deep-translator~=1.11.4
 requests-oauthlib~=2.0.0
 pillow~=11.3.0
 pydub~=0.25.1
+# desktop shell (tray icon, process supervision)
+pystray~=0.19.5
+psutil~=7.2.2

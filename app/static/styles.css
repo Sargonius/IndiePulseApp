@@ -408,3 +408,25 @@ img.thumbnail-clickable:hover,
   font-size: 22px;
   font-weight: 700;
 }
+
+/* Connection monitor banner (base.html) */
+#conn_banner {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 10000;
+  max-width: calc(100vw - 32px);
+  padding: 10px 16px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-md);
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #fff;
+}
+#conn_banner[hidden] { display: none; }
+#conn_banner.down { background: var(--danger); }
+#conn_banner.ok { background: var(--primary); }
+#conn_banner .btn { padding: 4px 10px; }

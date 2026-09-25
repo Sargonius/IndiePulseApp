@@ -52,9 +52,7 @@ ALTER TABLE briefs ADD COLUMN media_vertical_path TEXT;
 
 ### 5. Запустите проект
 
-```bash
-start.bat
-```
+Дважды щёлкните `IndiePulse.pyw` (или ярлык IndiePulse) — появится значок в трее.
 
 ## Что изменилось в работе
 

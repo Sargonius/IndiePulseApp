@@ -162,5 +162,41 @@
 	document.addEventListener('DOMContentLoaded', initLightbox);
 	document.addEventListener('htmx:afterSwap', initLightbox);
 	</script>
+	<!-- Connection monitor: shows when the server is gone (restart / tray closed) and
+	     reloads the page once a *new* server answers, unless you were typing. -->
+	<div id="conn_banner" hidden></div>
+	<script>
+	(function () {
+		const bar = document.getElementById('conn_banner');
+		let boot = '{{ request.app.state.asset_version if request and request.app.state.asset_version else '' }}' || null, down = false, dirty = false, timer = null;
+		document.addEventListener('input', () => { dirty = true; }, true);
+		document.addEventListener('submit', () => { dirty = false; }, true);
+		function show(html, cls) { bar.innerHTML = html; bar.className = cls; bar.hidden = false; }
+		async function ping() {
+			clearTimeout(timer);
+			try {
+				const r = await fetch('/health', { cache: 'no-store' });
+				if (!r.ok) throw new Error(r.status);
+				const j = await r.json();
+				if (boot === null) boot = j.boot;
+				if (j.boot !== boot) {
+					if (!dirty) { location.reload(); return; }
+					show('Сервер IndiePulse перезапустился. <button type="button" class="btn" onclick="location.reload()">Обновить страницу</button>', 'ok');
+				} else if (down) {
+					bar.hidden = true;
+				}
+				down = false;
+			} catch (e) {
+				down = true;
+				show('Нет связи с IndiePulse — переподключаюсь… (если закрыли из трея, запустите снова)', 'down');
+			}
+			timer = setTimeout(ping, down ? 2000 : 15000);
+		}
+		document.addEventListener('htmx:sendError', ping);
+		document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(); });
+		window.addEventListener('focus', ping);
+		ping();
+	})();
+	</script>
 </body>
 </html>

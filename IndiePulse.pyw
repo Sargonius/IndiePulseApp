@@ -1,0 +1,51 @@
+"""IndiePulse launcher — double-click this file (or the IndiePulse shortcut).
+
+No console windows: it makes sure .venv exists with the required packages, then runs
+the tray app (app/desktop/tray.py), which starts the server and the worker.
+`--background` = don't open the browser (used by "Запускать при входе в Windows").
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+from app.desktop import deps  # noqa: E402  (stdlib only)
+
+
+def _message(text: str) -> None:
+	import ctypes
+	ctypes.windll.user32.MessageBoxW(None, text, "IndiePulse", 0x40)
+
+
+def _tray_importable() -> bool:
+	return subprocess.call(
+		[str(deps.venv_python()), "-c", "import pystray, psutil, PIL, loguru, dotenv, uvicorn, huey"],
+		cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=deps.CREATE_NO_WINDOW,
+	) == 0
+
+
+def main() -> None:
+	first_run = not deps.venv_python().exists()
+	if first_run:
+		_message("Первый запуск IndiePulse: установлю зависимости (пара минут).\n"
+				 "Когда всё будет готово, появится значок в трее и откроется браузер.")
+	deps.ensure_venv()
+	# The tray syncs requirements itself (with a status in the icon); here only make
+	# sure it can start at all.
+	if deps.requirements_changed() and not _tray_importable():
+		if not deps.install_requirements(ROOT / "logs" / "pip.log"):
+			_message("Не удалось установить зависимости. Подробности: logs\\pip.log")
+			sys.exit(1)
+
+	if Path(sys.prefix).resolve() == (ROOT / ".venv").resolve():
+		from app.desktop.tray import main as tray_main
+		tray_main(sys.argv[1:])
+	else:  # started by the system Python (pyw.exe): hand over to the venv
+		subprocess.Popen([str(deps.venv_python(windowed=True)), "-m", "app.desktop.tray", *sys.argv[1:]],
+						 cwd=ROOT, creationflags=deps.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS)
+
+
+if __name__ == "__main__":
+	main()

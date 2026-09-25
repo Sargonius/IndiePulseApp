@@ -558,7 +558,7 @@ def check_local(cfg: dict, r: _Result) -> None:
                                           Post.updated_at < now - timedelta(minutes=30))).all()
     if overdue:
         r.warn(f"{len(overdue)} запланированных постов просрочены >15 мин — воркер, похоже, не запущен",
-               "Запусти воркер (start.bat открывает окно «IndiePulse Worker»).")
+               "Проверь значок IndiePulse в трее: строка «Воркер» в его меню (или logs/worker.log).")
     else:
         r.ok("просроченных запланированных постов нет")
     if stuck:
