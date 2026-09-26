@@ -194,9 +194,16 @@
 	white-space: normal;
 }
 
+/* Tables have overflow:hidden (rounded corners), which turns the table into the sticky
+   container: the header then sits 64px down *inside* the table, on top of the first row.
+   clip keeps the corners without that, so the header sticks under the fixed site header. */
+table#analytics_table {
+	overflow: clip;
+}
+
 #analytics_table thead th {
 	position: sticky;
-	top: 64px;
+	top: var(--site-header-h, 56px);
 	background: #f8fafc;
 	z-index: 10;
 }

@@ -133,6 +133,15 @@ body.page-analytics header .inner {
 </style>
 
 <script>
+// The table header sticks right under the fixed site header, whatever its height (nav may wrap)
+(function syncHeaderHeight() {
+	const h = document.querySelector('header');
+	const set = () => document.documentElement.style.setProperty('--site-header-h', h.offsetHeight + 'px');
+	set();
+	window.addEventListener('resize', set);
+	window.addEventListener('load', set);  // web font changes the height
+})();
+
 function filterAnalytics() {
 	const platform = document.getElementById('filter_platform').value.toLowerCase();
 	const status = document.getElementById('filter_status').value.toLowerCase();
