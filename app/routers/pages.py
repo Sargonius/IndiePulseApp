@@ -87,6 +87,7 @@ def _enrich_posts(posts):
             'tags': tags_val,
             'preview': preview,
             'thumb_url': thumb_url,
+            'm_error': metrics.get('error'),
         }
         enriched.append(row)
     return enriched
@@ -174,6 +175,7 @@ def accounts(request: Request):
             'yt_client_secret': cfg.get('yt_client_secret', ''),
             'yt_access_token': cfg.get('yt_access_token', ''),
             'yt_refresh_token': cfg.get('yt_refresh_token', ''),
+            'yt_metrics_days': cfg.get('yt_metrics_days', 90),
             'fb_app_id': cfg.get('fb_app_id', ''),
             'fb_app_secret': cfg.get('fb_app_secret', ''),
             'fb_ru_page_id': cfg.get('fb_ru_page_id', ''),

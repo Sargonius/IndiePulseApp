@@ -29,12 +29,21 @@ def analytics_table(request: Request, session: Session = Depends(get_session)):
 @router.post("/analytics/refresh", response_class=HTMLResponse)
 def analytics_refresh(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
-    from app.models.models import Post as _Post
+    from app.models.models import Post as _Post, PostStatusEnum
+    from app.platforms import platform_key
     rows = session.exec(select(_Post).order_by(_Post.created_at.desc()).limit(100)).all()
-    ids = [p.id for p in rows]
+    # Published YouTube videos go in one batched videos.list call instead of one each
+    yt_ids = [p.id for p in rows if platform_key(p.platform) == 'yt'
+              and p.status == PostStatusEnum.done and p.platform_post_id]
+    ids = [p.id for p in rows if p.id not in yt_ids]
     # Run metrics refresh synchronously
     try:
-        from app.jobs.tasks import refresh_metrics_for_post as _refresh
+        from app.jobs.tasks import refresh_metrics_for_post as _refresh, refresh_youtube_metrics
+        if yt_ids:
+            try:
+                refresh_youtube_metrics.call_local(yt_ids)
+            except Exception:
+                pass
         for pid in ids:
             try:
                 _refresh.call_local(pid)

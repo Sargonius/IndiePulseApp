@@ -51,6 +51,9 @@ DEFAULTS: Dict[str, Any] = {
     # YouTube playlist preferences
     "yt_playlist_id": "",
     "yt_playlist_title": "Synthetica",
+    # Video stats: every 30 min for the first week, then daily until this many days
+    # after publish (Shorts keep gathering views for weeks). 0 = first week only.
+    "yt_metrics_days": 90,
     # Facebook (two groups)
     "fb_app_id": "",
     "fb_app_secret": "",

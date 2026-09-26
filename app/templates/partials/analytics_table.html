@@ -120,6 +120,9 @@
 			</td>
 			<td>
 				<div class="row" style="gap:4px;flex-wrap:nowrap;">
+					{% if p.m_error %}
+						<span class="metric-error" title="Metrics fetch failed: {{ p.m_error }}" style="cursor:help;color:#e0a800;align-self:center;">⚠</span>
+					{% endif %}
 					<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/analytics/refresh_one" hx-vals='{"id": {{ p.id }} }' hx-target="#analytics_table" hx-swap="outerHTML">⟳</button>
 					{% if p.status_text == 'done' and p.platform_url %}
 						<button class="btn btn-icon btn-red" title="Delete from platform" onclick="deleteRemote({{ p.id }})">🗑</button>

@@ -110,6 +110,12 @@ def youtube_callback(code: str = "", error: str = "", state: str = ""):
         if refresh_token:
             updates["yt_refresh_token"] = refresh_token
         save_settings(updates)
+        try:
+            # Stats of every video failed while the token was dead — refetch them all now
+            from app.jobs.tasks import backfill_youtube_metrics
+            backfill_youtube_metrics.schedule(delay=5)
+        except Exception as exc:
+            logger.warning(f"yt metrics backfill not scheduled: {exc}")
         return HTMLResponse(
             "<span style='color:green'>YouTube connected! Refresh token сохранён"
             + ("" if refresh_token else " (Google не вернул refresh token — отзови доступ в myaccount.google.com/permissions и повтори)")

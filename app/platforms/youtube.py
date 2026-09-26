@@ -124,31 +124,111 @@ def publish(session, post, job) -> Optional[str]:
         return 'error'
 
 
-def fetch_metrics(post) -> dict:
-    """Engagement counters for a published post; may raise (caller records the error)."""
+VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
+# videos.list takes up to 50 ids and costs 1 quota unit per call however many ids it
+# carries, so stats are always fetched in batches (uploads need the rest of the quota).
+MAX_IDS_PER_CALL = 50
+VIDEO_NOT_FOUND = ("yt_video_not_found: not in the videos.list response — deleted/removed, "
+                   "or private and not owned by the connected account")
+
+
+def _count(value) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _api_error(resp) -> str:
+    """'http_403 quotaExceeded: The request cannot be completed because ...'"""
+    try:
+        body = resp.json()
+    except ValueError:
+        body = None
+    err = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(err, dict):
+        return f"http_{resp.status_code}: {resp.text[:200]}"
+    reason = (err.get("errors") or [{}])[0].get("reason") or err.get("status") or ""
+    return f"http_{resp.status_code} {reason}: {(err.get('message') or '')[:200]}"
+
+
+def _auth_error(exc) -> str:
+    return f"yt_reauth_needed: {exc}" if getattr(exc, "reauth", False) else f"yt_token_error: {exc}"
+
+
+def _metrics_from_item(item: dict) -> dict:
+    stats = item.get("statistics") or {}
+    metrics = {"likes": _count(stats.get("likeCount")),
+               "comments": _count(stats.get("commentCount")),
+               "views": _count(stats.get("viewCount"))}
+    if all(v is None for v in metrics.values()):
+        st = item.get("status") or {}
+        detail = ", ".join(f"{k}={st[k]}" for k in
+                           ("privacyStatus", "uploadStatus", "rejectionReason", "failureReason") if st.get(k))
+        return {"error": f"yt_no_statistics ({detail or 'no status'})"}
+    return metrics
+
+
+def fetch_metrics_batch(video_ids) -> dict:
+    """{video_id: metrics} for any number of videos, one videos.list call per 50 ids.
+
+    Never hands back all-None counters: a video missing from the response, a failed
+    call or a dead token come back as {"error": ...} for the affected ids, so the
+    caller records the failure instead of blank numbers.
+    """
     import httpx
-    metrics: dict = {}
-    # YouTube stats: requires access token
+    from loguru import logger
     from app.services.tokens import yt_access_token
+
+    ids = list(dict.fromkeys(v.strip() for v in video_ids if v and v.strip()))
+    out: dict = {}
+    if not ids:
+        return out
     try:
         access = yt_access_token()
     except Exception as exc:
-        access = ''
-        metrics = {"error": str(exc)}
-    if access:
-        with httpx.Client(timeout=15) as client:
-            r = client.get("https://www.googleapis.com/youtube/v3/videos", params={
-                "part": "statistics",
-                "id": post.platform_post_id,
-            }, headers={"Authorization": f"Bearer {access}"})
-            data = r.json()
-        if r.status_code >= 400:
-            raise RuntimeError(f"yt_metrics status={r.status_code} body={str(data)[:200]}")
-        stats = ((data.get('items') or [{}])[0].get('statistics') or {})
-        likes = stats.get('likeCount')
-        comments = stats.get('commentCount')
-        views = stats.get('viewCount')
-        metrics = {"likes": int(likes) if likes is not None else None,
-                   "comments": int(comments) if comments is not None else None,
-                   "views": int(views) if views is not None else None}
-    return metrics
+        return {vid: {"error": _auth_error(exc)} for vid in ids}
+
+    def _get(client, chunk):
+        return client.get(VIDEOS_URL, params={"part": "statistics,status", "id": ",".join(chunk)},
+                          headers={"Authorization": f"Bearer {access}"})
+
+    with httpx.Client(timeout=20) as client:
+        for start in range(0, len(ids), MAX_IDS_PER_CALL):
+            chunk = ids[start:start + MAX_IDS_PER_CALL]
+            try:
+                r = _get(client, chunk)
+                if r.status_code == 401:
+                    # the stored expiry can't see a revoked token: refresh once and retry
+                    access = yt_access_token(force=True)
+                    r = _get(client, chunk)
+            except httpx.HTTPError as exc:
+                out.update({vid: {"error": f"yt_metrics_network: {exc}"} for vid in chunk})
+                continue
+            except Exception as exc:
+                # the forced refresh failed: every remaining call would fail the same way
+                out.update({vid: {"error": _auth_error(exc)} for vid in ids[start:]})
+                break
+            try:
+                data = r.json() if r.status_code < 400 else None
+            except ValueError:
+                data = None
+            if not isinstance(data, dict):
+                msg = f"yt_metrics_{_api_error(r)}"
+                logger.warning(f"yt.metrics videos.list failed for {len(chunk)} ids: {msg}")
+                out.update({vid: {"error": msg} for vid in chunk})
+                continue
+            items = {it.get("id"): it for it in (data.get("items") or [])}
+            missing = [vid for vid in chunk if vid not in items]
+            if missing:
+                logger.warning(f"yt.metrics videos.list returned {len(items)}/{len(chunk)} videos, "
+                               f"missing={missing} response={str(data)[:500]}")
+            for vid in chunk:
+                out[vid] = _metrics_from_item(items[vid]) if vid in items else {"error": VIDEO_NOT_FOUND}
+    return out
+
+
+def fetch_metrics(post) -> dict:
+    """Engagement counters for one published video (a batch of one)."""
+    vid = (post.platform_post_id or "").strip()
+    return fetch_metrics_batch([vid]).get(vid) or {}

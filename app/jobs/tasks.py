@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from .huey_app import huey
 from sqlmodel import Session
 from app.db.session import engine
@@ -387,10 +387,41 @@ def render_short(job_id: int, brief_id: int) -> str:
         return f"rendered brief={brief_id} posts={made}"
 
 
+def _has_numbers(m: dict) -> bool:
+    return any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in m.values())
+
+
+def _apply_metrics(post, metrics: dict) -> None:
+    """Store a fetch result in post.metrics_json (the caller commits).
+
+    A failed fetch must not wipe good numbers (this runs every 30 min): keep the
+    previous counters and just attach the error. Errors are redacted like
+    Post.error_text — they can quote API URLs. `checked_at` (UTC) drives the daily
+    YouTube refresh.
+    """
+    import json
+    from app.core.redact import redact
+    metrics = dict(metrics or {})
+    if metrics.get('error'):
+        metrics['error'] = redact(str(metrics['error']))
+    try:
+        prev = json.loads(post.metrics_json or '{}') or {}
+    except Exception:
+        prev = {}
+    if (metrics.get('error') or not _has_numbers(metrics)) and _has_numbers(prev):
+        kept = {k: v for k, v in prev.items() if k not in ('error', 'stale', 'checked_at')}
+        if metrics.get('error'):
+            kept['error'] = metrics['error']
+            kept['stale'] = True
+        metrics = kept
+    if metrics:
+        metrics['checked_at'] = datetime.utcnow().isoformat(timespec='seconds')
+    post.metrics_json = json.dumps(metrics, ensure_ascii=False)
+
+
 @huey.task()
 def refresh_metrics_for_post(post_id: int) -> str:
     from app.models.models import Post, PostStatusEnum
-    import json
     with Session(engine) as session:
         post = session.get(Post, post_id)
         if not post:
@@ -403,55 +434,125 @@ def refresh_metrics_for_post(post_id: int) -> str:
                 metrics = fetch(post) or {}
         except Exception as exc:
             metrics = {"error": str(exc)}
-        # A failed fetch must not wipe good numbers (this runs every 30 min): keep the
-        # previous counters and just attach the error.
-        try:
-            prev = json.loads(post.metrics_json or '{}') or {}
-        except Exception:
-            prev = {}
-
-        def _has_numbers(m: dict) -> bool:
-            return any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in m.values())
-
-        if (metrics.get('error') or not _has_numbers(metrics)) and _has_numbers(prev):
-            kept = {k: v for k, v in prev.items() if k not in ('error', 'stale')}
-            if metrics.get('error'):
-                kept['error'] = metrics['error']
-                kept['stale'] = True
-            metrics = kept
+        _apply_metrics(post, metrics)
         # Backstop: if a platform post id or url exists but status is still running, mark it done
         try:
             if post.status == PostStatusEnum.running and (post.platform_post_id or post.platform_url):
                 post.status = PostStatusEnum.done
         except Exception:
             pass
-        post.metrics_json = json.dumps(metrics, ensure_ascii=False)
         session.add(post)
         session.commit()
         return "ok"
 
 
+METRICS_RECENT_DAYS = 7                   # refreshed on every refresh_recent_metrics run
+YT_DAILY_INTERVAL = timedelta(hours=23)   # then ~daily; <24h so a PC that is only on
+                                          # part of the day still gets one check a day
+
+
+def youtube_posts_due(session, now=None) -> list:
+    """Published YouTube posts whose stats are due: every run during the first week,
+    then about once a day until `yt_metrics_days` after publish — Shorts keep
+    picking up views for weeks."""
+    import json
+    from sqlmodel import select
+    from app.models.models import Post, PostStatusEnum, PlatformEnum
+    from app.services.settings import DEFAULTS, load_settings
+    now = now or datetime.utcnow()
+    try:
+        days = int(load_settings().get('yt_metrics_days'))
+    except (TypeError, ValueError):
+        days = int(DEFAULTS['yt_metrics_days'])
+    rows = session.exec(
+        select(Post).where(
+            Post.platform == PlatformEnum.yt,
+            Post.status == PostStatusEnum.done,
+            Post.platform_post_id.is_not(None),
+            Post.published_at.is_not(None),
+            Post.published_at >= now - timedelta(days=max(days, METRICS_RECENT_DAYS)),
+        ).order_by(Post.published_at.desc())
+    ).all()
+    due = []
+    for p in rows:
+        if p.published_at >= now - timedelta(days=METRICS_RECENT_DAYS):
+            due.append(p.id)
+            continue
+        try:
+            checked = datetime.fromisoformat(json.loads(p.metrics_json or '{}').get('checked_at') or '')
+        except (TypeError, ValueError, AttributeError):
+            checked = None
+        if checked is None or now - checked >= YT_DAILY_INTERVAL:
+            due.append(p.id)
+    return due
+
+
+@huey.task()
+def refresh_youtube_metrics(post_ids: list) -> str:
+    """Stats for many YouTube posts at once: one videos.list call (1 quota unit) per
+    50 videos instead of a call per post."""
+    from app.models.models import Post
+    from app.platforms.youtube import fetch_metrics_batch
+    with Session(engine) as session:
+        targets = [(p.id, p.platform_post_id.strip()) for p in (session.get(Post, pid) for pid in post_ids or [])
+                   if p is not None and (p.platform_post_id or '').strip()]
+    results = fetch_metrics_batch([vid for _, vid in targets])  # network outside the DB session
+    failed = 0
+    with Session(engine) as session:
+        for pid, vid in targets:
+            post = session.get(Post, pid)
+            if post is None:
+                continue
+            metrics = results.get(vid) or {"error": "yt_no_result"}
+            failed += bool(metrics.get('error'))
+            _apply_metrics(post, metrics)
+            session.add(post)
+        session.commit()
+    return f"videos={len(targets)} failed={failed}"
+
+
+@huey.task()
+def backfill_youtube_metrics() -> str:
+    """Refresh every published YouTube video whatever its age — for posts that aged out
+    of the schedule while the token was dead. Runs after each YouTube (re)connect."""
+    from sqlmodel import select
+    from app.models.models import Post, PostStatusEnum, PlatformEnum
+    with Session(engine) as session:
+        ids = list(session.exec(
+            select(Post.id).where(
+                Post.platform == PlatformEnum.yt,
+                Post.status == PostStatusEnum.done,
+                Post.platform_post_id.is_not(None),
+            )
+        ).all())
+    return refresh_youtube_metrics.call_local(ids)
+
+
 @huey.periodic_task(crontab(minute='*/30'))
 def refresh_recent_metrics() -> str:
     """Every 30 minutes refresh metrics for posts published in the last 7 days,
-    so Analytics stays fresh without manual clicking."""
-    from app.models.models import Post, PostStatusEnum
+    so Analytics stays fresh without manual clicking. YouTube goes out as one batched
+    task and keeps a daily refresh for much longer (see youtube_posts_due)."""
+    from app.models.models import Post, PostStatusEnum, PlatformEnum
     from sqlmodel import select
-    from datetime import datetime as _dt, timedelta as _td
-    cutoff = _dt.utcnow() - _td(days=7)
+    cutoff = datetime.utcnow() - timedelta(days=METRICS_RECENT_DAYS)
     with Session(engine) as session:
         rows = session.exec(
             select(Post).where(
                 Post.status == PostStatusEnum.done,
+                Post.platform != PlatformEnum.yt,
                 Post.published_at.is_not(None),
                 Post.published_at >= cutoff,
             ).order_by(Post.published_at.desc()).limit(60)
         ).all()
         ids = [p.id for p in rows]
+        yt_ids = youtube_posts_due(session)
+    if yt_ids:
+        refresh_youtube_metrics.schedule(args=(yt_ids,), delay=0)
     # Stagger requests to be gentle on platform APIs
     for i, pid in enumerate(ids):
         refresh_metrics_for_post.schedule(args=(pid,), delay=i * 2)
-    return f"scheduled={len(ids)}"
+    return f"scheduled={len(ids)} youtube={len(yt_ids)}"
 
 
 @huey.task()

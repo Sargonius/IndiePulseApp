@@ -91,6 +91,7 @@ def save_settings_endpoint(
 	yt_client_secret: str = Form(""),
 	yt_access_token: str = Form(""),
 	yt_refresh_token: str = Form(""),
+	yt_metrics_days: str = Form(""),
 	tiktok_client_key: str = Form(""),
 	tiktok_client_secret: str = Form(""),
 	tiktok_redirect_uri: str = Form(""),
@@ -157,6 +158,11 @@ def save_settings_endpoint(
 		updates["yt_access_token"] = yt_access_token.strip()
 	if yt_refresh_token.strip():
 		updates["yt_refresh_token"] = yt_refresh_token.strip()
+	if yt_metrics_days.strip():
+		try:
+			updates["yt_metrics_days"] = max(0, min(3650, int(yt_metrics_days.strip())))
+		except ValueError:
+			pass
 	if tiktok_client_key.strip():
 		updates["tiktok_client_key"] = tiktok_client_key.strip()
 	if tiktok_client_secret.strip():
