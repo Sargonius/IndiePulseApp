@@ -53,6 +53,8 @@
 (function () {
 	const ORDER = ['telegram', 'discord', 'vk', 'x', 'youtube', 'facebook', 'instagram', 'reddit', 'tiktok', 'bluesky', 'openai', 'local'];
 	const LABEL = { ok: 'OK', warn: 'Внимание', error: 'Ошибка', off: 'Не настроен', pending: 'Проверка…' };
+	// Step-by-step fix pages, linked under the hint of a failed check
+	const FIX_LINKS = { youtube: '/accounts#yt_setup' };
 	let state = { results: {}, history: {}, ran_at: null };
 
 	function el(tag, cls, text) {
@@ -106,7 +108,14 @@
 				r.details.forEach(d => ul.appendChild(el('li', null, d)));
 				main.appendChild(ul);
 			}
-			if (r.hint && (r.status === 'error' || r.status === 'warn')) main.appendChild(el('div', 'hc-hint', '💡 ' + r.hint));
+			if (r.hint && (r.status === 'error' || r.status === 'warn')) {
+				const hint = main.appendChild(el('div', 'hc-hint', '💡 ' + r.hint));
+				if (FIX_LINKS[id]) {
+					const a = el('a', null, ' Пошаговая инструкция →');
+					a.href = FIX_LINKS[id];
+					hint.appendChild(a);
+				}
+			}
 			if (r.checked_at) main.appendChild(el('div', 'hc-meta', 'проверено ' + r.checked_at.replace('T', ' ') + (r.ms != null ? ' · ' + r.ms + ' мс' : '')));
 			tr.appendChild(main);
 			tr.appendChild(historyCell(state.history[id]));

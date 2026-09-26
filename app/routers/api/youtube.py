@@ -1,4 +1,4 @@
-"""YouTube OAuth connect flow."""
+"""YouTube OAuth connect flow, the setup checklist and the "YouTube is off" alert."""
 
 import httpx
 from app.core.config import APP_BASE_URL as _BASE_URL
@@ -15,6 +15,7 @@ from urllib.parse import quote_plus
 from app.routers.api.common import _e
 from app.routers.api.common import _oauth_check_state
 from app.routers.api.common import _oauth_new_state
+from app.routers.api.common import templates_api
 
 router = APIRouter()
 
@@ -55,14 +56,8 @@ _YT_REDIRECT_URI = f"{_BASE_URL}/api/accounts/callback/youtube"
 _YT_SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube"
 
 
-@router.get("/accounts/connect/youtube")
-def youtube_connect_start():
-    """Return a Google consent link that yields a fresh refresh token."""
-    cfg = load_settings()
-    client_id = (cfg.get("yt_client_id") or "").strip()
-    if not client_id:
-        return HTMLResponse("<span style='color:orange'>Сначала сохрани YouTube Client ID и Secret</span>")
-    auth_url = (
+def _youtube_auth_url(client_id: str) -> str:
+    return (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={quote_plus(client_id)}&"
         f"redirect_uri={quote_plus(_YT_REDIRECT_URI)}&"
@@ -72,21 +67,80 @@ def youtube_connect_start():
         f"state={_oauth_new_state('youtube')}&"
         "prompt=consent"  # force re-issue of the refresh token
     )
-    return HTMLResponse(f"<a href='{_e(auth_url)}' target='_blank'>Open Google Authorization</a>")
+
+
+@router.get("/accounts/connect/youtube")
+def youtube_connect_start():
+    """Return a Google consent link that yields a fresh refresh token."""
+    cfg = load_settings()
+    client_id = (cfg.get("yt_client_id") or "").strip()
+    if not client_id:
+        return HTMLResponse("<span style='color:orange'>Сначала сохрани YouTube Client ID и Secret</span>")
+    return HTMLResponse(f"<a href='{_e(_youtube_auth_url(client_id))}' target='_blank' rel='noopener'>"
+                        "Открыть вход Google ↗</a> — войди в аккаунт канала и разреши доступ")
+
+
+@router.get("/accounts/connect/youtube/go")
+def youtube_connect_go():
+    """One-click variant for the checklist: straight to Google's consent screen."""
+    client_id = (load_settings().get("yt_client_id") or "").strip()
+    if not client_id:
+        return _page("Сначала шаг 2", "<p>Сохрани YouTube <b>Client ID</b> и <b>Client Secret</b> "
+                     "в настройках, потом нажми Connect YouTube ещё раз.</p>", 400, "error")
+    return RedirectResponse(_youtube_auth_url(client_id), status_code=302)
+
+
+def _page(title: str, body: str, status_code: int = 200, tone: str = "ok") -> HTMLResponse:
+    """Standalone page for the consent tab: result + what to do next. Callers escape."""
+    color = {"ok": "#16a34a", "warn": "#d97706", "error": "#dc2626"}[tone]
+    return HTMLResponse(
+        "<!doctype html><html lang='ru'><head><meta charset='utf-8'><title>IndiePulse · YouTube</title></head>"
+        "<body style='font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 16px;"
+        "line-height:1.6;color:#1e1e1e'>"
+        f"<h2 style='color:{color}'>{title}</h2>{body}"
+        "<p style='margin-top:24px'><a href='/accounts#yt_setup'>← Настройки YouTube (пошаговая настройка)</a>"
+        " · <a href='/analytics'>Analytics</a></p></body></html>",
+        status_code=status_code)
+
+
+_WARN_P = "<p style='padding:10px 12px;background:#fef3c7;border-left:4px solid #d97706;border-radius:6px'>"
+
+
+def _channel_name(access_token: str) -> str:
+    """'Title (@handle)' of the channel the token belongs to; '' when it can't be read."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            r = client.get("https://www.googleapis.com/youtube/v3/channels",
+                           params={"part": "snippet", "mine": "true"},
+                           headers={"Authorization": f"Bearer {access_token}"})
+        items = (r.json().get("items") or []) if r.status_code < 400 else []
+    except Exception:
+        return ""
+    snippet = (items[0].get("snippet") or {}) if items else {}
+    title, handle = snippet.get("title") or "", snippet.get("customUrl") or ""
+    return f"{title} ({handle})" if title and handle else title
 
 
 @router.get("/accounts/callback/youtube")
 def youtube_callback(code: str = "", error: str = "", state: str = ""):
     """Exchange the consent code for access+refresh tokens and store them."""
     if error:
-        return HTMLResponse(f"<span style='color:red'>Google OAuth error: {_e(error)}</span>", status_code=400)
+        hint = ""
+        if error == "access_denied":
+            hint = ("<p>Если Google написал <b>«Access blocked»</b> или <b>«has not completed the Google "
+                    "verification process»</b> — приложение ещё в режиме <b>Testing</b>: сделай шаг 3 "
+                    "(Publish app) и подключись заново. Если ты сам нажал Cancel — просто начни заново.</p>")
+        return _page("Google не выдал доступ", f"<p>Ошибка Google OAuth: <code>{_e(error)}</code></p>{hint}",
+                     400, "error")
     if not _oauth_check_state("youtube", state):
-        return HTMLResponse("<span style='color:red'>Invalid OAuth state — start again from Settings → Connect YouTube</span>", status_code=400)
+        return _page("Ссылка устарела", "<p>Эта ссылка авторизации уже использована или устарела — "
+                     "вернись в настройки YouTube и нажми <b>Connect YouTube</b> ещё раз.</p>", 400, "error")
     cfg = load_settings()
     client_id = (cfg.get("yt_client_id") or "").strip()
     client_secret = (cfg.get("yt_client_secret") or "").strip()
     if not client_id or not client_secret:
-        return HTMLResponse("<span style='color:red'>YouTube client credentials not configured</span>", status_code=400)
+        return _page("Нет Client ID / Secret", "<p>Сохрани <b>Client ID</b> и <b>Client Secret</b> "
+                     "(шаг 2) и подключись заново.</p>", 400, "error")
     try:
         with httpx.Client(timeout=20) as client:
             r = client.post(
@@ -103,10 +157,20 @@ def youtube_callback(code: str = "", error: str = "", state: str = ""):
         access_token = (data.get("access_token") or "").strip()
         refresh_token = (data.get("refresh_token") or "").strip()
         if not access_token:
-            return HTMLResponse(f"<span style='color:red'>No access token: {_e(data)}</span>", status_code=400)
+            return _page("Google не выдал токен", f"<p><code>{_e(data)}</code></p>"
+                         "<p>Нажми <b>Connect YouTube</b> ещё раз — код авторизации одноразовый.</p>", 400, "error")
         from time import time as _now
+        now = int(_now())
+        # Documented for time-limited grants; apps in Testing get 7-day tokens —
+        # remember the expiry so the checklist and the alert can warn in time.
+        refresh_ttl = int(data.get("refresh_token_expires_in") or 0)
+        channel = _channel_name(access_token)
         updates = {"yt_access_token": access_token,
-                   "yt_expires_at": int(_now()) + int(data.get("expires_in") or 3600)}
+                   "yt_expires_at": now + int(data.get("expires_in") or 3600),
+                   "yt_connected_at": now,
+                   "yt_auth_error": "", "yt_auth_error_at": 0,
+                   "yt_refresh_expires_at": now + refresh_ttl if refresh_ttl else 0,
+                   "yt_channel": channel}
         if refresh_token:
             updates["yt_refresh_token"] = refresh_token
         save_settings(updates)
@@ -116,10 +180,74 @@ def youtube_callback(code: str = "", error: str = "", state: str = ""):
             backfill_youtube_metrics.schedule(delay=5)
         except Exception as exc:
             logger.warning(f"yt metrics backfill not scheduled: {exc}")
-        return HTMLResponse(
-            "<span style='color:green'>YouTube connected! Refresh token сохранён"
-            + ("" if refresh_token else " (Google не вернул refresh token — отзови доступ в myaccount.google.com/permissions и повтори)")
-            + ". Можно закрыть вкладку.</span>"
-        )
+        body = (f"<p>Канал: <b>{_e(channel)}</b></p>" if channel else
+                "<p>Канал определить не удалось — проверь шаг 1 (включён ли YouTube Data API v3).</p>")
+        body += ("<p>Статистика всех видео обновится в течение минуты. Эту вкладку можно закрыть — "
+                 "в IndiePulse нажми <b>↻ Проверить снова</b> в настройках YouTube.</p>")
+        tone = "ok"
+        if refresh_ttl:
+            from app.services.youtube_setup import fmt_when
+            tone = "warn"
+            body += (f"{_WARN_P}⚠ Google выдал токен только до <b>{_e(fmt_when(now + refresh_ttl))}</b> — "
+                     "приложение всё ещё в режиме <b>Testing</b>, потом YouTube снова отключится. "
+                     "Сделай шаг 3 (Publish app) и подключись ещё раз.</p>")
+        if not refresh_token:
+            tone = "warn"
+            body += (f"{_WARN_P}⚠ Google не вернул refresh token — через час доступ пропадёт. Открой "
+                     "<a href='https://myaccount.google.com/permissions' target='_blank' rel='noopener'>"
+                     "myaccount.google.com/permissions</a>, удали доступ этого приложения и нажми "
+                     "Connect YouTube ещё раз.</p>")
+        return _page("✅ YouTube подключён", body, 200, tone)
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>YouTube OAuth error: {_e(exc)}</span>", status_code=500)
+        return _page("Ошибка подключения", f"<p><code>{_e(exc)}</code></p>"
+                     "<p>Нажми <b>Connect YouTube</b> ещё раз.</p>", 500, "error")
+
+
+@router.get("/youtube/setup", response_class=HTMLResponse)
+def youtube_setup(request: Request):
+    """Accounts → YouTube checklist. Checks the token live: refreshing it records or
+    clears yt_auth_error, so the page never shows a stale verdict."""
+    from sqlmodel import Session
+    from app.core.redact import redact
+    from app.db.session import engine
+    from app.services import youtube_setup as ys
+    from app.services.tokens import yt_access_token
+    cfg = load_settings()
+    live_note = ""
+    if all((cfg.get(k) or "").strip() for k in ("yt_refresh_token", "yt_client_id", "yt_client_secret")):
+        try:
+            yt_access_token()
+        except Exception as exc:
+            if not getattr(exc, "reauth", False):  # network trouble is not a verdict
+                live_note = f"Токен сейчас проверить не удалось: {redact(str(exc))[:200]}"
+        cfg = load_settings()
+    with Session(engine) as session:
+        metrics = ys.metrics_summary(session)
+    state = ys.setup_state(cfg, metrics)
+    return templates_api.TemplateResponse("partials/youtube_setup.html", {
+        "request": request,
+        "s": state,
+        "links": ys.console_links(cfg.get("yt_client_id") or ""),
+        "redirect_uri": _YT_REDIRECT_URI,
+        "channel": (cfg.get("yt_channel") or "").strip(),
+        "metrics_days": cfg.get("yt_metrics_days"),
+        "live_note": live_note,
+        "quota_hit": "quotaExceeded" in state["last_metric_error"],
+    })
+
+
+@router.get("/youtube/alert", response_class=HTMLResponse)
+def youtube_alert():
+    """Banner on every page while YouTube is disconnected (settings only, no network)."""
+    from app.services.youtube_setup import alert
+    a = alert(load_settings())
+    if not a:
+        return HTMLResponse("")
+    bg, border, fg = {"error": ("#fee2e2", "#dc2626", "#991b1b"),
+                      "warn": ("#fef3c7", "#d97706", "#92400e")}[a["level"]]
+    return HTMLResponse(
+        f"<div id='yt_alert' role='alert' style='margin:0 0 16px;padding:10px 14px;background:{bg};"
+        f"border-left:4px solid {border};border-radius:6px;color:{fg};display:flex;gap:12px;"
+        f"align-items:center;flex-wrap:wrap'><span>⚠ {_e(a['text'])}</span>"
+        "<a href='/accounts#yt_setup' class='btn btn-primary' style='margin-left:auto;text-decoration:none'>"
+        "Как починить (пошагово) →</a></div>")

@@ -293,10 +293,12 @@ def check_youtube(cfg: dict, r: _Result) -> None:
     try:
         access = yt_access_token(force=True)  # proves the refresh token still works
     except YouTubeAuthError as exc:
-        hint = "Нажми Connect YouTube в Settings."
+        hint = "Настройки → YouTube → шаг 4 (Connect YouTube)."
         if "invalid_grant" in str(exc):
-            hint = ("Refresh token протух/отозван. Если OAuth-приложение в Google Cloud в статусе "
-                    "Testing — токены живут 7 дней; переведи его в Production. Затем Connect YouTube.")
+            hint = ("Refresh token протух/отозван. Обычно причина — OAuth-приложение в статусе Testing "
+                    "(токен живёт 7 дней): Настройки → YouTube → шаг 3 (Publish app), затем шаг 4 (Connect YouTube).")
+        elif "invalid_client" in str(exc) or "unauthorized_client" in str(exc):
+            hint = "Client ID / Client Secret не подходят: Настройки → YouTube → шаг 2 (OAuth-клиент)."
         r.err(str(exc).replace("yt_refresh_failed: ", "refresh: "), hint)
         r.summary = "нужна переавторизация"
         return

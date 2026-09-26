@@ -231,10 +231,11 @@ def test_reconnecting_youtube_schedules_the_backfill(client, set_settings, monke
     set_settings(yt_client_id="cid", yt_client_secret="csec", oauth_state_youtube="state-1")
     scheduled = []
     monkeypatch.setattr(tasks.backfill_youtube_metrics, "schedule", lambda **kw: scheduled.append(kw))
-    _route_httpx(monkeypatch, lambda req: httpx.Response(200, json={
-        "access_token": "at-new", "refresh_token": "rt-new", "expires_in": 3600}))
+    _route_httpx(monkeypatch, lambda req: httpx.Response(200, json=(
+        {"access_token": "at-new", "refresh_token": "rt-new", "expires_in": 3600}
+        if req.url.path == "/token" else {"items": []})))
     r = client.get("/api/accounts/callback/youtube", params={"code": "c", "state": "state-1"})
-    assert r.status_code == 200 and "YouTube connected" in r.text
+    assert r.status_code == 200 and "YouTube подключён" in r.text
     assert load_settings()["yt_refresh_token"] == "rt-new"
     assert len(scheduled) == 1
 

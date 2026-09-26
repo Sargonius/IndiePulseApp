@@ -1,0 +1,125 @@
+{# Accounts → YouTube: live setup checklist (rendered by GET /api/youtube/setup) #}
+{% set mark = {'done': '✓', 'error': '✗', 'warn': '!'} %}
+{% set steps = s.steps %}
+<div class="yt-setup">
+<style>
+.yt-setup { font-size: 13px; color: #374151; }
+.yt-setup a:not(.btn) { color: #1d4ed8; }
+.yt-setup a.btn { text-decoration: none; }
+.yt-verdict { padding: 10px 12px; border-radius: 6px; border-left: 4px solid; margin-bottom: 12px; font-weight: 600; line-height: 1.5; }
+.yt-verdict.done { background: #dcfce7; border-color: #16a34a; color: #166534; }
+.yt-verdict.todo, .yt-verdict.unknown { background: #e0f2fe; border-color: #0284c7; color: #075985; }
+.yt-verdict.warn { background: #fef3c7; border-color: #d97706; color: #92400e; }
+.yt-verdict.error { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.yt-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.yt-head h4 { margin: 0; font-size: 14px; color: #1f2937; }
+.yt-steps { list-style: none; margin: 0; padding: 0; }
+.yt-step { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #fff; }
+.yt-step.error { border-color: #fca5a5; background: #fffafa; }
+.yt-step.warn { border-color: #fcd34d; background: #fffdf5; }
+.yt-step-title { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.yt-mark { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; align-items: center; justify-content: center;
+	font-size: 12px; font-weight: 700; flex: none; color: #fff; background: #94a3b8; }
+.yt-mark.done { background: #16a34a; }
+.yt-mark.error { background: #dc2626; }
+.yt-mark.warn { background: #d97706; }
+.yt-mark.todo { background: #2563eb; }
+.yt-note { font-size: 12px; color: #64748b; }
+.yt-step.error .yt-step-title .yt-note { color: #b91c1c; font-weight: 600; }
+.yt-step.warn .yt-step-title .yt-note { color: #b45309; font-weight: 600; }
+.yt-step.done .yt-step-title .yt-note { color: #15803d; }
+.yt-step ol, .yt-step ul { margin: 6px 0 0; padding-left: 20px; line-height: 1.7; }
+.yt-step p.yt-note { margin: 6px 0 0; }
+.yt-copy { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 2px 0; }
+.yt-copy code { background: #e5e7eb; padding: 2px 6px; border-radius: 3px; font-size: 12px; word-break: break-all; }
+.yt-setup details summary { cursor: pointer; color: #1d4ed8; font-size: 12px; margin-top: 6px; }
+</style>
+
+<div class="yt-verdict {{ s.overall.status }}">{{ mark.get(s.overall.status, 'ℹ') }} {{ s.overall.note }}</div>
+{% if live_note %}<p class="yt-note">{{ live_note }}</p>{% endif %}
+
+<div class="yt-head">
+	<h4>Пошаговая настройка</h4>
+	<button type="button" class="btn" hx-get="/api/youtube/setup" hx-target="#yt_setup" hx-swap="innerHTML">↻ Проверить снова</button>
+</div>
+{% if not links.project %}
+<p class="yt-note">Ссылки ниже откроют последний проект в консоли Google — проверь, что сверху выбран именно проект IndiePulse
+	(после сохранения Client ID проект подставится сам).</p>
+{% endif %}
+
+<ol class="yt-steps">
+	<li class="yt-step {{ steps.api.status }}">
+		<div class="yt-step-title"><span class="yt-mark {{ steps.api.status }}">{{ mark.get(steps.api.status, '1') }}</span>
+			<b>Включить YouTube Data API v3</b><span class="yt-note">— {{ steps.api.note }}</span></div>
+		<ol>
+			<li>Открой <a href="{{ links.api }}" target="_blank" rel="noopener">YouTube Data API v3 в Google Cloud ↗</a></li>
+			<li>Нажми <b>Enable</b>. Если вместо неё кнопка <b>Manage</b> — API уже включён, шаг готов.</li>
+		</ol>
+	</li>
+
+	<li class="yt-step {{ steps.client.status }}">
+		<div class="yt-step-title"><span class="yt-mark {{ steps.client.status }}">{{ mark.get(steps.client.status, '2') }}</span>
+			<b>OAuth-клиент (Client ID и Secret)</b><span class="yt-note">— {{ steps.client.note }}</span></div>
+		<ol>
+			<li>Открой <a href="{{ links.clients }}" target="_blank" rel="noopener">Clients ↗</a>. Клиент уже есть — открой его;
+				нет — <b>+ Create client</b> → Application type <b>Web application</b>.</li>
+			<li>В <b>Authorized redirect URIs</b> должен быть ровно этот адрес:
+				<div class="yt-copy"><code>{{ redirect_uri }}</code>
+					<button type="button" class="btn" onclick='navigator.clipboard.writeText({{ redirect_uri|tojson }}); this.textContent="✓ скопировано"'>📋 Копировать</button></div></li>
+			<li><b>Save</b> / <b>Create</b> → скопируй <b>Client ID</b> и <b>Client secret</b> в поля слева → <b>Save</b>.</li>
+		</ol>
+		<p class="yt-note">Google пишет <b>Error 400: redirect_uri_mismatch</b> — адрес в клиенте не совпадает с адресом выше
+			(важны http/https, 127.0.0.1 или localhost и порт).</p>
+	</li>
+
+	<li class="yt-step {{ steps.publish.status }}">
+		<div class="yt-step-title"><span class="yt-mark {{ steps.publish.status }}">{{ mark.get(steps.publish.status, '3') }}</span>
+			<b>Опубликовать приложение — иначе токен умирает через 7 дней</b><span class="yt-note">— {{ steps.publish.note }}</span></div>
+		<ol>
+			<li>Открой <a href="{{ links.audience }}" target="_blank" rel="noopener">Audience ↗</a> (Google Auth Platform → Audience).</li>
+			<li>В блоке <b>Publishing status</b> нажми <b>Publish app</b> → <b>Confirm</b>. Должно стать <b>In production</b>.
+				Уже In production — шаг готов.</li>
+			<li>Проходить проверку Google (<b>verification</b>) <b>не нужно</b> — для своего канала хватает In production.</li>
+			<li>Токен, выданный пока было Testing, сам не «вылечится» — после Publish app обязательно сделай шаг 4.</li>
+		</ol>
+		<p class="yt-note">В статусе <b>Testing</b> Google выдаёт refresh token ровно на 7 дней, потом загрузки и статистика
+			отваливаются с ошибкой invalid_grant. После публикации токен бессрочный.</p>
+	</li>
+
+	<li class="yt-step {{ steps.connect.status }}">
+		<div class="yt-step-title"><span class="yt-mark {{ steps.connect.status }}">{{ mark.get(steps.connect.status, '4') }}</span>
+			<b>Подключить канал</b><span class="yt-note">— {{ steps.connect.note }}</span></div>
+		<ol>
+			<li><a class="btn btn-primary" href="/api/accounts/connect/youtube/go" target="_blank" rel="noopener">Connect YouTube ↗</a>
+				— откроется вкладка Google.</li>
+			<li>Выбери Google-аккаунт, которому принадлежит канал{% if channel %} <b>{{ channel }}</b>{% endif %}.
+				Спросит, какой канал использовать, — выбери <b>канал</b>, а не личный профиль.</li>
+			<li>Экран <b>«Google hasn't verified this app»</b> — это нормально для своего приложения:
+				<b>Advanced</b> → <b>Go to … (unsafe)</b>.</li>
+			<li>Отметь <b>все</b> галочки доступа (загрузка видео и управление YouTube) → <b>Continue</b>.</li>
+			<li>Появится «✅ YouTube подключён» — закрой вкладку и нажми здесь <b>↻ Проверить снова</b>.</li>
+		</ol>
+		<p class="yt-note">«Access blocked … has not completed the Google verification process» — приложение ещё в Testing, вернись к шагу 3.
+			Google не вернул refresh token — удали доступ приложения на
+			<a href="{{ links.permissions }}" target="_blank" rel="noopener">myaccount.google.com/permissions ↗</a> и подключись ещё раз.</p>
+	</li>
+
+	<li class="yt-step {{ steps.stats.status }}">
+		<div class="yt-step-title"><span class="yt-mark {{ steps.stats.status }}">{{ mark.get(steps.stats.status, '5') }}</span>
+			<b>Проверить, что всё работает</b><span class="yt-note">— {{ steps.stats.note }}</span></div>
+		<ul>
+			<li>После подключения статистика всех видео подтягивается сама (до минуты), дальше — автоматически:
+				первую неделю каждые 30 минут, потом раз в день до {{ metrics_days }} дней после публикации.</li>
+			<li><a href="/analytics">Analytics</a> → фильтр YouTube: в Views / Likes цифры, значков ⚠ нет.</li>
+			<li><a href="/status">🩺 Статус</a> → YouTube: зелёная галочка.</li>
+			{% if quota_hit %}
+			<li>Ошибка <b>quotaExceeded</b> — кончилась дневная квота API (10 000 единиц, сбрасывается в полночь по
+				тихоокеанскому времени): <a href="{{ links.quotas }}" target="_blank" rel="noopener">квоты ↗</a></li>
+			{% endif %}
+		</ul>
+		{% if steps.stats.status == 'error' and s.last_metric_error %}
+		<details><summary>Последняя ошибка статистики</summary><p class="yt-note">{{ s.last_metric_error }}</p></details>
+		{% endif %}
+	</li>
+</ol>
+</div>

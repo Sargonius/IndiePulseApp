@@ -32,6 +32,8 @@
 	</header>
 	<main>
 		<div class="container">
+			<!-- "YouTube is disconnected" banner; empty (removed) while everything works -->
+			<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>
 			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>

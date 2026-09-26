@@ -65,6 +65,15 @@ class YouTubeAuthError(RuntimeError):
         self.reauth = reauth
 
 
+def _remember_yt_auth_error(error: str) -> None:
+    """Keep the last refresh failure that needs a reconnect in settings, so the
+    Accounts checklist and the global alert can show it ('' = working again).
+    Written only on change: metrics hit this every 30 minutes."""
+    if (load_settings().get("yt_auth_error") or "") == error:
+        return
+    save_settings({"yt_auth_error": error, "yt_auth_error_at": int(_now()) if error else 0})
+
+
 def yt_access_token(force: bool = False) -> str:
     """Return a fresh YouTube access token (1h lifetime), refreshing and persisting it.
 
@@ -95,10 +104,14 @@ def yt_access_token(force: bool = False) -> str:
             d = r.json()
         if r.status_code >= 400 or not d.get("access_token"):
             err = d.get("error") or f"http_{r.status_code}"
-            raise YouTubeAuthError(f"yt_refresh_failed: {err} {d.get('error_description') or ''}".strip(),
+            exc = YouTubeAuthError(f"yt_refresh_failed: {err} {d.get('error_description') or ''}".strip(),
                                    reauth=err in ("invalid_grant", "invalid_client", "unauthorized_client"))
+            if exc.reauth:
+                _remember_yt_auth_error(str(exc))
+            raise exc
         save_settings({
             "yt_access_token": d["access_token"],
             "yt_expires_at": int(_now()) + int(d.get("expires_in") or 3600),
+            **({"yt_auth_error": "", "yt_auth_error_at": 0} if cfg.get("yt_auth_error") else {}),
         })
         return d["access_token"]

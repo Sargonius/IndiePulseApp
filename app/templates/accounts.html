@@ -272,20 +272,9 @@
 				<div id="yt_metrics_status" class="status-msg"></div>
 			</div>
 			<div class="settings-right">
-				<div class="instructions">
-					<h4>Setup Instructions</h4>
-					<ol>
-						<li>Open <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
-						<li>Create project, enable <b>YouTube Data API v3</b></li>
-						<li>Create OAuth 2.0 Client, добавь redirect URI <code>http://127.0.0.1:8000/api/accounts/callback/youtube</code></li>
-						<li>Сохрани Client ID + Secret → <b>Connect YouTube</b> (токены заполнятся сами)</li>
-					</ol>
-					<div class="info-box">
-						Ошибка <b>invalid_grant</b> при загрузке = refresh token протух или отозван — просто нажми
-						<b>Connect YouTube</b> ещё раз. Если OAuth-приложение в Google Console стоит в статусе
-						<b>Testing</b>, refresh token живёт всего <b>7 дней</b> — переключи консент-скрин в
-						<b>In production</b> (аудит не нужен), и токен станет вечным.
-					</div>
+				<!-- Live checklist: links into your Google Cloud project + ✓/✗ per step (api/youtube.py) -->
+				<div id="yt_setup" hx-get="/api/youtube/setup" hx-trigger="load" hx-swap="innerHTML">
+					<div class="instructions">Проверяю подключение YouTube…</div>
 				</div>
 			</div>
 		</div>

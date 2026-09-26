@@ -48,6 +48,14 @@ DEFAULTS: Dict[str, Any] = {
     "yt_access_token": "",
     "yt_refresh_token": "",
     "yt_expires_at": 0,
+    # Runtime state for the setup checklist / global alert (not user-editable):
+    # last refresh failure that needs a reconnect, when Connect YouTube last worked,
+    # the refresh-token expiry Google reported (Testing apps: 7 days), the channel.
+    "yt_auth_error": "",
+    "yt_auth_error_at": 0,
+    "yt_connected_at": 0,
+    "yt_refresh_expires_at": 0,
+    "yt_channel": "",
     # YouTube playlist preferences
     "yt_playlist_id": "",
     "yt_playlist_title": "Synthetica",

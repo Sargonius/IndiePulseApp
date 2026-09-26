@@ -286,6 +286,8 @@ def settings_status():
             return {'status': 'not_configured', 'message': 'No tokens'}
         if not client_id:
             return {'status': 'partial', 'message': 'Missing client ID'}
+        if (cfg.get('yt_auth_error') or '').strip():
+            return {'status': 'not_configured', 'message': 'Нужно переподключить — см. шаги справа'}
         return {'status': 'configured', 'message': 'OAuth tokens set'}
     
     def check_facebook():
