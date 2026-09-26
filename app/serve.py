@@ -22,6 +22,8 @@ def main() -> None:
 		"app.main:app", host=config.APP_HOST, port=config.APP_PORT,
 		reload=reload, reload_dirs=["app", "app/templates", "app/static"] if reload else None,
 		access_log=False,  # app.core.logging logs requests itself (minus /health polling)
+		# open browser tabs keep connections alive; don't wait for them forever on stop
+		timeout_graceful_shutdown=5,
 	)
 	server = uvicorn.Server(cfg)
 	if cfg.should_reload:
