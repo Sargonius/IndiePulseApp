@@ -1,13 +1,12 @@
 """Post authoring: translation, hashtags, drafts, draft media, briefs."""
 
-import httpx
 import os
 import time
 from app.db.session import get_session
 from app.models.models import Brief
 from app.services.draft_store import load_draft
 from app.services.draft_store import save_draft
-from app.services.settings import load_settings
+from app.services import openai_client
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import File
@@ -52,33 +51,25 @@ class BriefOut(BaseModel):
 
 
 @router.get("/translate/test_openai")
-def test_openai():
+def test_openai(openai_model: Optional[str] = None):
+    """Settings → OpenAI → Test; tries the model typed in the form (before saving)."""
     try:
-        cfg = load_settings()
-        api_key = (cfg.get("openai_api_key") or "").strip()
-        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        api_key, _ = openai_client.settings()
         if not api_key:
             return {"ok": False, "error": "no_api_key"}
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": model,
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": "You translate RU to EN."},
-                {"role": "user", "content": "Переведи на английский: Привет мир"},
-            ],
-        }
-        with httpx.Client(timeout=15) as client:
-            r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-            data = {"status": r.status_code}
+        r, model = openai_client.chat_completion([
+            {"role": "system", "content": "You translate RU to EN."},
+            {"role": "user", "content": "Переведи на английский: Привет мир"},
+        ], temperature=0, model=(openai_model or "").strip() or None, timeout=30)
+        data = {"status": r.status_code, "model": model}
+        if r.status_code < 400:
+            data["translation"] = openai_client.content_of(r)
+        else:
             try:
                 data["json"] = r.json()
             except Exception:
                 data["text"] = r.text[:400]
-            return {"ok": r.status_code < 400, "response": data}
+        return {"ok": r.status_code < 400, "response": data}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -95,39 +86,20 @@ def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form
     provider = ""
     # 1) Try OpenAI if configured
     try:
-        cfg = load_settings()
-        api_key = (cfg.get("openai_api_key") or "").strip()
-        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        api_key, model = openai_client.settings()
         if api_key and model:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            payload = {
-                "model": model,
-                "temperature": 0.2,
-                "messages": [
-                    {"role": "system", "content": "You are a professional localization translator. Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is. Do not add commentary; return only the translated text."},
-                    {"role": "user", "content": f"Translate to English, preserving markup:\n\n{src}"},
-                ],
-            }
-            with httpx.Client(timeout=20) as client:
-                r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-                if r.status_code < 400:
-                    data = r.json()
-                    en = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-                    if en:
-                        provider = f"openai:{model}"
-                    else:
-                        try:
-                            logger.warning("openai_empty_response model=%s raw=%s", model, str(data)[:400])
-                        except Exception:
-                            pass
+            r, model = openai_client.chat_completion([
+                {"role": "system", "content": "You are a professional localization translator. Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is. Do not add commentary; return only the translated text."},
+                {"role": "user", "content": f"Translate to English, preserving markup:\n\n{src}"},
+            ], temperature=0.2, timeout=60)
+            if r.status_code < 400:
+                en = openai_client.content_of(r)
+                if en:
+                    provider = f"openai:{model}"
                 else:
-                    try:
-                        logger.warning("openai_http_error status=%s model=%s body=%s", r.status_code, model, r.text[:400])
-                    except Exception:
-                        pass
+                    logger.warning(f"openai_empty_response model={model} raw={r.text[:400]}")
+            else:
+                logger.warning(f"openai_http_error status={r.status_code} model={model} body={r.text[:400]}")
     except Exception as e_oa:
         err = e_oa
     # 2) Fallback chain via deep_translator

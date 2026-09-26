@@ -569,11 +569,11 @@
 					</div>
 					<div class="form-group">
 						<label>Model</label>
-						<input type="text" name="openai_model" value="{{ openai_model or 'gpt-4o-mini' }}" />
+						<input type="text" id="openai_model_input" name="openai_model" value="{{ openai_model or 'gpt-6-luna' }}" placeholder="gpt-6-luna" />
 					</div>
 					<div class="btn-row">
 						<button type="submit" class="btn btn-primary">Save</button>
-						<button type="button" class="btn" hx-get="/api/translate/test_openai" hx-target="#ai_status" hx-swap="innerHTML">Test</button>
+						<button type="button" class="btn" hx-get="/api/translate/test_openai" hx-include="#openai_model_input" hx-target="#ai_status" hx-swap="innerHTML">Test</button>
 					</div>
 				</form>
 				<div id="ai_status" class="status-msg"></div>
@@ -587,7 +587,8 @@
 						<li>Paste key and save</li>
 					</ol>
 					<div class="info-box">
-						OpenAI is optional - used for better translations. Falls back to free translators if not configured.
+						OpenAI is optional - used for better translations. Falls back to free translators if not configured.<br>
+						Model: <code>gpt-6-luna</code> is the cheap current one; any chat model works. Test tries the model typed above before you save it.
 					</div>
 				</div>
 			</div>

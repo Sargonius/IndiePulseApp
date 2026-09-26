@@ -1,11 +1,10 @@
 """Steam announcement export and translation."""
 
-import httpx
 import io
 import os
 import time
 from app.core.config import STEAM_APP_ID
-from app.services.settings import load_settings
+from app.services import openai_client
 from fastapi import APIRouter
 from fastapi import File
 from fastapi import Form
@@ -222,11 +221,8 @@ def steam_translate_text(
     provider = ""
     out = {"title_en": "", "subtitle_en": "", "short_desc_en": "", "body_en": ""}
     try:
-        cfg = load_settings()
-        api_key = (cfg.get("openai_api_key") or "").strip()
-        model = (cfg.get("openai_model") or "gpt-4o-mini").strip()
+        api_key, model = openai_client.settings()
         if api_key and model:
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
             system = (
                 "You are a professional localization translator for Steam Partner Events. "
                 "Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is in the 'body'. "
@@ -239,35 +235,26 @@ def steam_translate_text(
                 f"body: {src['body']}\n"
                 "Translate all fields to English."
             )
-            payload = {"model": model, "temperature": 0.2, "messages": [
+            r, model = openai_client.chat_completion([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
-            ]}
-            with httpx.Client(timeout=25) as client:
-                r = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-                if r.status_code < 400:
-                    data = r.json()
-                    content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-                    import json as _json
-                    try:
-                        parsed = _json.loads(content)
-                        out.update({
-                            "title_en": (parsed.get("title_en") or "").strip(),
-                            "subtitle_en": (parsed.get("subtitle_en") or "").strip(),
-                            "short_desc_en": (parsed.get("short_desc_en") or "").strip(),
-                            "body_en": (parsed.get("body_en") or "").strip(),
-                        })
-                        provider = f"openai:{model}"
-                    except Exception as pe:
-                        try:
-                            logger.warning("steam_translate parse_json_failed raw=%s", content[:400])
-                        except Exception:
-                            pass
-                else:
-                    try:
-                        logger.warning("openai_http_error steam status=%s model=%s body=%s", r.status_code, model, r.text[:400])
-                    except Exception:
-                        pass
+            ], temperature=0.2, timeout=90)
+            if r.status_code < 400:
+                content = openai_client.content_of(r)
+                import json as _json
+                try:
+                    parsed = _json.loads(content)
+                    out.update({
+                        "title_en": (parsed.get("title_en") or "").strip(),
+                        "subtitle_en": (parsed.get("subtitle_en") or "").strip(),
+                        "short_desc_en": (parsed.get("short_desc_en") or "").strip(),
+                        "body_en": (parsed.get("body_en") or "").strip(),
+                    })
+                    provider = f"openai:{model}"
+                except Exception:
+                    logger.warning(f"steam_translate parse_json_failed raw={content[:400]}")
+            else:
+                logger.warning(f"openai_http_error steam status={r.status_code} model={model} body={r.text[:400]}")
     except Exception as exc:
         try:
             logger.warning("steam_translate openai_error: %s", str(exc))

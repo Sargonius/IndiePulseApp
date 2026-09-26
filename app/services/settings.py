@@ -91,7 +91,7 @@ DEFAULTS: Dict[str, Any] = {
     "oauth_state_youtube": "",
     # OpenAI (optional for translation)
     "openai_api_key": "",
-    "openai_model": "gpt-4o-mini",
+    "openai_model": "gpt-6-luna",
     # Local music directory (Windows default path)
     "music_dir": "E:\\SynthSocial\\Music",
 }

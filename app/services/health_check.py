@@ -494,17 +494,16 @@ def check_bluesky(cfg: dict, r: _Result) -> None:
 
 
 def check_openai(cfg: dict, r: _Result) -> None:
-    key, model = _s(cfg, "openai_api_key"), _s(cfg, "openai_model") or "gpt-4o-mini"
+    from app.services import openai_client
+    key, model = _s(cfg, "openai_api_key"), _s(cfg, "openai_model") or openai_client.DEFAULT_MODEL
     if not key:
         r.status = "off"
         r.summary = "не настроен (перевод через deep-translator)"
         return
-    # 1-token completion: the only way to catch an exhausted balance (costs ~nothing)
-    with httpx.Client(timeout=TIMEOUT) as c:
-        resp = c.post("https://api.openai.com/v1/chat/completions",
-                      headers={"Authorization": f"Bearer {key}"},
-                      json={"model": model, "messages": [{"role": "user", "content": "ping"}],
-                            "max_completion_tokens": 5})
+    # tiny completion: the only way to catch an exhausted balance (costs ~nothing)
+    resp, model = openai_client.chat_completion([{"role": "user", "content": "ping"}],
+                                                max_completion_tokens=16, model=model,
+                                                api_key=key, timeout=TIMEOUT)
     d = _json(resp)
     if resp.status_code == 200:
         r.ok(f"ключ и баланс в порядке, модель {model}")
@@ -520,7 +519,7 @@ def check_openai(cfg: dict, r: _Result) -> None:
     elif resp.status_code == 401:
         r.err("ключ отклонён (401)", "Создай новый ключ на platform.openai.com/api-keys.")
     elif e.get("code") == "model_not_found":
-        r.err(f"модель {model} недоступна", "Поменяй openai_model в Settings (например gpt-4o-mini).")
+        r.err(f"модель {model} недоступна", f"Поменяй openai_model в Settings (например {openai_client.DEFAULT_MODEL}).")
     else:
         r.warn(f"HTTP {resp.status_code}: {e.get('message') or _short(d)}")
 
