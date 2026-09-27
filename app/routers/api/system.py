@@ -286,8 +286,16 @@ def settings_status():
             return {'status': 'not_configured', 'message': 'No tokens'}
         if not client_id:
             return {'status': 'partial', 'message': 'Missing client ID'}
-        if (cfg.get('yt_auth_error') or '').strip():
+        from app.services.youtube_setup import connection, fmt_when
+        conn = connection(cfg)
+        if conn['state'] == 'error':
             return {'status': 'not_configured', 'message': 'Нужно переподключить — см. шаги справа'}
+        if conn['state'] == 'expired':
+            return {'status': 'not_configured', 'message': 'Токен истёк — переподключи'}
+        if conn['state'] == 'expiring':
+            return {'status': 'partial', 'message': f"Токен до {fmt_when(conn['expires_at'])} — переподключи"}
+        if conn['expires_at']:
+            return {'status': 'configured', 'message': f"Токен до {fmt_when(conn['expires_at'])}"}
         return {'status': 'configured', 'message': 'OAuth tokens set'}
     
     def check_facebook():

@@ -12,11 +12,21 @@ from app.routers.api.common import templates_api
 
 router = APIRouter()
 
+
+def _analytics_rows(session):
+    """The 100 newest posts, minus IG/TikTok drafts left in the platform's inbox
+    ('awaiting_finish') — those never actually went out."""
+    from sqlmodel import select
+    from app.models.models import Post, PostStatusEnum
+    return session.exec(
+        select(Post).where(Post.status != PostStatusEnum.awaiting_finish)
+        .order_by(Post.created_at.desc()).limit(100)
+    ).all()
+
+
 @router.get("/analytics/table", response_class=HTMLResponse)
 def analytics_table(request: Request, session: Session = Depends(get_session)):
-    from sqlmodel import select
-    from app.models.models import Post as _Post
-    rows = session.exec(select(_Post).order_by(_Post.created_at.desc()).limit(100)).all()
+    rows = _analytics_rows(session)
     # Reuse pages enrichment to attach preview/thumb and mapped metrics
     try:
         from app.routers.pages import _enrich_posts as _ep
@@ -28,10 +38,9 @@ def analytics_table(request: Request, session: Session = Depends(get_session)):
 
 @router.post("/analytics/refresh", response_class=HTMLResponse)
 def analytics_refresh(request: Request, session: Session = Depends(get_session)):
-    from sqlmodel import select
-    from app.models.models import Post as _Post, PostStatusEnum
+    from app.models.models import PostStatusEnum
     from app.platforms import platform_key
-    rows = session.exec(select(_Post).order_by(_Post.created_at.desc()).limit(100)).all()
+    rows = _analytics_rows(session)
     # Published YouTube videos go in one batched videos.list call instead of one each
     yt_ids = [p.id for p in rows if platform_key(p.platform) == 'yt'
               and p.status == PostStatusEnum.done and p.platform_post_id]

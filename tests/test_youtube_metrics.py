@@ -252,6 +252,16 @@ def test_update_metrics_button_batches_youtube(client, yt_post, yt_api):
     assert all(_metrics(pid)["views"] == 5 for pid, _ in posts)
 
 
+def test_analytics_hides_inbox_drafts(client, make_post, yt_post):
+    # IG/TikTok uploads left in the platform's drafts never went out: not analytics material
+    make_post("tiktok", status=PostStatusEnum.awaiting_finish)
+    make_post("ig_reels", status=PostStatusEnum.awaiting_finish)
+    yt_post()
+    html = client.get("/api/analytics/table").text
+    assert 'data-status="awaiting_finish"' not in html
+    assert 'data-platform="yt"' in html
+
+
 def test_analytics_table_flags_metric_errors(client, yt_post):
     yt_post(metrics={"error": "yt_reauth_needed: yt_refresh_failed: invalid_grant"})
     r = client.get("/api/analytics/table")

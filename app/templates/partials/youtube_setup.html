@@ -6,6 +6,7 @@
 .yt-setup { font-size: 13px; color: #374151; }
 .yt-setup a:not(.btn) { color: #1d4ed8; }
 .yt-setup a.btn { text-decoration: none; }
+.yt-step li .btn { display: inline-block; margin: 4px 0; }
 .yt-verdict { padding: 10px 12px; border-radius: 6px; border-left: 4px solid; margin-bottom: 12px; font-weight: 600; line-height: 1.5; }
 .yt-verdict.done { background: #dcfce7; border-color: #16a34a; color: #166534; }
 .yt-verdict.todo, .yt-verdict.unknown { background: #e0f2fe; border-color: #0284c7; color: #075985; }
@@ -74,24 +75,26 @@
 
 	<li class="yt-step {{ steps.publish.status }}">
 		<div class="yt-step-title"><span class="yt-mark {{ steps.publish.status }}">{{ mark.get(steps.publish.status, '3') }}</span>
-			<b>Опубликовать приложение — иначе токен умирает через 7 дней</b><span class="yt-note">— {{ steps.publish.note }}</span></div>
+			<b>Опубликовать приложение — или переподключать раз в неделю</b><span class="yt-note">— {{ steps.publish.note }}</span></div>
 		<ol>
-			<li>Открой <a href="{{ links.audience }}" target="_blank" rel="noopener">Audience ↗</a> (Google Auth Platform → Audience).</li>
-			<li>В блоке <b>Publishing status</b> нажми <b>Publish app</b> → <b>Confirm</b>. Должно стать <b>In production</b>.
-				Уже In production — шаг готов.</li>
-			<li>Проходить проверку Google (<b>verification</b>) <b>не нужно</b> — для своего канала хватает In production.</li>
-			<li>Токен, выданный пока было Testing, сам не «вылечится» — после Publish app обязательно сделай шаг 4.</li>
+			<li>Открой <a href="{{ links.audience }}" target="_blank" rel="noopener">Audience ↗</a> (Google Auth Platform → Audience)
+				→ в блоке <b>Publishing status</b> нажми <b>Publish app</b> → <b>Confirm</b>. Должно стать <b>In production</b>.</li>
+			<li>Google не даёт опубликовать без заполненного <b>Branding</b> (домашняя страница, политика конфиденциальности…)?
+				Тогда можно не публиковать: оставайся в <b>Testing</b> и переподключай YouTube раз в неделю (шаг 4) —
+				за 2 дня появится баннер, в последний день — уведомление в трее.</li>
+			<li>Проходить проверку Google (<b>verification</b>) не нужно ни в одном из вариантов.</li>
+			<li>После Publish app всё равно сделай шаг 4: токен, выданный в Testing, так и останется 7-дневным.</li>
 		</ol>
-		<p class="yt-note">В статусе <b>Testing</b> Google выдаёт refresh token ровно на 7 дней, потом загрузки и статистика
-			отваливаются с ошибкой invalid_grant. После публикации токен бессрочный.</p>
+		<p class="yt-note">В Testing Google выдаёт refresh token на 7 дней и сообщает дату окончания — IndiePulse показывает её
+			в шаге 4. После публикации токен бессрочный.</p>
 	</li>
 
 	<li class="yt-step {{ steps.connect.status }}">
 		<div class="yt-step-title"><span class="yt-mark {{ steps.connect.status }}">{{ mark.get(steps.connect.status, '4') }}</span>
-			<b>Подключить канал</b><span class="yt-note">— {{ steps.connect.note }}</span></div>
+			<b>{% if connected %}Переподключить канал (раз в неделю, пока приложение в Testing){% else %}Подключить канал{% endif %}</b><span class="yt-note">— {{ steps.connect.note }}</span></div>
 		<ol>
-			<li><a class="btn btn-primary" href="/api/accounts/connect/youtube/go" target="_blank" rel="noopener">Connect YouTube ↗</a>
-				— откроется вкладка Google.</li>
+			<li><a class="btn btn-primary" href="/api/accounts/connect/youtube/go" target="_blank" rel="noopener">{% if connected %}Переподключить{% else %}Connect YouTube{% endif %} ↗</a>
+				— откроется вкладка Google. То же самое есть в трее: правый клик по значку IndiePulse → «YouTube: переподключить».</li>
 			<li>Выбери Google-аккаунт, которому принадлежит канал{% if channel %} <b>{{ channel }}</b>{% endif %}.
 				Спросит, какой канал использовать, — выбери <b>канал</b>, а не личный профиль.</li>
 			<li>Экран <b>«Google hasn't verified this app»</b> — это нормально для своего приложения:

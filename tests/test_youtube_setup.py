@@ -101,20 +101,71 @@ def test_state_when_everything_works():
         ("api", "client", "publish", "connect", "stats"), "done")
 
 
-def test_token_that_died_after_a_week_points_at_testing_mode():
+def test_token_that_died_after_a_week_asks_for_a_reconnect_not_publishing():
     now = 1_800_000_000
     cfg = {"yt_client_id": CID, "yt_client_secret": "s", "yt_refresh_token": "r",
            "yt_connected_at": now - 8 * DAY, "yt_auth_error_at": now - DAY,
            "yt_auth_error": "yt_refresh_failed: invalid_grant Bad Request"}
     st = ys.setup_state(cfg, NO_VIDEOS, now=now)
-    assert st["overall"]["status"] == "error"
-    assert st["steps"]["publish"]["status"] == "error" and "Testing" in st["steps"]["publish"]["note"]
+    assert st["overall"]["status"] == "error" and "шаг 4" in st["overall"]["note"]
+    # staying in Testing is a supported setup: publishing is optional, not a failure
+    assert st["steps"]["publish"]["status"] == "optional" and "раз в неделю" in st["steps"]["publish"]["note"]
     assert st["steps"]["connect"]["status"] == "error"
 
 
+# ── weekly reconnect (app stays in Testing: Google reports a 7-day token) ────
+
+def _testing_cfg(now):
+    return {"yt_client_id": CID, "yt_client_secret": "s", "yt_refresh_token": "r", "yt_connected_at": now,
+            "yt_refresh_expires_at": now + 7 * DAY, "yt_channel": "Sargonius Games (@sargoniusgames)"}
+
+
+def test_weekly_countdown_from_connect_to_expiry():
+    t0 = 1_800_000_000
+    cfg = _testing_cfg(t0)
+    exp = cfg["yt_refresh_expires_at"]
+
+    fresh = ys.setup_state(cfg, NO_VIDEOS, now=t0)  # just connected: all quiet
+    assert fresh["overall"]["status"] == "done" and "Токен до" in fresh["overall"]["note"]
+    assert fresh["steps"]["connect"]["status"] == "done" and "осталось 7 дн." in fresh["steps"]["connect"]["note"]
+    assert fresh["steps"]["publish"]["status"] == "optional"
+    assert ys.alert(cfg, now=t0) is None and ys.tray_reminder(cfg, now=t0) is None
+    assert ys.tray_menu_label(cfg, now=t0).startswith("YouTube: переподключить (токен до ")
+
+    day5 = exp - DAY - DAY // 2  # 1.5 days left: page banner, no tray balloon yet
+    assert ys.setup_state(cfg, NO_VIDEOS, now=day5)["steps"]["connect"]["status"] == "warn"
+    assert ys.alert(cfg, now=day5)["level"] == "warn" and ys.alert(cfg, now=day5)["reconnect"]
+    assert ys.tray_reminder(cfg, now=day5) is None
+
+    last_day = exp - DAY // 2  # the tray balloon comes on the last day
+    key, text = ys.tray_reminder(cfg, now=last_day)
+    assert key == f"soon:{exp}" and "переподключить" in text
+
+    expired = exp + 3600  # before any refresh attempt has recorded an error
+    assert ys.setup_state(cfg, NO_VIDEOS, now=expired)["overall"]["status"] == "error"
+    assert ys.alert(cfg, now=expired)["level"] == "error"
+    assert ys.tray_reminder(cfg, now=expired)[0] == f"off:{exp}"
+    assert ys.tray_menu_label(cfg, now=expired) == "⚠ YouTube отключён — переподключить"
+
+    next_week = _testing_cfg(expired)  # reconnected: a new key, so the tray reminds again
+    assert ys.tray_reminder(next_week, now=next_week["yt_refresh_expires_at"] - 3600)[0] != key
+
+
+def test_wrong_client_is_not_offered_a_reconnect():
+    cfg = {**_testing_cfg(1_800_000_000), "yt_auth_error": "yt_refresh_failed: invalid_client Unauthorized"}
+    a = ys.alert(cfg)
+    assert a["level"] == "error" and a["reconnect"] is False
+    assert "шаг 2" in ys.setup_state(cfg, NO_VIDEOS)["overall"]["note"]
+    assert "Client ID" in ys.tray_reminder(cfg)[1]
+
+
 def test_status_badge_asks_for_a_reconnect(client, set_settings):
+    import time
     set_settings(yt_client_id=CID, yt_access_token="a", yt_refresh_token="r",
-                 yt_auth_error="yt_refresh_failed: invalid_grant")
+                 yt_refresh_expires_at=int(time.time()) + DAY)
+    badge = client.get("/api/settings/status").json()["youtube"]
+    assert badge["status"] == "partial" and badge["message"].startswith("Токен до")
+    set_settings(yt_auth_error="yt_refresh_failed: invalid_grant")
     assert client.get("/api/settings/status").json()["youtube"]["status"] == "not_configured"
 
 
@@ -126,6 +177,16 @@ def test_banner_only_while_youtube_is_broken(client, set_settings):
     set_settings(yt_auth_error="yt_refresh_failed: invalid_grant Bad Request", yt_auth_error_at=1_790_000_000)
     html = client.get("/api/youtube/alert").text
     assert "YouTube отключён" in html and "/accounts#yt_setup" in html
+    assert "href='/api/accounts/connect/youtube/go'" in html  # one-click reconnect
+
+
+def test_banner_warns_before_the_weekly_expiry(client, set_settings):
+    import time
+    set_settings(yt_refresh_token="r", yt_refresh_expires_at=int(time.time()) + 5 * DAY)
+    assert client.get("/api/youtube/alert").text == ""  # plenty of time left
+    set_settings(yt_refresh_expires_at=int(time.time()) + DAY)
+    html = client.get("/api/youtube/alert").text
+    assert "Токен YouTube истекает через" in html and "Переподключить" in html
 
 
 def test_every_page_loads_the_banner_and_accounts_the_checklist(client):
@@ -147,7 +208,7 @@ def test_connect_button_goes_straight_to_google(client, set_settings):
     assert f"state={load_settings()['oauth_state_youtube']}" in location
 
 
-def test_reconnect_records_channel_and_warns_about_testing(client, set_settings, monkeypatch):
+def test_reconnect_records_channel_and_token_expiry(client, set_settings, monkeypatch):
     set_settings(yt_client_id=CID, yt_client_secret="sec", oauth_state_youtube="st-2",
                  yt_auth_error="yt_refresh_failed: invalid_grant", yt_auth_error_at=1)
     monkeypatch.setattr(tasks.backfill_youtube_metrics, "schedule", lambda **kw: None)
@@ -167,7 +228,7 @@ def test_reconnect_records_channel_and_warns_about_testing(client, set_settings,
     assert cfg["yt_refresh_expires_at"] - cfg["yt_connected_at"] == 604799
     assert ys.alert(cfg, now=cfg["yt_connected_at"]) is None  # a week left: no banner yet
     assert ys.alert(cfg, now=cfg["yt_refresh_expires_at"] - DAY)["level"] == "warn"
-    assert ys.setup_state(cfg, NO_VIDEOS)["steps"]["publish"]["status"] == "error"
+    assert ys.setup_state(cfg, NO_VIDEOS)["steps"]["publish"]["status"] == "optional"
 
 
 def test_callback_errors_say_what_to_do(client, set_settings):

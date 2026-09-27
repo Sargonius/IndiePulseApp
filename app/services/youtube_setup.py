@@ -13,7 +13,7 @@ from time import time as _now
 CONSOLE = "https://console.cloud.google.com"
 DAY = 86400
 TESTING_TOKEN_DAYS = 7      # refresh-token lifetime Google gives apps in "Testing"
-EXPIRY_WARN_DAYS = 3        # start warning this long before a reported token expiry
+EXPIRY_WARN_DAYS = 2        # page banner this long before a reported token expiry
 
 
 def project_number(client_id: str) -> str:
@@ -87,20 +87,63 @@ def metrics_summary(session) -> dict:
     return out
 
 
+def left_text(seconds: int) -> str:
+    """'6 дн. 23 ч' / '5 ч 12 мин' / '40 мин'."""
+    minutes = max(0, int(seconds)) // 60
+    days, hours, mins = minutes // 1440, minutes % 1440 // 60, minutes % 60
+    if days:
+        return f"{days} дн. {hours} ч"
+    return f"{hours} ч {mins} мин" if hours else f"{mins} мин"
+
+
+def _client_problem(error: str) -> bool:
+    return "invalid_client" in error or "unauthorized_client" in error
+
+
+def connection(cfg: dict, now: float | None = None) -> dict:
+    """Where the YouTube token stands — shared by the checklist, the page banner, the
+    Accounts badge and the tray reminder.
+
+    state: off (never connected) | error (refresh failed) | expired | expiring | ok.
+    Apps in Google's "Testing" status get 7-day refresh tokens; Google reports that
+    expiry at connect time (yt_refresh_expires_at), so the weekly reconnect can be
+    announced ahead of time instead of discovered through failed uploads.
+    """
+    now = int(now or _now())
+    error = str(cfg.get("yt_auth_error") or "").strip()
+    expires_at = int(cfg.get("yt_refresh_expires_at") or 0)
+    if not str(cfg.get("yt_refresh_token") or "").strip():
+        state = "off"
+    elif error:
+        state = "error"
+    elif expires_at and now >= expires_at:
+        state = "expired"
+    elif expires_at and expires_at - now < EXPIRY_WARN_DAYS * DAY:
+        state = "expiring"
+    else:
+        state = "ok"
+    return {"state": state, "error": error, "error_at": int(cfg.get("yt_auth_error_at") or 0),
+            "expires_at": expires_at, "left": left_text(expires_at - now) if expires_at else "",
+            "reconnect": state in ("error", "expired", "expiring", "ok") and not _client_problem(error)}
+
+
 def _step(status: str, note: str) -> dict:
     return {"status": status, "note": note}
 
 
 def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
-    """Overall verdict + per-step status for the checklist (done/todo/warn/error/unknown)."""
+    """Overall verdict + per-step status for the checklist
+    (done/todo/warn/error/optional/unknown)."""
     now = int(now or _now())
     s = lambda k: str(cfg.get(k) or "").strip()  # noqa: E731
     client_ok = bool(s("yt_client_id") and s("yt_client_secret"))
     connected = bool(s("yt_refresh_token"))
-    error = s("yt_auth_error")
-    error_at = int(cfg.get("yt_auth_error_at") or 0)
+    conn = connection(cfg, now)
+    error = conn["error"]
+    error_at = conn["error_at"]
     connected_at = int(cfg.get("yt_connected_at") or 0)
-    expires_at = int(cfg.get("yt_refresh_expires_at") or 0)
+    expires_at = conn["expires_at"]
+    until = f"{fmt_when(expires_at)} (осталось {conn['left']})" if expires_at else ""
     channel = s("yt_channel")
     last_metric_error = metrics.get("error") or ""
 
@@ -116,28 +159,35 @@ def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
     client = (_step("done", "Client ID и Client Secret сохранены") if client_ok
               else _step("todo", "заполни Client ID и Client Secret слева и нажми Save"))
 
-    # 3. App published (In production), otherwise the refresh token dies after 7 days
+    # 3. App published (In production) — optional: staying in Testing only means a
+    #    reconnect every 7 days, which IndiePulse reminds about
     lived = error_at - connected_at if (error_at and connected_at) else 0
-    if expires_at:
-        publish = _step("error", f"Google выдал токен только до {fmt_when(expires_at)} — приложение в режиме Testing")
+    if expires_at or (error and 6 * DAY <= lived <= 8 * DAY):
+        publish = _step("optional", "не обязательно: приложение в Testing — токен живёт 7 дней, "
+                                    "переподключай раз в неделю (IndiePulse напомнит)")
     elif connected and not error and connected_at and now - connected_at > TESTING_TOKEN_DAYS * DAY:
         publish = _step("done", "проверено: токен живёт дольше 7 дней")
-    elif error and 6 * DAY <= lived <= 8 * DAY:
-        publish = _step("error", "токен умер через 7 дней после подключения — приложение в режиме Testing")
     elif "invalid_grant" in error:
-        publish = _step("warn", "скорее всего приложение в режиме Testing (там токен живёт 7 дней) — проверь")
+        publish = _step("optional", "не обязательно: если приложение в Testing, токен живёт 7 дней — "
+                                    "переподключай раз в неделю")
     else:
-        publish = _step("unknown", "автоматически не проверить — убедись, что стоит In production")
+        publish = _step("unknown", "автоматически не проверить; в Testing просто переподключай раз в неделю")
 
     # 4. Channel connected, token refreshes
-    if not connected:
+    who = f"канал «{channel}»" if channel else ""
+    if conn["state"] == "off":
         connect = _step("todo", "ещё не подключено")
-    elif error:
+    elif conn["state"] == "error":
         since = f" (с {fmt_when(error_at)})" if error_at else ""
         connect = _step("error", f"{auth_reason(error)}{since}")
+    elif conn["state"] == "expired":
+        connect = _step("error", f"токен истёк {fmt_when(expires_at)} — переподключи")
+    elif conn["state"] == "expiring":
+        connect = _step("warn", f"токен истекает через {conn['left']} ({fmt_when(expires_at)}) — переподключи")
+    elif expires_at:
+        connect = _step("done", f"работает до {until}" + (f", {who}" if who else ""))
     else:
-        parts = [p for p in (f"канал «{channel}»" if channel else "",
-                             f"подключено {fmt_when(connected_at)}" if connected_at else "") if p]
+        parts = [p for p in (who, f"подключено {fmt_when(connected_at)}" if connected_at else "") if p]
         connect = _step("done", "работает" + (": " + ", ".join(parts) if parts else ""))
 
     # 5. Stats are flowing
@@ -145,7 +195,7 @@ def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
     checked = f", последняя проверка {fmt_when(metrics['checked_at'])}" if metrics.get("checked_at") else ""
     if not total:
         stats = _step("unknown", "пока нет опубликованных видео")
-    elif error:
+    elif conn["state"] in ("error", "expired"):
         stats = _step("error", f"не собирается, пока не починен шаг 4 ({ok} из {total} видео со статистикой)")
     elif failed:
         stats = _step("error", f"{failed} из {total} видео с ошибкой{checked}")
@@ -154,19 +204,26 @@ def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
     else:
         stats = _step("todo", f"{ok} из {total} видео со статистикой — остальные подтянутся в течение 30 минут")
 
-    # Verdict on top of the checklist (and in the global alert)
+    # Verdict on top of the checklist
+    state = conn["state"]
     if not (client_ok or connected):
         overall = _step("todo", "YouTube не подключён — пройди шаги 1–4 по порядку.")
-    elif error:
+    elif state == "error":
+        fix = "проверь Client ID и Secret (шаг 2)" if _client_problem(error) else "переподключи (шаг 4)"
         overall = _step("error", f"YouTube сейчас не работает: {auth_reason(error)}. "
-                                 "Загрузки на YouTube и статистика стоят — сделай шаги 3 и 4.")
-    elif expires_at and expires_at - now < EXPIRY_WARN_DAYS * DAY:
-        overall = _step("warn", f"YouTube отключится {fmt_when(expires_at)}: приложение в режиме Testing. "
-                                "Сделай шаг 3, потом шаг 4.")
+                                 f"Загрузки на YouTube и статистика стоят — {fix}.")
+    elif state == "expired":
+        overall = _step("error", f"Токен YouTube истёк {fmt_when(expires_at)} — загрузки и статистика стоят. "
+                                 "Переподключи (шаг 4).")
+    elif state == "expiring":
+        overall = _step("warn", f"Токен YouTube истекает через {conn['left']} ({fmt_when(expires_at)}) — "
+                                "переподключи (шаг 4), иначе загрузки и статистика остановятся.")
     elif not connected:
-        overall = _step("todo", "Осталось подключить канал — шаги 3 и 4.")
+        overall = _step("todo", "Осталось подключить канал — шаг 4.")
     else:
-        overall = _step("done", "YouTube работает" + (f": канал «{channel}»." if channel else "."))
+        overall = _step("done", "YouTube работает" + (f": канал «{channel}»." if channel else ".")
+                        + (f" Токен до {until} — за {EXPIRY_WARN_DAYS} дня IndiePulse напомнит переподключиться."
+                           if expires_at else ""))
 
     return {"overall": overall, "steps": {"api": api, "client": client, "publish": publish,
                                           "connect": connect, "stats": stats},
@@ -174,19 +231,51 @@ def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
 
 
 def alert(cfg: dict, now: float | None = None) -> dict | None:
-    """What the global banner should say, or None. Settings only — no network."""
+    """What the page banner should say, or None. Settings only — no network."""
     now = int(now or _now())
-    if not str(cfg.get("yt_refresh_token") or "").strip():
-        return None  # YouTube isn't used (or not connected yet): nothing to nag about
-    error = str(cfg.get("yt_auth_error") or "").strip()
-    if error:
-        since = int(cfg.get("yt_auth_error_at") or 0)
-        return {"level": "error",
-                "text": f"YouTube отключён{' с ' + fmt_when(since) if since else ''}: {auth_reason(error)}. "
-                        "Загрузки на YouTube и статистика не работают."}
-    expires_at = int(cfg.get("yt_refresh_expires_at") or 0)
-    if expires_at and expires_at - now < EXPIRY_WARN_DAYS * DAY:
-        return {"level": "warn",
-                "text": f"YouTube отключится {fmt_when(expires_at)}: Google выдал токен на 7 дней "
-                        "(приложение в режиме Testing)."}
+    conn = connection(cfg, now)
+    state, exp = conn["state"], conn["expires_at"]
+    if state == "error":
+        since = f" с {fmt_when(conn['error_at'])}" if conn["error_at"] else ""
+        text = (f"YouTube отключён{since}: {auth_reason(conn['error'])}. "
+                "Загрузки на YouTube и статистика не работают.")
+    elif state == "expired":
+        text = f"Токен YouTube истёк {fmt_when(exp)} — загрузки на YouTube и статистика остановились."
+    elif state == "expiring":
+        text = (f"Токен YouTube истекает через {conn['left']} ({fmt_when(exp)}) — переподключи, "
+                "иначе загрузки на YouTube и статистика остановятся.")
+    else:
+        return None  # ok, or YouTube isn't used at all: nothing to nag about
+    return {"level": "warn" if state == "expiring" else "error", "text": text, "reconnect": conn["reconnect"]}
+
+
+TRAY_REMIND_BEFORE = DAY  # the tray balloon comes on the last day, the page banner earlier
+_TRAY_HOW = "Правый клик по значку IndiePulse → «YouTube: переподключить»."
+
+
+def tray_reminder(cfg: dict, now: float | None = None) -> tuple[str, str] | None:
+    """(key, text) of a Windows notification for the tray app, which shows each key
+    once: on the last day before the token expires and when YouTube stops working.
+    The key changes with every reconnect, so next week reminds again."""
+    now = int(now or _now())
+    conn = connection(cfg, now)
+    state, exp = conn["state"], conn["expires_at"]
+    if state in ("error", "expired"):
+        how = _TRAY_HOW if conn["reconnect"] else "Открой настройки YouTube — Client ID / Secret не подходят."
+        return (f"off:{conn['error_at'] or exp}",
+                f"YouTube отключён — загрузки и статистика стоят. {how}")
+    if state == "expiring" and exp - now <= TRAY_REMIND_BEFORE:
+        return (f"soon:{exp}", f"Токен YouTube истекает {fmt_when(exp)} (через {conn['left']}). {_TRAY_HOW}")
     return None
+
+
+def tray_menu_label(cfg: dict, now: float | None = None) -> str:
+    """Tray menu entry for the weekly reconnect ('' = hide: YouTube not connected)."""
+    conn = connection(cfg, now)
+    if conn["state"] == "off":
+        return ""
+    if conn["state"] in ("error", "expired"):
+        return "⚠ YouTube отключён — переподключить"
+    if conn["expires_at"]:
+        return f"YouTube: переподключить (токен до {fmt_when(conn['expires_at'])})"
+    return "YouTube: переподключить"

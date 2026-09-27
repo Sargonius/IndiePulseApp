@@ -187,10 +187,9 @@ def youtube_callback(code: str = "", error: str = "", state: str = ""):
         tone = "ok"
         if refresh_ttl:
             from app.services.youtube_setup import fmt_when
-            tone = "warn"
-            body += (f"{_WARN_P}⚠ Google выдал токен только до <b>{_e(fmt_when(now + refresh_ttl))}</b> — "
-                     "приложение всё ещё в режиме <b>Testing</b>, потом YouTube снова отключится. "
-                     "Сделай шаг 3 (Publish app) и подключись ещё раз.</p>")
+            body += (f"<p>Токен действует до <b>{_e(fmt_when(now + refresh_ttl))}</b>: приложение в режиме "
+                     "<b>Testing</b>, Google выдаёт токен на 7 дней. За 2 дня до конца IndiePulse напомнит "
+                     "(баннер и уведомление в трее) — переподключишь в один клик.</p>")
         if not refresh_token:
             tone = "warn"
             body += (f"{_WARN_P}⚠ Google не вернул refresh token — через час доступ пропадёт. Открой "
@@ -230,6 +229,7 @@ def youtube_setup(request: Request):
         "links": ys.console_links(cfg.get("yt_client_id") or ""),
         "redirect_uri": _YT_REDIRECT_URI,
         "channel": (cfg.get("yt_channel") or "").strip(),
+        "connected": bool((cfg.get("yt_refresh_token") or "").strip()),
         "metrics_days": cfg.get("yt_metrics_days"),
         "live_note": live_note,
         "quota_hit": "quotaExceeded" in state["last_metric_error"],
@@ -238,16 +238,19 @@ def youtube_setup(request: Request):
 
 @router.get("/youtube/alert", response_class=HTMLResponse)
 def youtube_alert():
-    """Banner on every page while YouTube is disconnected (settings only, no network)."""
+    """Banner on every page while the YouTube token is about to expire or has stopped
+    working, with a one-click reconnect (settings only, no network)."""
     from app.services.youtube_setup import alert
     a = alert(load_settings())
     if not a:
         return HTMLResponse("")
     bg, border, fg = {"error": ("#fee2e2", "#dc2626", "#991b1b"),
                       "warn": ("#fef3c7", "#d97706", "#92400e")}[a["level"]]
+    buttons = ("<a href='/api/accounts/connect/youtube/go' target='_blank' rel='noopener' "
+               "class='btn btn-primary' style='text-decoration:none'>Переподключить ↗</a>") if a["reconnect"] else ""
+    buttons += "<a href='/accounts#yt_setup' class='btn' style='text-decoration:none'>Пошагово →</a>"
     return HTMLResponse(
         f"<div id='yt_alert' role='alert' style='margin:0 0 16px;padding:10px 14px;background:{bg};"
         f"border-left:4px solid {border};border-radius:6px;color:{fg};display:flex;gap:12px;"
         f"align-items:center;flex-wrap:wrap'><span>⚠ {_e(a['text'])}</span>"
-        "<a href='/accounts#yt_setup' class='btn btn-primary' style='margin-left:auto;text-decoration:none'>"
-        "Как починить (пошагово) →</a></div>")
+        f"<span style='margin-left:auto;display:flex;gap:8px'>{buttons}</span></div>")

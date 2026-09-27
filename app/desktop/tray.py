@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
+import time
 import webbrowser
 
 from app.desktop import ROOT
@@ -95,10 +97,42 @@ def run(background: bool) -> None:
 	def quit_app() -> None:
 		sup.quit()
 
+	def youtube_label() -> str:
+		from app.services.settings import load_settings
+		from app.services.youtube_setup import tray_menu_label
+		try:
+			return tray_menu_label(load_settings())
+		except Exception:
+			return ""
+
+	def reconnect_youtube() -> None:
+		if sup.server.state == "running":
+			webbrowser.open(url + "api/accounts/connect/youtube/go")
+		else:
+			notify("Сервер ещё запускается — попробуй через минуту.")
+
+	def youtube_watch() -> None:
+		"""Weekly-reconnect reminder (apps in Google's Testing status get 7-day YouTube
+		tokens): one balloon on the last day, one when YouTube stops; fresh menu label."""
+		from app.services.settings import load_settings
+		from app.services.youtube_setup import tray_reminder
+		shown: set = set()
+		while True:
+			try:
+				reminder = tray_reminder(load_settings())
+				if reminder and reminder[0] not in shown:
+					shown.add(reminder[0])
+					notify(reminder[1])
+				icon.update_menu()
+			except Exception:
+				logger.exception("youtube reminder failed")
+			time.sleep(600)
+
 	icon = pystray.Icon(
 		"IndiePulse", tray_image("busy"), "IndiePulse — запуск…",
 		menu=Menu(
 			Item("Открыть IndiePulse", open_ui, default=True),
+			Item(lambda _: youtube_label() or "YouTube", reconnect_youtube, visible=lambda _: bool(youtube_label())),
 			Menu.SEPARATOR,
 			Item(lambda _: sup.child_line(sup.server), None, enabled=False),
 			Item(lambda _: sup.child_line(sup.worker), None, enabled=False),
@@ -115,6 +149,7 @@ def run(background: bool) -> None:
 	def setup(ic: pystray.Icon) -> None:
 		ic.visible = True
 		sup.start()
+		threading.Thread(target=youtube_watch, name="youtube-reminder", daemon=True).start()
 		if not _SHORTCUTS_MARKER.exists():
 			make_shortcuts()  # first run: behave like an installed program
 
