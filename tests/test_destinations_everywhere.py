@@ -9,6 +9,7 @@ from sqlmodel import select
 from app.models.models import Brief, Job, JobKindEnum, Post
 from app.platforms.common import brief_for_publish, post_text_lang
 from app.services import destinations, languages
+from app.services.settings import load_settings
 from tests.conftest import reload
 from tests.test_destinations import OWNER, _publish, _with_ja, networks  # noqa: F401  (networks: a fixture)
 
@@ -147,3 +148,75 @@ def test_translate_takes_any_configured_language(client, monkeypatch):
     monkeypatch.setattr(repost, "translate", lambda data, target: {"title": f"{target}:{data['title']}"})
     assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "日本"}).status_code == 400
     assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "DE"}).json() == {"title": "de:Hi"}
+
+
+# ── the TikTok pipeline ──────────────────────────────────────────────────────
+
+def _tiktok_clip(session, tmp_path, monkeypatch, lang):
+    from app.models.models import TikTokItem
+    from app.services import video_edit
+    media = tmp_path / "media"
+    media.mkdir(exist_ok=True)
+    (media / "tt_clip_9x16.mp4").write_bytes(b"v")
+    monkeypatch.setattr(video_edit, "MEDIA_DIR", str(media))
+    brief = Brief(user_id=1, type="video", title="Convoy", text_en="Escorting the convoy", vertical_916=True,
+                  media_path="tt_clip.mp4", media_vertical_path="tt_clip_9x16.mp4")
+    session.add(brief)
+    session.commit()
+    item = TikTokItem(brief_id=brief.id, lang=lang, caption="護衛ミッション" if lang == "ja" else "Escort mission",
+                      tags="#インディーゲーム", video_rel="tt_clip_9x16.mp4")
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return item
+
+
+def _tiktok_lang(lang):
+    destinations.migrate_settings()
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]]
+    for it in items:
+        if it["module"] == "tiktok":
+            it["lang"] = lang
+    assert destinations.save(["ru", "en", "ja"], items)["ok"]
+
+
+def test_a_tiktok_clip_goes_to_the_tiktok_destination_of_its_language(session, tmp_path, monkeypatch, set_settings,
+                                                                      scheduled):
+    from app.services import tiktok_pipeline as tp
+    from tests.test_tiktok_pipeline import CONNECTED
+    set_settings(**CONNECTED)
+    _tiktok_lang("ja")
+    item = _tiktok_clip(session, tmp_path, monkeypatch, "ja")
+    tp.send(session, item, load_settings())
+    post = session.get(Post, item.post_id)
+    assert post.destination_id == "tiktok"
+    assert post_text_lang(brief_for_publish(session, post), post) == ("護衛ミッション\n\n#インディーゲーム", "ja")
+    # a clip in another language than the TikTok destination's: no destination, exactly as before
+    other = _tiktok_clip(session, tmp_path, monkeypatch, "en")
+    tp.link(session, other, str((1_760_000_000 << 32) + 777))
+    post = session.get(Post, other.post_id)
+    assert post.destination_id is None and json.loads(post.overrides_json)["text_en"] == "Escort mission\n\n#インディーゲーム"
+
+
+def test_a_factory_post_to_a_tiktok_destination_is_adopted_with_its_language(session, tmp_path, monkeypatch,
+                                                                            set_settings):
+    from datetime import datetime, timedelta
+    from app.models.models import PostStatusEnum, TikTokItem
+    from app.services import tiktok_pipeline as tp
+    from tests.test_tiktok_pipeline import CONNECTED
+    set_settings(**CONNECTED, languages=["ru", "en", "ja"])
+    _tiktok_lang("ja")
+    cfg = dict(load_settings(), tiktok_connected_at=int((datetime.utcnow() - timedelta(hours=1)).timestamp()))
+    tp.adopt_factory_posts(session, cfg)  # TikTok posts other tests left in the shared DB
+    brief = Brief(user_id=1, type="video", title="夜の襲撃", vertical_916=True, media_path="f.mp4",
+                  media_vertical_path="f_9x16.mp4")
+    languages.set_brief_texts(brief, {"ru": "Ночной рейд", "ja": "キャラバンを襲う"})
+    session.add(brief)
+    session.commit()
+    post = Post(user_id=1, brief_id=brief.id, platform="tiktok", destination_id="tiktok",
+                status=PostStatusEnum.awaiting_finish, created_at=datetime.utcnow())
+    session.add(post)
+    session.commit()
+    assert tp.adopt_factory_posts(session, cfg) == 1
+    item = session.exec(select(TikTokItem).where(TikTokItem.post_id == post.id)).one()
+    assert (item.caption, item.lang) == ("キャラバンを襲う", "ja")

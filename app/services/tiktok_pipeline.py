@@ -540,6 +540,19 @@ def stage(item, post) -> str:
     return "ready"
 
 
+def _new_post(item, cfg: Optional[dict] = None) -> Post:
+    """The TikTok post of a clip: to the TikTok destination of the clip's language when there is one (Settings →
+    Languages & destinations; the caption as that language's text), else as before — no destination, the caption
+    as text_en."""
+    from app.services import destinations
+    dest = next((d for d in destinations.all_destinations(cfg) if d["module"] == "tiktok" and d["enabled"]
+                 and d["lang"] == item.lang), None)
+    overrides = {"text_en": "", "text_ru": "", "tags_json": ""}
+    overrides[f"text_{item.lang}" if dest else "text_en"] = full_caption(item)
+    return Post(user_id=1, brief_id=item.brief_id, platform=PlatformEnum.tiktok, status=PostStatusEnum.queued,
+                destination_id=dest["id"] if dest else None, overrides_json=json.dumps(overrides, ensure_ascii=False))
+
+
 def send(session: Session, item, cfg: dict) -> None:
     """Queue the upload of the TikTok version to the account's TikTok inbox."""
     from app.jobs.tasks import publish_news_post
@@ -551,9 +564,7 @@ def send(session: Session, item, cfg: dict) -> None:
         raise PipelineError("not_ready")
     if not connection(cfg)["connected"]:
         raise PipelineError("not_connected")
-    overrides = {"text_en": full_caption(item), "text_ru": "", "tags_json": ""}
-    post = Post(user_id=1, brief_id=item.brief_id, platform=PlatformEnum.tiktok, status=PostStatusEnum.queued,
-                overrides_json=json.dumps(overrides, ensure_ascii=False))
+    post = _new_post(item, cfg)
     session.add(post)
     session.flush()  # the id, in the same transaction as the item (the tick adopts unclaimed posts)
     # allow_duplicate: the clip may have a draft from the old, lost TikTok account
@@ -633,9 +644,7 @@ def link(session: Session, item, url: str) -> None:
     if stage(item, post) == "sending":  # the upload would mark it a draft again when it ends
         raise PipelineError("busy", "The upload is still running. Link the video once it’s in the inbox.")
     if post is None or stage(item, post) == "send_failed":
-        overrides = {"text_en": full_caption(item), "text_ru": "", "tags_json": ""}
-        post = Post(user_id=1, brief_id=item.brief_id, platform=PlatformEnum.tiktok, status=PostStatusEnum.queued,
-                    overrides_json=json.dumps(overrides, ensure_ascii=False))
+        post = _new_post(item)
         session.add(post)
         session.flush()
         item.post_id = post.id
@@ -719,6 +728,7 @@ def adopt_factory_posts(session: Session, cfg: dict) -> int:
         return 0
     from app.jobs.tasks import publish_payload_for
     from app.platforms.common import post_overrides
+    from app.services import destinations, languages
     taken = set(session.exec(select(TikTokItem.post_id).where(TikTokItem.post_id.is_not(None))).all())
     posts = session.exec(select(Post).where(Post.platform == PlatformEnum.tiktok, Post.created_at >= since,
                                             Post.status.in_([PostStatusEnum.queued, PostStatusEnum.running,
@@ -733,7 +743,12 @@ def adopt_factory_posts(session: Session, cfg: dict) -> int:
             continue
         texts = default_texts(brief)
         own = post_overrides(post)
-        caption = clean_caption(own.get("text_en") or own.get("text_ru") or "") or texts["caption"]
+        dest = destinations.get(post.destination_id, cfg) if post.destination_id else None
+        if dest is not None:  # the factory's post to a TikTok destination: the text in its language
+            mine = own.get(f"text_{dest['lang']}") or languages.brief_text(brief, dest["lang"], cfg)
+        else:
+            mine = own.get("text_en") or own.get("text_ru") or ""
+        caption = clean_caption(mine) or texts["caption"]
         media = _rel(publish_payload_for(session, post.id).get("media_rel")) or _rel(brief.media_vertical_path)
         item = TikTokItem(brief_id=brief.id, post_id=post.id, source="factory",
                           lang=repost.detect_lang(caption) or texts["lang"], caption=caption,
