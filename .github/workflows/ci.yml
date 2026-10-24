@@ -1,0 +1,44 @@
+# Tests and pyflakes on every push to main and every pull request into it.
+# Windows, because that's the only place IndiePulse runs (tray, job objects, ctypes); Python 3.12 from uv, the
+# packages from requirements.lock (requirements-dev.txt adds pytest and pyflakes on top of it).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            requirements*.txt
+            requirements.lock
+
+      # one command per step: a step's pwsh script fails only by its last command's exit code
+      - name: Python 3.12
+        run: uv venv --python 3.12 .venv
+
+      - name: Dependencies
+        run: uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
+
+      - name: pyflakes
+        run: .venv\Scripts\python.exe tools\lint.py
+
+      - name: pytest
+        run: .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
