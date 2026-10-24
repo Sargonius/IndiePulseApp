@@ -76,14 +76,8 @@
 		</div>
 		<form id="edit_post_form" onsubmit="submitEditPost(event)">
 			<input type="hidden" name="post_id" id="edit_post_id" />
-			<div class="form-group">
-				<label>Text (RU)</label>
-				<textarea name="text_ru" id="edit_text_ru" rows="4"></textarea>
-			</div>
-			<div class="form-group">
-				<label>Text (EN)</label>
-				<textarea name="text_en" id="edit_text_en" rows="4"></textarea>
-			</div>
+			<!-- a text per language of Settings → Languages (and any other one the post has), filled by openEditModal -->
+			<div id="edit_texts"></div>
 			<div class="form-group">
 				<label>Tags</label>
 				<input type="text" name="tags" id="edit_tags" />
@@ -108,22 +102,7 @@
 			<h3>View Post Text</h3>
 			<button class="modal-close" onclick="closeViewModal()">&times;</button>
 		</div>
-		<div class="form-group">
-			<label>Text (RU)</label>
-			<div class="row" style="gap:8px; align-items:center;">
-				<button type="button" class="btn btn-sm" onclick="copyText('view_text_ru')">Copy</button>
-				<span id="copy_status_ru" class="muted" style="font-size:12px;"></span>
-			</div>
-			<textarea id="view_text_ru" rows="6" readonly></textarea>
-		</div>
-		<div class="form-group">
-			<label>Text (EN)</label>
-			<div class="row" style="gap:8px; align-items:center;">
-				<button type="button" class="btn btn-sm" onclick="copyText('view_text_en')">Copy</button>
-				<span id="copy_status_en" class="muted" style="font-size:12px;"></span>
-			</div>
-			<textarea id="view_text_en" rows="6" readonly></textarea>
-		</div>
+		<div id="view_texts"></div>
 	</div>
 </div>
 
@@ -238,14 +217,25 @@ async function deleteRemote(postId) {
 	}
 }
 
+// One field per language: data.languages from /edit_data; the language this post goes out in is marked.
+function langFieldsHtml(data, prefix, readonly) {
+	const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	const texts = (data.brief && data.brief.texts) || {};
+	return (data.languages || []).map(l => {
+		const mark = data.post && data.post.lang === l.code ? ' <span class="muted" style="font-weight:400;">— this post goes out in it</span>' : '';
+		const copy = readonly ? `<div class="row" style="gap:8px; align-items:center;"><button type="button" class="btn btn-sm" onclick="copyText('${prefix}${l.code}')">Copy</button><span id="copy_status_${l.code}" class="muted" style="font-size:12px;"></span></div>` : '';
+		return `<div class="form-group"><label>Text (${esc(l.code.toUpperCase())}) <span class="muted" style="font-weight:400;">${esc(l.name)}</span>${mark}</label>${copy}`
+			+ `<textarea ${readonly ? 'readonly' : `name="text_${esc(l.code)}"`} id="${prefix}${esc(l.code)}" rows="${readonly ? 6 : 4}">${esc(texts[l.code] || '')}</textarea></div>`;
+	}).join('');
+}
+
 async function openEditModal(postId) {
 	try {
 		const resp = await fetch(`/api/posts/${postId}/edit_data`);
 		const data = await resp.json();
-		
+
 		document.getElementById('edit_post_id').value = postId;
-		document.getElementById('edit_text_ru').value = data.brief?.text_ru || '';
-		document.getElementById('edit_text_en').value = data.brief?.text_en || '';
+		document.getElementById('edit_texts').innerHTML = langFieldsHtml(data, 'edit_text_', false);
 		document.getElementById('edit_tags').value = data.brief?.tags_json || '';
 		document.getElementById('edit_scheduled_at').value = data.post?.scheduled_at?.slice(0, 16) || '';
 		
@@ -263,10 +253,7 @@ async function openViewModal(postId) {
 	try {
 		const resp = await fetch(`/api/posts/${postId}/edit_data`);
 		const data = await resp.json();
-		document.getElementById('view_text_ru').value = data.brief?.text_ru || '';
-		document.getElementById('view_text_en').value = data.brief?.text_en || '';
-		document.getElementById('copy_status_ru').textContent = '';
-		document.getElementById('copy_status_en').textContent = '';
+		document.getElementById('view_texts').innerHTML = langFieldsHtml(data, 'view_text_', true);
 		document.getElementById('view_post_modal').style.display = 'flex';
 	} catch (e) {
 		alert('Failed to load post data: ' + e.message);
@@ -294,11 +281,8 @@ async function copyText(id) {
 			ok = false;
 		}
 	}
-	if (id === 'view_text_ru') {
-		document.getElementById('copy_status_ru').textContent = ok ? 'Copied' : 'Copy failed';
-	} else if (id === 'view_text_en') {
-		document.getElementById('copy_status_en').textContent = ok ? 'Copied' : 'Copy failed';
-	}
+	const status = document.getElementById('copy_status_' + id.replace('view_text_', ''));
+	if (status) status.textContent = ok ? 'Copied' : 'Copy failed';
 }
 
 async function submitEditPost(e) {

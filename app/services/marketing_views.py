@@ -92,7 +92,7 @@ def audience_rows(session: Session, cfg: dict, statuses: dict[str, dict], today:
     """Followers per social account (biggest first) and the accounts not connected."""
     rows, missing = [], []
     start30 = mk.shift(today, -29)
-    for ch in audience.CHANNELS:
+    for ch in audience.channels(cfg):
         st = statuses.get(ch.key) or {}
         last = mk.level_on_or_before(session, 0, ch.metric, today)
         if last is None:

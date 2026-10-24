@@ -1,7 +1,6 @@
 """App-level endpoints: restart/autoreload, settings save + status, API health check."""
 
 from app.services.settings import load_settings
-from app.services.settings import save_settings
 from fastapi import APIRouter
 from fastapi import Form
 from fastapi import Query
@@ -239,7 +238,9 @@ def save_settings_endpoint(
 			updates["discord_upload_limit_mb"] = max(1, min(500, int(float(discord_upload_limit_mb))))
 		except ValueError:
 			pass
-	save_settings(updates)
+	# a chat id / Page / subreddit set up here reaches a destination (Settings → Languages & destinations)
+	from app.services import destinations
+	destinations.save_keys(updates)
 	# Ask htmx to reload the page so new values are visible
 	return Response(content="", headers={"HX-Redirect": "/accounts"})
 

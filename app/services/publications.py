@@ -181,16 +181,18 @@ def _gain(s: mk.Samples, metric: str, pid: int, t0: datetime, end: datetime) -> 
     return after[1] - before[1] if before and after else None
 
 
-def follower_gain(s: mk.Samples, pub: dict, now: datetime, hours: int = WINDOW_H) -> dict:
+def follower_gain(s: mk.Samples, pub: dict, now: datetime, hours: int = WINDOW_H,
+                  chans: Optional[list] = None) -> dict:
     """Followers gained in the first `hours` after a publication (or so far): on the
     accounts it went to, and on all of them. None where there's no read before/after."""
     t0 = pub["t0"]
     end = min(now, t0 + timedelta(hours=hours))
-    platforms = set(pub["platforms"])
+    chans = chans if chans is not None else audience.channels()
+    went = audience.reached(chans, pub["posts"])
     posted = every = None
     counted, missing = [], []
-    for ch in audience.CHANNELS:
-        here = bool(platforms & set(ch.platforms))
+    for ch in chans:
+        here = ch.key in went
         g = _gain(s, ch.metric, 0, t0, end)
         if g is None:
             if here:
@@ -210,8 +212,9 @@ def with_gains(session: Session, pubs: list[dict], now: Optional[datetime] = Non
     now = now or datetime.utcnow()
     if pubs:
         s = mk.Samples(session, min(p["t0"] for p in pubs) - BEFORE_MAX_AGE)
+        chans = audience.channels()
         for p in pubs:
-            p["gain"] = follower_gain(s, p, now)
+            p["gain"] = follower_gain(s, p, now, chans=chans)
     return pubs
 
 
@@ -240,7 +243,9 @@ def report(session: Session, brief: Brief, now: Optional[datetime] = None) -> di
     t0 = min(p.published_at for p in done)
     platforms = {_key(p.platform) for p in done}
     s = mk.Samples(session, t0 - timedelta(days=USUAL_DAYS + 2))
-    targets = [(ch.label, ch.metric, 0, bool(platforms & set(ch.platforms))) for ch in audience.CHANNELS]
+    chans = audience.channels()
+    went = audience.reached(chans, done)  # each destination counted on its own is its own account
+    targets = [(ch.label, ch.metric, 0, ch.key in went) for ch in chans]
     if project and project.steam_app_id:
         targets.append((f"Steam: {project.name}", "steam_followers", project.id, True))
     end = min(now, t0 + timedelta(hours=WINDOW_H))
@@ -274,7 +279,7 @@ def report(session: Session, brief: Brief, now: Optional[datetime] = None) -> di
         })
     rows.sort(key=lambda r: (not r["posted"], r["steam"], -(r["now"] or r["before"] or 0)))
     social = [r for r in rows if not r["steam"] and r["window_delta"] is not None]
-    posted_labels = [ch.label for ch in audience.CHANNELS if platforms & set(ch.platforms)]
+    posted_labels = [ch.label for ch in chans if ch.key in went]
     counted = [r["label"] for r in social if r["posted"]]
     others = [p for p in published(session, t0 - timedelta(hours=24), t0 + timedelta(hours=WINDOW_H))
               if p["brief"].id != brief.id]

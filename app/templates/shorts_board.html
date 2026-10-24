@@ -3,6 +3,9 @@
 {% include "partials/shorts_tabs.html" %}
 <p class="muted" style="margin-top:0;">All Shorts and their status on each network. A Short took off? Hit <b>📣 Cross-post</b> on its card to send it to other networks, each with its own caption and language.</p>
 {% include "partials/shorts_tips.html" %}
+{% if skipped %}
+<p class="sb-skipped" style="margin:8px 0; padding:8px 12px; border:1px solid #fcd34d; background:#fffbeb; border-radius:8px; font-size:13px;">Left out of this batch: {{ skipped | join(', ') }}. <a href="/accounts#section_languages">Languages &amp; destinations →</a></p>
+{% endif %}
 <div class="toolbar" style="margin:8px 0;">
 	<button class="btn" hx-get="/shorts/board/partial" hx-target="#shorts_board" hx-swap="innerHTML">Refresh</button>
 	<button class="btn" hx-post="/shorts/board/refresh_metrics" hx-target="#shorts_board" hx-swap="innerHTML">↻ Metrics</button>

@@ -299,12 +299,13 @@ def shorts_lint(data: Optional[dict] = Body(None), session: Session = Depends(ge
 # ---- Shorts: translation + repost to more networks ----------------------------
 @router.post("/shorts/translate")
 def shorts_translate(data: Optional[dict] = Body(None)):
-    """{title, desc, tags, target: en|ja|ru} → the same fields translated (no side effects)."""
-    from app.services import repost
+    """{title, desc, tags, target: a language code (ja, de, pt-br...)} → the same fields translated (no side
+    effects)."""
+    from app.services import languages, repost
     data = data or {}
-    target = str(data.get("target") or "")
-    if target not in repost.LANGS:
-        raise HTTPException(status_code=400, detail="target must be one of en, ja, ru")
+    target = languages.normalize_code(data.get("target"))
+    if target is None:
+        raise HTTPException(status_code=400, detail="target must be a language code, like ja or de")
     try:
         return repost.translate(data, target)
     except repost.TranslateError as exc:
@@ -313,8 +314,8 @@ def shorts_translate(data: Optional[dict] = Body(None)):
 
 @router.post("/shorts/{brief_id}/repost")
 def shorts_repost(brief_id: int, data: Optional[dict] = Body(None), session: Session = Depends(get_session)):
-    """Queue a published short on more networks: {items: [{platform, lang, title, text,
-    tags, text_ru, text_en}], allow_duplicate} → {created, skipped}."""
+    """Queue a published short on more destinations: {items: [{destination, lang, title, text,
+    tags}], allow_duplicate} → {created, skipped}."""
     from app.models.models import Brief
     from app.services import repost
     data = data or {}
@@ -323,7 +324,7 @@ def shorts_repost(brief_id: int, data: Optional[dict] = Body(None), session: Ses
         raise HTTPException(status_code=404, detail="short not found")
     items = data.get("items") if isinstance(data.get("items"), list) else []
     try:
-        return repost.create_reposts(session, brief, items[:20], allow_duplicate=bool(data.get("allow_duplicate")))
+        return repost.create_reposts(session, brief, items[:60], allow_duplicate=bool(data.get("allow_duplicate")))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

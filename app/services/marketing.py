@@ -76,12 +76,26 @@ METRICS: dict[str, dict] = {
 }
 
 
+# The followers of a destination counted on its own (app.services.audience.DESTINATION_METRICS):
+# "<the network's metric>:<destination id>", a level like the network's own.
+_DESTINATION_FOLLOWERS = {"tg_subscribers": "Telegram", "fb_followers": "Facebook", "reddit_subscribers": "Reddit"}
+
+
+def _spec(metric: str) -> dict:
+    spec = METRICS.get(metric)
+    if spec is None and ":" in str(metric):
+        base, dest = str(metric).split(":", 1)
+        if base in _DESTINATION_FOLLOWERS:
+            spec = {"label": f"{_DESTINATION_FOLLOWERS[base]} {dest}: followers", "kind": "level", "scope": "global"}
+    return spec or {}
+
+
 def metric_kind(metric: str) -> str:
-    return (METRICS.get(metric) or {}).get("kind", "flow")
+    return _spec(metric).get("kind", "flow")
 
 
 def metric_label(metric: str) -> str:
-    return (METRICS.get(metric) or {}).get("label", metric)
+    return _spec(metric).get("label", metric)
 
 
 # ── dates ────────────────────────────────────────────────────────────────────

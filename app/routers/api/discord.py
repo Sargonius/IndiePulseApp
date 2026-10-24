@@ -1,8 +1,8 @@
 """Discord webhook settings and test."""
 
+from app.services import destinations
 from app.services.discord_client import DiscordClient
 from app.services.settings import load_settings
-from app.services.settings import save_settings
 from fastapi import APIRouter
 from fastapi import Form
 from fastapi import HTTPException
@@ -16,7 +16,8 @@ def save_discord_webhook(url: str = Form(...)):
     url = (url or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="Empty webhook URL")
-    save_settings({"discord_webhook_url": url})
+    # the webhook reaches a destination even when the migration made none for this field
+    destinations.save_keys({"discord_webhook_url": url})
     # Return small HTML snippet for htmx
     return HTMLResponse("<span style='color:green'>Discord webhook saved</span>")
 
@@ -29,7 +30,7 @@ def save_discord_webhooks(url_ru: str = Form(""), url_en: str = Form("")):
     if (url_en or "").strip():
         updates["discord_webhook_en"] = url_en.strip()
     if updates:
-        save_settings(updates)
+        destinations.save_keys(updates)
     return HTMLResponse("<span style='color:green'>Webhooks updated</span>")
 
 
