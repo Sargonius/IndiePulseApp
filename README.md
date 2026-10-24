@@ -2,6 +2,7 @@
 
 Local-first Windows app to write, schedule and cross-post news posts and short videos
 (Telegram, Discord, VK, X, YouTube, Facebook, Instagram Reels, Reddit, TikTok, Bluesky).
+Free and open source (MIT); donations welcome: [paypal.me/sargoniusgames](https://paypal.me/sargoniusgames).
 
 ## Install / update
 
@@ -219,8 +220,10 @@ creates the GitHub Release with both attached, using only `GITHUB_TOKEN`. Instal
 A broken release: release a fixed, higher version. Installs that took the broken one went back by themselves only if
 it didn't start; the others update to the fix at their next check.
 
-## License
-Proprietary — all rights reserved.
+## Support and license
+IndiePulse is free (MIT license, see `LICENSE`). If it saves you time, you can support it with a donation:
+[paypal.me/sargoniusgames](https://paypal.me/sargoniusgames) — also the ❤ link at the bottom of every page and the
+Sponsor button on GitHub.
 
 
 ## Facebook API setup (Page posting)

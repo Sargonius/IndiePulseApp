@@ -72,6 +72,7 @@
 		<div class="container">
 			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '' }}</span>
 			{% if request and request.app and request.app.state and request.app.state.app_last_change %}<span>Last change: {{ request.app.state.app_last_change }}</span>{% endif %}
+			<span><a href="https://paypal.me/sargoniusgames" target="_blank" rel="noopener" title="IndiePulse is free; a donation helps keep it going">❤ Support IndiePulse</a></span>
 		</div>
 	</footer>
 

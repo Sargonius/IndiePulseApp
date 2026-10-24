@@ -68,3 +68,7 @@ node_modules/
 .coverage
 .pytest_cache/
 vendor/ffmpeg/*.exe
+
+# Claude Code: local permissions and worktrees of this machine
+.claude/settings.local.json
+.claude/worktrees/
