@@ -359,6 +359,10 @@ def bsky(monkeypatch, tmp_path):
     from app.services import bluesky_client
     monkeypatch.setattr(bluesky_client.httpx, "Client", FakeBskyHttp)
     monkeypatch.setattr(time, "sleep", lambda s: None)
+    # the aspect-ratio probe needs ffprobe; without vendor/ffmpeg (CI, a fresh checkout) it would try to
+    # download ffmpeg through the faked client and show up in the request log
+    from app.services import video_editor
+    monkeypatch.setattr(video_editor, "_probe_video_info", lambda path: {})
     FakeBskyHttp.log = []
     blob = {"$type": "blob", "ref": {"$link": "bafyvideo"}, "mimeType": "video/mp4", "size": 3}
     FakeBskyHttp.routes = {
