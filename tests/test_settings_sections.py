@@ -109,3 +109,17 @@ def test_the_old_save_keeps_working_and_comes_back_where_it_was(client):
     r = client.post("/api/settings/save", data={"vk_group_id": "456"},
                     headers={"HX-Current-URL": "http://127.0.0.1:8000/setup?step=accounts"})
     assert r.headers["HX-Redirect"] == "/setup?step=accounts" and load_settings()["vk_group_id"] == "456"
+
+
+def test_a_section_save_brings_a_target_to_a_destination(client, set_settings):
+    # like the old /api/settings/save (app.services.destinations.save_keys): a chat id / webhook / subreddit set
+    # up later through its section reaches a destination, even one removed in the editor
+    from app.services import destinations
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]
+             if d["id"] != "telegram-ru"]
+    assert destinations.save(["ru", "en"], items)["ok"] and destinations.get("telegram-ru") is None
+    client.post("/api/settings/section/telegram", data={"tg_bot_token": "1:abc", "tg_chat_id_ru": "-100500"})
+    dest = destinations.get("telegram-ru")
+    assert dest["target"] == {"chat_id": "-100500"} and destinations.ready(dest)
+    client.post("/api/settings/section/discord", data={"discord_webhook_url": "https://hook/one"})
+    assert destinations.get("discord")["target"] == {"webhook": "https://hook/one"}

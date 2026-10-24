@@ -4,7 +4,7 @@
 	<h2>📣 Cross-post Short</h2>
 	<a href="/shorts/board" class="btn">← Shorts board</a>
 </div>
-<p class="muted" style="margin-top:0;">The Short took off? Send it further. Each network gets its own caption and language; translations fill in on their own, and you can edit them right in the card.</p>
+<p class="muted" style="margin-top:0;">The Short took off? Send it further. Each destination (<a href="/accounts#section_languages">Settings → Languages &amp; destinations</a>) gets its own caption, in its language by default; translations fill in on their own, and you can edit them right in the card.</p>
 
 <div class="rp-layout">
 	<aside class="rp-side">
@@ -97,8 +97,9 @@
 <script>
 const CTX = {{ ctx|tojson }};
 const SRC = CTX.source;
-const LANG_LABEL = { en: 'EN', ja: 'JA', ru: 'RU' };
-const tr = { [SRC.lang]: { title: SRC.title, desc: SRC.desc, tags: SRC.tags } };  // lang → texts
+const LANG_LABEL = l => String(l || '').toUpperCase();
+// lang → texts: the short's own language and what the factory already wrote; the rest is translated
+const tr = { ...CTX.texts };
 const trPending = {};    // lang → Promise
 const trError = {};      // lang → message
 const cards = [];
@@ -156,15 +157,16 @@ function ensureLang(lang) {
 	return trPending[lang];
 }
 function showTrStatus() {
-	const busy = Object.keys(trPending).map(l => LANG_LABEL[l]);
-	const bad = Object.keys(trError).map(l => LANG_LABEL[l]);
+	const busy = Object.keys(trPending).map(LANG_LABEL);
+	const bad = Object.keys(trError).map(LANG_LABEL);
 	let s = busy.length ? `🌐 translating: ${busy.join(', ')}…` : '';
 	if (bad.length) s += (s ? ' · ' : '') + `⚠ not translated: ${bad.join(', ')}`;
 	document.getElementById('tr_status').textContent = s;
 }
 
-// ---- one card per network -------------------------------------------------
-function cardLang(p) { return p.lang === 'src' ? SRC.lang : p.lang; }
+// ---- one card per destination ---------------------------------------------
+// in the destination's language; one that takes only its own language can't switch
+function cardLang(p) { return p.lang; }
 
 function buildCard(p) {
 	const root = document.createElement('div');
@@ -177,13 +179,12 @@ function buildCard(p) {
 	else if (ex && ex.state === 'live') state = ex.url ? `<a class="badge success rp-state" href="${esc(ex.url)}" target="_blank" rel="noopener">already live ↗</a>` : '<span class="badge success rp-state">already live</span>';
 	else if (ex && ex.state === 'pending') state = '<span class="badge running rp-state">queued</span>';
 	else if (ex) state = `<span class="badge error rp-state" title="${esc(ex.error)}">✗ failed before</span>`;
-	const dual = p.lang === 'dual';
-	const langSwitch = dual ? '' : `<span class="rp-langs">${['en','ja','ru'].map(l => `<button type="button" data-l="${l}">${LANG_LABEL[l]}</button>`).join('')}</span>`;
+	const langSwitch = p.own_only
+		? `<span class="rp-langs" title="Takes only its own language"><button type="button" class="rp-active" disabled>${LANG_LABEL(p.lang)}</button></span>`
+		: `<span class="rp-langs">${CTX.langs.map(l => `<button type="button" data-l="${esc(l.code)}" title="${esc(l.name)}">${LANG_LABEL(l.code)}</button>`).join('')}</span>`;
 	let fields = '';
 	if (p.title_only) {
 		fields = `<div class="rp-lbl">Post title</div><input type="text" class="rp-title" maxlength="300" />`;
-	} else if (dual) {
-		fields = p.dual_langs.map(l => `<div class="rp-lbl">${l === 'ru' ? 'RU channel' : 'EN channel'}</div><textarea class="rp-dual" data-l="${l}" rows="4"></textarea>`).join('');
 	} else {
 		fields = `<div class="rp-lbl">Caption</div><textarea class="rp-text" rows="5"></textarea>`;
 		if (p.tags) fields += `<div class="rp-lbl">Hashtags</div><input type="text" class="rp-tags" />`;
@@ -206,13 +207,12 @@ function buildCard(p) {
 		title: root.querySelector('.rp-title'),
 		text: root.querySelector('.rp-text'),
 		tags: root.querySelector('.rp-tags'),
-		duals: [...root.querySelectorAll('.rp-dual')],
 		bar: root.querySelector('.rp-bar'),
 		count: root.querySelector('.rp-count'),
 	};
 	card.pick.checked = p.configured && !live;
 	card.pick.addEventListener('change', () => { syncPicked(card); updateGo(); });
-	root.querySelectorAll('.rp-langs button').forEach(b => b.addEventListener('click', () => switchLang(card, b.dataset.l)));
+	root.querySelectorAll('.rp-langs button[data-l]').forEach(b => b.addEventListener('click', () => switchLang(card, b.dataset.l)));
 	root.addEventListener('input', () => updateCount(card));
 	root.querySelector('.rp-copy').addEventListener('click', (e) => {
 		navigator.clipboard.writeText(captionOf(card)).then(() => { e.target.textContent = '✓'; setTimeout(() => e.target.textContent = '📋', 1200); });
@@ -226,10 +226,10 @@ function syncPicked(card) {
 	card.root.classList.toggle('rp-off', !card.p.configured);
 }
 function markLang(card) {
-	card.root.querySelectorAll('.rp-langs button').forEach(b => b.classList.toggle('rp-active', b.dataset.l === card.lang));
+	card.root.querySelectorAll('.rp-langs button[data-l]').forEach(b => b.classList.toggle('rp-active', b.dataset.l === card.lang));
 }
 function inputs(card) {
-	return [card.title, card.text, card.tags, ...card.duals].filter(Boolean);
+	return [card.title, card.text, card.tags].filter(Boolean);
 }
 function setBusy(card, busy, msg) {
 	inputs(card).forEach(el => el.disabled = busy);
@@ -251,27 +251,11 @@ function fillFrom(card, t) {
 }
 
 async function fillCard(card) {
-	if (card.p.lang === 'dual') {
-		for (const ta of card.duals) {
-			const l = ta.dataset.l;
-			try {
-				setBusy(card, true, '🌐 translating…');
-				ta.value = compose(await ensureLang(l));
-				setBusy(card, false);
-			} catch (e) {
-				setBusy(card, false);
-				card.msg.className = 'rp-msg err';
-				card.msg.textContent = `⚠ ${LANG_LABEL[l]}: ${e.message} — type the text yourself or untick it`;
-			}
-		}
-		updateCount(card);
-		return;
-	}
 	const lang = card.lang;
 	markLang(card);
 	if (card.edits[lang]) { restore(card, card.edits[lang]); updateCount(card); return; }
 	try {
-		setBusy(card, !tr[lang], tr[lang] ? '' : `🌐 translating to ${LANG_LABEL[lang]}…`);
+		setBusy(card, !tr[lang], tr[lang] ? '' : `🌐 translating to ${LANG_LABEL(lang)}…`);
 		const t = await ensureLang(lang);
 		if (card.lang !== lang) return;  // switched again while waiting
 		fillFrom(card, t);
@@ -281,7 +265,7 @@ async function fillCard(card) {
 		setBusy(card, false);
 		card.pick.checked = false; syncPicked(card); updateGo();
 		card.msg.className = 'rp-msg err';
-		card.msg.innerHTML = `⚠ translation to ${LANG_LABEL[lang]} failed: ${esc(e.message)} — type the text yourself or <a href="#" class="rp-retry">retry</a>`;
+		card.msg.innerHTML = `⚠ translation to ${LANG_LABEL(lang)} failed: ${esc(e.message)} — type the text yourself or <a href="#" class="rp-retry">retry</a>`;
 		card.msg.querySelector('.rp-retry').addEventListener('click', ev => { ev.preventDefault(); fillCard(card); });
 	}
 	updateCount(card);
@@ -296,14 +280,13 @@ function switchLang(card, lang) {
 
 function captionOf(card) {
 	if (card.title) return card.title.value.trim();
-	if (card.duals.length) return card.duals.map(t => t.value.trim()).filter(Boolean).join('\n\n');
 	const text = card.text.value.trim(), tags = card.tags ? card.tags.value.trim() : '';
 	return [text, tags].filter(Boolean).join('\n');
 }
 function updateCount(card) {
 	const limit = card.p.limit;
-	const pieces = card.duals.length ? card.duals.map(t => t.value.trim()) : [captionOf(card)];
-	const len = Math.max(0, ...pieces.map(s => card.p.count === 'x' ? xLength(s) : graphemes(s)));
+	const caption = captionOf(card);
+	const len = card.p.count === 'x' ? xLength(caption) : graphemes(caption);
 	const nTags = (captionOf(card).match(/#[^\s#]+/g) || []).length;
 	const tagNote = card.tags ? ` · ${nTags} ${nTags === 1 ? 'tag' : 'tags'}` : '';
 	if (!limit) {
@@ -323,7 +306,7 @@ function updateGo() {
 	const n = cards.filter(c => c.pick.checked).length;
 	const go = document.getElementById('rp_go');
 	go.disabled = n === 0;
-	go.textContent = n ? `Cross-post to ${n} ${n === 1 ? 'network' : 'networks'} →` : 'Cross-post →';
+	go.textContent = n ? `Cross-post to ${n} ${n === 1 ? 'destination' : 'destinations'} →` : 'Cross-post →';
 }
 
 document.getElementById('pick_all').addEventListener('click', () => {
@@ -337,22 +320,20 @@ document.getElementById('pick_none').addEventListener('click', () => {
 
 const REASONS = {
 	already: 'already live or queued (tick “even where this Short is already live”)',
-	not_configured: 'network not connected',
+	not_configured: 'not connected',
 	empty_text: 'empty caption',
-	unknown_platform: 'unknown network', twice: 'listed twice',
+	unknown_destination: 'no such destination any more', turned_off: 'turned off in Settings',
+	twice: 'listed twice',
 };
 document.getElementById('rp_go').addEventListener('click', async () => {
 	const picked = cards.filter(c => c.pick.checked);
 	if (!picked.length) return;
 	if (picked.some(c => inputs(c).some(el => el.disabled))) { alert('Wait — a translation is still running'); return; }
 	const items = picked.map(c => {
-		const it = { platform: c.p.key, lang: c.lang };
+		const it = { destination: c.p.id, lang: c.lang };
 		if (c.title) it.title = c.title.value;
 		if (c.text) it.text = c.text.value;
 		if (c.tags) it.tags = c.tags.value;
-		c.duals.forEach(t => {
-			if (t.dataset.l === 'default') it.text = t.value; else it['text_' + t.dataset.l] = t.value;
-		});
 		return it;
 	});
 	const go = document.getElementById('rp_go');
@@ -366,14 +347,14 @@ document.getElementById('rp_go').addEventListener('click', async () => {
 		const j = await r.json().catch(() => ({}));
 		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
 		const rep = document.getElementById('rp_report');
-		const label = k => (CTX.platforms.find(p => p.key === k) || { label: k }).label;
-		rep.innerHTML = (j.created || []).map(c => `<div>✓ ${esc(label(c.platform))} — queued</div>`).join('')
-			+ (j.skipped || []).map(s => `<div>— ${esc(label(s.platform))}: ${esc(REASONS[s.reason] || s.reason)}</div>`).join('')
+		const label = id => (CTX.destinations.find(d => d.id === id) || { label: id }).label;
+		rep.innerHTML = (j.created || []).map(c => `<div>✓ ${esc(label(c.destination))} — queued</div>`).join('')
+			+ (j.skipped || []).map(s => `<div>— ${esc(label(s.destination))}: ${esc(REASONS[s.reason] || s.reason)}</div>`).join('')
 			+ '<div style="margin-top:6px;"><a href="/shorts/board">See statuses on the board →</a></div>';
 		rep.hidden = false;
 		document.getElementById('rp_result').textContent = (j.created || []).length ? 'Done ✓' : 'Nothing sent';
 		(j.created || []).forEach(c => {
-			const card = cards.find(x => x.p.key === c.platform);
+			const card = cards.find(x => x.p.id === c.destination);
 			if (card) { card.pick.checked = false; card.pick.disabled = true; syncPicked(card); }
 		});
 	} catch (e) {
@@ -383,12 +364,13 @@ document.getElementById('rp_go').addEventListener('click', async () => {
 });
 
 // ---- init -------------------------------------------------------------------
-document.getElementById('src_lang').textContent = LANG_LABEL[SRC.lang] || SRC.lang;
+document.getElementById('src_lang').textContent = LANG_LABEL(SRC.lang);
 document.getElementById('src_title').textContent = SRC.title || '(no title)';
 document.getElementById('src_desc').textContent = SRC.desc;
 document.getElementById('src_tags').textContent = SRC.tags;
 const host = document.getElementById('rp_cards');
-CTX.platforms.forEach(p => { const c = buildCard(p); cards.push(c); host.appendChild(c.root); });
+CTX.destinations.forEach(p => { const c = buildCard(p); cards.push(c); host.appendChild(c.root); });
+if (!CTX.destinations.length) host.innerHTML = '<span class="muted">No destinations to cross-post to — add them in <a href="/accounts#section_languages">Settings → Languages &amp; destinations</a>.</span>';
 // configured networks first, so the cards to post sit on top
 cards.slice().sort((a, b) => (b.p.configured - a.p.configured)).forEach(c => host.appendChild(c.root));
 cards.forEach(c => fillCard(c));

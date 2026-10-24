@@ -118,19 +118,38 @@ empty ones from it (the AI from Settings, else machine translation). **Destinati
 with its language — a Telegram channel, Discord webhook, Facebook Page or subreddit per language (as many as you
 like), and one for each single-account network (VK, X, Bluesky, YouTube, TikTok, Instagram), where you pick the
 language. A post sends each destination the text in its language, else the first language's, else any; a destination
-marked "only its language" gets nothing instead (the RU/EN Discord webhooks are, as they always behaved). The post
-forms tick destinations, not platforms.
+marked "only its language" gets nothing instead (the RU/EN Discord webhooks are, as they always behaved). Every
+place that publishes ticks destinations, not platforms:
+
+- 📷 Post and 🎬 Video: one post per ticked destination.
+- 🎞️ Shorts factory: a title, description and hashtags per language on every clip (the shared description and
+  hashtags fill the first language; **Translate missing** per clip or for the selected ones). After the render each
+  ticked destination gets a post with that language's texts (none written: the first language's). One "only its
+  language" without a text in it is left out and named on the board.
+- 📣 Cross-post a short: a card per destination (Instagram, X, Bluesky, Reddit, Facebook, VK, Telegram, Discord) in its
+  language, switchable to any language of Settings; "already live" means on that destination, so a short live on the
+  RU channel can still go to the JA one.
+- /tiktok: a clip goes to the TikTok destination when that is in the clip's language (otherwise as before).
+- Posts → ✎ Edit (and the calendar's Edit) edits the text of every language.
+- 🩺 checks every destination's channel, webhook, Page and subreddit (a turned-off one is only noted), and the
+  follower counts read each of them: the targets of the old keys keep their metrics and history (`tg_subscribers`,
+  `fb_ru_followers`…), any other destination is counted as `<metric>:<destination id>` with a row of its own.
+
+Details:
 
 - Stored in the settings (`languages`, `destinations`); texts in `Brief.texts_json`, with `text_ru` / `text_en` kept
   as mirrors (`app/services/languages.py`, `app/services/destinations.py`). A post knows its destination by
-  `Post.destination_id`.
+  `Post.destination_id`; a post's own texts (a factory title in another language, a cross-post caption) are in
+  `Post.overrides_json`.
 - On the first start they are built from the old per-language keys (Telegram chat, Discord RU/EN webhooks, Facebook
   RU/EN pages, subreddits — the RU subreddit comes in off: it was never posted to) and stay **linked** to them:
-  editing either changes both, and the old keys are never deleted, so a rollback keeps working.
-- Posts queued before (and reposts / Shorts factory posts, which pick platforms) have no destination and publish
-  exactly as before. A destination removed or turned off while a post waits for it fails that post
-  (`destination_off`, Retry after fixing) instead of sending it somewhere else; a module that is off in 🧩 hides its
-  destinations.
+  editing either changes both, and the old keys are never deleted, so a rollback keeps working. A target set up
+  later through its old Settings section (the Telegram chat id, the Discord webhook field, Facebook "Use as RU/EN",
+  the subreddit) reaches a destination too: one is added, linked, when none uses that key.
+- Posts queued before (and Shorts renders queued before, `/news` tabs left open, scripts that send platforms) have
+  no destination and publish exactly as before. A destination removed or turned off while a post waits for it fails
+  that post (`destination_off`, Retry after fixing) instead of sending it somewhere else; a module that is off in 🧩
+  hides its destinations. The old `/news` page redirects to 📷 Post.
 
 ## AI & translation
 

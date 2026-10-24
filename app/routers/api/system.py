@@ -2,8 +2,8 @@
 check."""
 
 from app.services.settings import load_settings
-from app.services.settings import save_settings
 from app.core import settings_schema
+from app.services import destinations
 from fastapi import APIRouter
 from fastapi import Form
 from fastapi import Query
@@ -84,7 +84,8 @@ async def save_settings_endpoint(request: Request):
 	(a secret isn't shown back) — and when it reads (a bad number is skipped). The other sections save through
 	/settings/section/<id> below."""
 	updates = settings_schema.parse_legacy(await request.form())
-	save_settings(updates)
+	# a chat id / Page / subreddit set up here reaches a destination (Settings → Languages & destinations)
+	destinations.save_keys(updates)
 	# Ask htmx to reload the page so new values are visible
 	return Response(content="", headers={"HX-Redirect": settings_back_url(request)})
 
@@ -110,7 +111,9 @@ async def save_settings_section(request: Request, section_id: str):
 		return templates_api.TemplateResponse("partials/settings_form.html", {"request": request, "form": view},
 											  status_code=422)
 	if updates:
-		save_settings(updates)
+		# the Telegram chat id, the Discord webhook, the subreddit… reach a destination even when the migration
+		# made none for them (app.services.destinations.adopt_keys)
+		destinations.save_keys(updates)
 	logger.info(f"settings section {section_id} saved: {sorted(updates)}")
 	view = settings_schema.form_view(s, load_settings(), keys, group, note="Saved ✓")
 	return templates_api.TemplateResponse("partials/settings_form.html", {"request": request, "form": view})

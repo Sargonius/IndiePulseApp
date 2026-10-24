@@ -175,7 +175,9 @@ def facebook_assign_page(
     lang = (lang or '').strip().lower()
     if lang not in ('ru', 'en'):
         return HTMLResponse("<span style='color:red'>Invalid language</span>")
-    save_settings({
+    # "Use as RU/EN": the Page reaches its destination even when that one was removed
+    from app.services import destinations
+    destinations.save_keys({
         f'fb_{lang}_page_id': (page_id or '').strip(),
         f'fb_{lang}_page_access_token': (page_token or '').strip(),
     })

@@ -85,12 +85,31 @@ def _json(r: httpx.Response):
 
 # ── platform checks ──────────────────────────────────────────────────────────
 
+def _more_targets(cfg: dict, r: _Result, module: str, key: str, seen: list, norm=lambda v: v) -> list[tuple[str, dict]]:
+    """The destinations of `module` (Settings → Languages & destinations) whose target `key` isn't one of `seen`
+    (what the old settings keys point at, checked as before): [(its name, its target)]. One that is turned off is
+    noted, not checked."""
+    from app.services import destinations
+    out = []
+    for d in destinations.all_destinations(cfg):
+        val = norm(str(d["target"].get(key) or "").strip()) if d["module"] == module else ""
+        if not val or val in seen:
+            continue
+        if not d["enabled"]:
+            r.details.append(f"ℹ {destinations.title(d)}: turned off — not checked")
+            continue
+        seen.append(val)
+        out.append((destinations.title(d), d["target"]))
+    return out
+
+
 def check_discord(cfg: dict, r: _Result) -> None:
     hooks = []
     for key, label in (("discord_webhook_ru", "RU"), ("discord_webhook_en", "EN"), ("discord_webhook_url", "default")):
         url = _s(cfg, key)
         if url and url not in [h[1] for h in hooks]:
             hooks.append((label, url))
+    hooks += [(label, t["webhook"]) for label, t in _more_targets(cfg, r, "discord", "webhook", [h[1] for h in hooks])]
     bot = _s(cfg, "discord_bot_token")
     if not hooks and not bot:
         r.status = "off"
@@ -121,12 +140,45 @@ def check_discord(cfg: dict, r: _Result) -> None:
     r.summary = f"{len(hooks)} webhook(s)" + (" + bot" if bot else "")
 
 
+def _telegram_chat(c: httpx.Client, base: str, bot_id, chat_id: str, label: str, r: _Result) -> Optional[str]:
+    """One channel / chat the bot posts to → its title, None when the bot can't reach it."""
+    pre = f"{label}: " if label else ""
+    ch = _json(c.get(f"{base}/getChat", params={"chat_id": chat_id}))
+    if not ch.get("ok"):
+        r.err(f"{pre}getChat {chat_id}: {ch.get('description')}",
+              "The bot was removed from the channel or the ID is wrong — add the bot as an admin again.")
+        return None
+    title = ch["result"].get("title") or ch["result"].get("username")
+    ctype = ch["result"].get("type")
+    r.ok(f"{pre}chat “{title}” ({ctype})")
+    mem = _json(c.get(f"{base}/getChatMember", params={"chat_id": chat_id, "user_id": bot_id}))
+    st = (mem.get("result") or {}).get("status")
+    if ctype == "channel":
+        if st == "administrator" and (mem["result"].get("can_post_messages") is not False):
+            r.ok(f"{pre}bot is an admin with posting rights")
+        elif st in ("creator",):
+            r.ok(f"{pre}bot is the owner")
+        else:
+            r.err(f"{pre}bot is in the channel with status “{st}”, no posting rights",
+                  "Make the bot a channel admin with the “Post messages” right.")
+    elif st in ("left", "kicked"):
+        r.err(f"{pre}bot is not a member of the chat (status={st})")
+    else:
+        r.ok(f"{pre}bot status: {st}")
+    return title
+
+
 def check_telegram(cfg: dict, r: _Result) -> None:
     token, chat_id = _s(cfg, "tg_bot_token"), _s(cfg, "tg_chat_id_ru")
     if not token:
         r.status = "off"
         r.summary = "not configured"
         return
+    # the original channel, then every other channel of Settings → Languages & destinations
+    chats = [("", chat_id)] if chat_id else []
+    chats += [(label, t["chat_id"]) for label, t in _more_targets(cfg, r, "telegram", "chat_id", [chat_id])]
+    if len(chats) > 1 and chat_id:
+        chats[0] = (_linked_title(cfg, "tg_chat_id_ru") or "RU", chat_id)
     base = f"https://api.telegram.org/bot{token}"
     with httpx.Client(timeout=TIMEOUT) as c:
         me = _json(c.get(f"{base}/getMe"))
@@ -137,34 +189,20 @@ def check_telegram(cfg: dict, r: _Result) -> None:
             return
         bot_id = me["result"]["id"]
         r.ok(f"bot @{me['result'].get('username')}")
-        if not chat_id:
+        if not chats:
             r.warn("chat id not set", "Enter the channel/chat ID in Settings.")
             r.summary = f"@{me['result'].get('username')}, no chat"
             return
-        ch = _json(c.get(f"{base}/getChat", params={"chat_id": chat_id}))
-        if not ch.get("ok"):
-            r.err(f"getChat {chat_id}: {ch.get('description')}",
-                  "The bot was removed from the channel or the ID is wrong — add the bot as an admin again.")
-            r.summary = "no access to the chat"
-            return
-        title = ch["result"].get("title") or ch["result"].get("username")
-        ctype = ch["result"].get("type")
-        r.ok(f"chat “{title}” ({ctype})")
-        mem = _json(c.get(f"{base}/getChatMember", params={"chat_id": chat_id, "user_id": bot_id}))
-        st = (mem.get("result") or {}).get("status")
-        if ctype == "channel":
-            if st == "administrator" and (mem["result"].get("can_post_messages") is not False):
-                r.ok("bot is an admin with posting rights")
-            elif st in ("creator",):
-                r.ok("bot is the owner")
-            else:
-                r.err(f"bot is in the channel with status “{st}”, no posting rights",
-                      "Make the bot a channel admin with the “Post messages” right.")
-        elif st in ("left", "kicked"):
-            r.err(f"bot is not a member of the chat (status={st})")
-        else:
-            r.ok(f"bot status: {st}")
-    r.summary = f"“{title}”"
+        titles = [_telegram_chat(c, base, bot_id, cid, label, r) for label, cid in chats]
+    reached = [t for t in titles if t]
+    r.summary = ", ".join(f"“{t}”" for t in reached) if reached else "no access to the chat"
+
+
+def _linked_title(cfg: dict, key: str) -> str:
+    """The name of the destination that is linked to this old settings key ('' when none is)."""
+    from app.services import destinations
+    d = next((d for d in destinations.stored(cfg) if key in d["linked"].values()), None)
+    return destinations.title(d) if d else ""
 
 
 _VK_SCOPES = {"photos": 4, "video": 16, "wall": 8192, "offline": 65536}
@@ -364,6 +402,9 @@ def check_facebook(cfg: dict, r: _Result) -> None:
     pages = [(lbl, _s(cfg, f"fb_{lbl.lower()}_page_id"), _s(cfg, f"fb_{lbl.lower()}_page_access_token"))
              for lbl in ("RU", "EN")]
     pages = [p for p in pages if p[1] or p[2]]
+    # then every other Page of Settings → Languages & destinations
+    pages += [(label, str(t.get("page_id") or "").strip(), str(t.get("page_token") or "").strip())
+              for label, t in _more_targets(cfg, r, "facebook", "page_id", [p[1] for p in pages if p[1]])]
     if not pages:
         r.status = "off"
         r.summary = "not configured"
@@ -463,8 +504,11 @@ def check_reddit(cfg: dict, r: _Result) -> None:
         r.err(f"login failed: {exc}",
               "Check the password and that the app type is “script” at reddit.com/prefs/apps; password login doesn’t work with 2FA.")
         return
-    for key in ("reddit_subreddit_en", "reddit_subreddit_ru"):
-        name = _s(cfg, key).removeprefix("r/")
+    names = [_s(cfg, key).removeprefix("r/") for key in ("reddit_subreddit_en", "reddit_subreddit_ru")]
+    # then every other subreddit of Settings → Languages & destinations
+    names += [t["subreddit"].strip().removeprefix("r/") for _label, t in
+              _more_targets(cfg, r, "reddit", "subreddit", [n for n in names if n], norm=lambda v: v.removeprefix("r/"))]
+    for name in names:
         if not name:
             continue
         try:

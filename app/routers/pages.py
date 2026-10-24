@@ -99,23 +99,12 @@ def _enrich_posts(posts):
     _s.close()
     return enriched
 
-@router.get('/news', response_class=HTMLResponse)
+@router.get('/news')
 def news_form(request: Request):
-    draft = load_draft()
-    cfg = load_settings()
-    platforms_ready = {
-        'discord': bool((cfg.get('discord_webhook_ru') or cfg.get('discord_webhook_en') or cfg.get('discord_webhook_url') or '').strip()),
-        'x': bool((cfg.get('x_access_token') or '').strip()),
-        'vk': bool(((cfg.get('vk_access_token') or '').strip()) and ((cfg.get('vk_group_id') or '').strip())),
-        'yt': bool(((cfg.get('yt_access_token') or '').strip()) and ((cfg.get('yt_refresh_token') or '').strip())),
-        'fb_ru': bool(((cfg.get('fb_ru_page_id') or '').strip()) and ((cfg.get('fb_ru_page_access_token') or '').strip())),
-        'fb_en': bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip())),
-        'reddit': bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip())),
-        'tg': bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip())),
-        'bluesky': bool(((cfg.get('bluesky_handle') or '').strip()) and ((cfg.get('bluesky_app_password') or '').strip())),
-        'tiktok': True,
-    }
-    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready, 'ui_language': cfg.get('ui_language', 'en')})
+    """The old all-in-one post page: nothing links to it any more, /create/post replaced it (a text per
+    language, destinations). A bookmark lands there; the POST below still takes a tab left open."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('/create/post', status_code=303)
 
 @router.get('/steam', response_class=HTMLResponse)
 def steam_export_page(request: Request):
@@ -381,6 +370,8 @@ def published_page(request: Request, brief_id: int, skipped: str = '', duplicate
     })
 
 
+# The old /news page's form (GET /news redirects now): a tab left open or a script still posts here. Platforms,
+# no destinations: its posts publish by the old rules, as they always did.
 @router.post('/news')
 def submit_news(
     request: Request,
@@ -773,11 +764,31 @@ def submit_post(
 @router.get('/shorts', response_class=HTMLResponse)
 def shorts_form(request: Request):
     """The Shorts Factory: batch-queue vertical short videos."""
+    from app.services import languages
     cfg = load_settings()
     return templates.TemplateResponse('shorts.html', {
         'request': request,
+        # a title, description and hashtags per language of Settings → Languages (the first: the one you write in)
+        'langs': [{'code': c, 'name': languages.name(c)} for c in languages.configured(cfg)],
+        # YouTube, TikTok and Instagram were the ones ticked by default; the rest only when picked
+        'dest_groups': _dest_groups('shorts', cfg, None, default_off=('vk', 'telegram', 'x', 'reddit', 'discord')),
         'ui_language': cfg.get('ui_language', 'en'),
     })
+
+
+def _short_texts(m: dict) -> Optional[dict]:
+    """A Shorts card's {lang: {title, desc, tags}} (the factory since languages); None for a card of an older
+    tab or a script, which sends one title / text_en / tags."""
+    from app.services.languages import normalize_code
+    raw = m.get('texts')
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for code, f in raw.items():
+        lang = normalize_code(code)
+        if lang and isinstance(f, dict):
+            out[lang] = {k: str(f.get(k) or '').strip() for k in ('title', 'desc', 'tags')}
+    return out
 
 
 def _safe_filename(name: str) -> str:
@@ -803,9 +814,12 @@ def submit_shorts(
     import json as _json, os as _os
     from uuid import uuid4
     from app.jobs.tasks import render_short
-    from app.services import music_library, shorts_upload, video_edit
+    from app.services import languages, music_library, shorts_upload, video_edit
     from app.services.text_overlay import clean_overlays, clean_trim
 
+    cfg = load_settings()
+    langs_cfg = languages.configured(cfg)
+    skipped: List[str] = []
     try:
         metas = _json.loads(meta or '[]') or []
     except Exception:
@@ -874,13 +888,22 @@ def submit_shorts(
                         fade_in_ms=int(_num(m.get('fade_in'), 0) * 1000),
                         fade_out_ms=int(_num(m.get('fade_out'), 0) * 1000))
 
+        texts = _short_texts(m)
+        title, tags = (m.get('title') or '').strip(), (m.get('tags') or '').strip()
+        if texts is not None:
+            # the brief keeps the title and hashtags of the language written in (the first one that has them)
+            # and a description per language; a destination in another language gets its own title and
+            # hashtags as the post's texts (render_short)
+            order = [c for c in langs_cfg if c in texts] + [c for c in texts if c not in langs_cfg]
+            title = next((texts[c]['title'] for c in order if texts[c]['title']), '')
+            tags = next((texts[c]['tags'] for c in order if texts[c]['tags']), '')
         brief = Brief(
             user_id=1,
             type='video',
-            text_ru=(m.get('text_ru') or ''),
-            text_en=(m.get('text_en') or ''),
-            title=(m.get('title') or '').strip() or None,
-            tags_json=(m.get('tags') or '').strip(),
+            text_ru=(m.get('text_ru') or '') if texts is None else '',
+            text_en=(m.get('text_en') or '') if texts is None else '',
+            title=title or None,
+            tags_json=tags,
             media_path=fname,
             vertical_916=True,  # marks this Brief as a Shorts-Factory item
             trim_start=trim_start,
@@ -889,18 +912,24 @@ def submit_shorts(
             edit_spec_json=(_json.dumps(spec, ensure_ascii=False) if spec is not None else None),
             **crop,
         )
+        if texts is not None:
+            languages.set_brief_texts(brief, {c: f['desc'] for c, f in texts.items() if f['desc']})
+        if isinstance(m.get('destinations'), list):
+            # each with its language; render_short makes their posts (turned off since then: left out there)
+            targets = _destination_targets(m['destinations'], 'shorts', brief, skipped)
+            where = {'destinations': [d['id'] for d, _ in targets],
+                     'texts': {c: {'title': f['title'], 'tags': f['tags']} for c, f in (texts or {}).items()
+                               if f['title'] or f['tags']}}
+        else:
+            # an older tab or a script: platforms, published by the old rules
+            where = {'platforms': [p for p in (m.get('platforms') or []) if p]}
         session.add(brief)
         session.commit()
         session.refresh(brief)
+        payload = {'brief_id': brief.id, **where, 'scheduled_at': (m.get('scheduled_at') or None)}
         from app.services.marketing import tag_brief
         tag_brief(session, brief, m.get('project_id'), m.get('goal_id'))
 
-        platforms = [p for p in (m.get('platforms') or []) if p]
-        payload = {
-            'brief_id': brief.id,
-            'platforms': platforms,
-            'scheduled_at': (m.get('scheduled_at') or None),
-        }
         rjob = Job(kind=JobKindEnum.render, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
         session.add(rjob)
         session.commit()
@@ -908,16 +937,20 @@ def submit_shorts(
         render_short.schedule(args=(rjob.id, brief.id), delay=0)
         created += 1
 
+    from urllib.parse import urlencode
     from fastapi.responses import RedirectResponse
-    return RedirectResponse('/shorts/board', status_code=303)
+    skipped = list(dict.fromkeys(skipped))  # one line per destination, not per clip
+    return RedirectResponse('/shorts/board' + (f"?{urlencode({'skipped': ','.join(skipped)})}" if skipped else ''),
+                            status_code=303)
 
 
 @router.get('/shorts/board', response_class=HTMLResponse)
-def shorts_board(request: Request):
-    """Preview/status board for the Shorts Factory."""
+def shorts_board(request: Request, skipped: str = ''):
+    """Preview/status board for the Shorts Factory (`skipped`: destinations a batch just left out, and why)."""
     cfg = load_settings()
     return templates.TemplateResponse('shorts_board.html', {
         'request': request,
+        'skipped': [s for s in skipped.split(',') if s],
         'ui_language': cfg.get('ui_language', 'en'),
     })
 
@@ -961,6 +994,8 @@ def shorts_board_partial(request: Request, session: Session = Depends(get_sessio
             return f"{n/1_000:.1f}K".replace('.0K', 'K')
         return str(n)
 
+    from app.services import destinations as _destinations
+    dest_langs = {d['id']: d['lang'] for d in _destinations.stored()}
     cards = []
     total_views = 0
     published_count = 0
@@ -1004,6 +1039,9 @@ def shorts_board_partial(request: Request, session: Session = Depends(get_sessio
                     pass
             chips.append({
                 'platform': (p.platform.value if hasattr(p.platform, 'value') else str(p.platform)),
+                # two channels of one network differ by their destination (and its language)
+                'destination': p.destination_id,
+                'lang': (dest_langs.get(p.destination_id) or '') if p.destination_id else '',
                 'status': st,
                 'url': p.platform_url,
                 'error': (p.error_text or ''),

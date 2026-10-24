@@ -77,60 +77,73 @@ def test_unknown_or_broken_overrides_are_ignored(session, short):
 
 # ── build_overrides ──────────────────────────────────────────────────────────
 
-def test_overrides_put_the_caption_in_its_language_field():
-    assert repost.build_overrides("vk_video", {"lang": "ru", "text": "Привет", "tags": "#a"}, CONFIGURED) == \
+def _dest(dest_id, cfg=CONFIGURED):
+    from app.services import destinations
+    return destinations.get(dest_id, cfg)
+
+
+def test_overrides_put_the_caption_in_its_language_and_blank_the_others(session, short):
+    b = short()
+    assert repost.build_overrides(_dest("vk"), {"lang": "ru", "text": "Привет", "tags": "#a"}, b, CONFIGURED) == \
         {"text_ru": "Привет", "text_en": "", "tags_json": "#a"}
-    assert repost.build_overrides("x", {"lang": "ja", "text": "夜のドライブ", "tags": "#b", "title": "T"}, CONFIGURED) == \
-        {"text_en": "夜のドライブ", "text_ru": "", "tags_json": "#b", "title": "T"}
+    # a JA caption for the EN X account: it goes out as it is, tagged JA, not as the brief's EN text
+    out = repost.build_overrides(_dest("x"), {"lang": "ja", "text": "夜のドライブ", "tags": "#b", "title": "T"}, b,
+                                 CONFIGURED)
+    assert out == {"text_en": "", "text_ja": "夜のドライブ", "text_ru": "", "tags_json": "#b", "title": "T"}
+    post = Post(user_id=1, brief_id=b.id, platform="x", destination_id="x", overrides_json=json.dumps(out))
+    from app.platforms.common import post_text_lang
+    assert post_text_lang(brief_for_publish(session, post), post, cfg=CONFIGURED) == ("夜のドライブ", "ja")
 
 
-def test_overrides_drop_tags_where_the_publisher_ignores_them():
-    assert repost.build_overrides("tg", {"lang": "ru", "text": "Привет", "tags": "#a"}, CONFIGURED)["tags_json"] == ""
+def test_overrides_drop_tags_where_the_publisher_ignores_them(short):
+    out = repost.build_overrides(_dest("telegram-ru"), {"lang": "ru", "text": "Привет", "tags": "#a"}, short(),
+                                 CONFIGURED)
+    assert out["tags_json"] == ""
 
 
-def test_reddit_needs_only_a_title():
-    assert repost.build_overrides("reddit", {"title": "  My game  ", "text": "ignored"}, CONFIGURED) == \
+def test_reddit_needs_only_a_title(short):
+    cfg = {**CONFIGURED, "reddit_subreddit_en": "gamedev"}
+    b = short()
+    assert repost.build_overrides(_dest("reddit-en", cfg), {"title": "  My game  ", "text": "ignored"}, b, cfg) == \
         {"title": "My game", "text_en": "", "text_ru": "", "tags_json": ""}
-    assert repost.build_overrides("reddit", {"title": " "}, CONFIGURED) == {}
+    assert repost.build_overrides(_dest("reddit-en", cfg), {"title": " "}, b, cfg) == {}
 
 
-def test_discord_gets_one_text_per_webhook():
-    item = {"text_ru": "Привет", "text_en": "Hello"}
-    assert repost.build_overrides("discord", item, CONFIGURED) == {"text_ru": "Привет", "text_en": "Hello", "tags_json": ""}
-    only_ru = {"discord_webhook_ru": "https://discord.test/ru"}
-    assert repost.build_overrides("discord", item, only_ru)["text_en"] == ""
-    default = {"discord_webhook_url": "https://discord.test/any"}
-    assert repost.discord_langs(default) == ["default"]
-    assert repost.build_overrides("discord", {"text": "Hi"}, default) == {"text_en": "Hi", "text_ru": "", "tags_json": ""}
+def test_a_destination_of_its_own_language_only_gets_the_caption_in_it(short):
+    """Discord RU and EN are two destinations now (one post per webhook), each only for its own language: a card
+    can't send it a caption as another language's text."""
+    out = repost.build_overrides(_dest("discord-en"), {"lang": "ja", "text": "Hello"}, short(), CONFIGURED)
+    assert out["text_en"] == "Hello" and not out.get("text_ja")
 
 
-def test_empty_caption_means_nothing_to_post():
-    assert repost.build_overrides("x", {"lang": "en", "text": " ", "tags": ""}, CONFIGURED) == {}
+def test_empty_caption_means_nothing_to_post(short):
+    assert repost.build_overrides(_dest("x"), {"lang": "en", "text": " ", "tags": ""}, short(), CONFIGURED) == {}
 
 
 def test_configured():
-    assert repost.configured("x", CONFIGURED) and repost.configured("tg", CONFIGURED)
-    assert not repost.configured("bluesky", CONFIGURED)
-    assert not repost.configured("x", {k: v for k, v in CONFIGURED.items() if k != "x_oauth_token"})
-    assert not repost.configured("discord", {})
+    assert repost.configured(_dest("x"), CONFIGURED) and repost.configured(_dest("telegram-ru"), CONFIGURED)
+    assert not repost.configured(_dest("bluesky"), CONFIGURED)
+    no_oauth1 = {k: v for k, v in CONFIGURED.items() if k != "x_oauth_token"}
+    assert not repost.configured(_dest("x", no_oauth1), no_oauth1)
+    assert not repost.configured(_dest("discord", {}), {})
 
 
 # ── create_reposts ───────────────────────────────────────────────────────────
 
-def test_create_reposts_queues_new_networks_and_skips_the_rest(session, short, scheduled):
+def test_create_reposts_queues_new_destinations_and_skips_the_rest(session, short, scheduled):
     b = short()
     items = [
-        {"platform": "x", "lang": "en", "text": "Night ride", "tags": "#indiegame"},
-        {"platform": "tg", "lang": "ru", "text": "Ночная поездка"},
-        {"platform": "vk_video", "lang": "ru", "text": "Ночная поездка"},   # already live
-        {"platform": "bluesky", "lang": "en", "text": "Night ride"},        # not configured
-        {"platform": "x", "lang": "en", "text": "again"},                  # twice
-        {"platform": "nope"},
+        {"destination": "x", "lang": "en", "text": "Night ride", "tags": "#indiegame"},
+        {"destination": "telegram-ru", "lang": "ru", "text": "Ночная поездка"},
+        {"destination": "vk", "lang": "ru", "text": "Ночная поездка"},          # already live (an old vk_video post)
+        {"destination": "bluesky", "lang": "en", "text": "Night ride"},         # not configured
+        {"destination": "x", "lang": "en", "text": "again"},                   # twice
+        {"destination": "nope"},
     ]
     res = repost.create_reposts(session, b, items, cfg=CONFIGURED)
-    assert [c["platform"] for c in res["created"]] == ["x", "tg"]
-    assert {(s["platform"], s["reason"]) for s in res["skipped"]} == {
-        ("vk_video", "already"), ("bluesky", "not_configured"), ("x", "twice"), ("nope", "unknown_platform")}
+    assert [c["destination"] for c in res["created"]] == ["x", "telegram-ru"]
+    assert {(s["destination"], s["reason"]) for s in res["skipped"]} == {
+        ("vk", "already"), ("bluesky", "not_configured"), ("x", "twice"), ("nope", "unknown_destination")}
     assert len(scheduled) == 2
     for job_id, post_id in scheduled:
         job = session.get(Job, job_id)
@@ -138,15 +151,21 @@ def test_create_reposts_queues_new_networks_and_skips_the_rest(session, short, s
         assert payload["post_id"] == post_id and payload["media_rel"] == "short_abc_clip_vertical.mp4"
         assert "allow_duplicate" not in payload
     tg = session.exec(select(Post).where(Post.brief_id == b.id, Post.platform == "tg")).one()
+    assert tg.destination_id == "telegram-ru"
     assert json.loads(tg.overrides_json) == {"text_ru": "Ночная поездка", "text_en": "", "tags_json": ""}
     assert tg.status == PostStatusEnum.queued and tg.scheduled_at is None
 
 
+def test_an_older_caller_naming_a_platform_reaches_its_old_destination(session, short, scheduled):
+    res = repost.create_reposts(session, short(), [{"platform": "tg", "lang": "ru", "text": "Привет"}], cfg=CONFIGURED)
+    assert [(c["destination"], c["platform"]) for c in res["created"]] == [("telegram-ru", "tg")]
+
+
 def test_allow_duplicate_reposts_where_it_is_already_live(session, short, scheduled):
     b = short()
-    res = repost.create_reposts(session, b, [{"platform": "vk_video", "lang": "ru", "text": "Снова"}],
+    res = repost.create_reposts(session, b, [{"destination": "vk", "lang": "ru", "text": "Снова"}],
                                 allow_duplicate=True, cfg=CONFIGURED)
-    assert [c["platform"] for c in res["created"]] == ["vk_video"]
+    assert [(c["destination"], c["platform"]) for c in res["created"]] == [("vk", "vk_video")]
     assert json.loads(session.get(Job, scheduled[0][0]).payload_json)["allow_duplicate"] is True
 
 
@@ -154,13 +173,34 @@ def test_failed_post_does_not_block_a_new_try(session, short, scheduled):
     b = short(live=())
     session.add(Post(user_id=1, brief_id=b.id, platform="tg", status=PostStatusEnum.error))
     session.commit()
-    res = repost.create_reposts(session, b, [{"platform": "tg", "lang": "ru", "text": "Ещё раз"}], cfg=CONFIGURED)
-    assert [c["platform"] for c in res["created"]] == ["tg"]
+    res = repost.create_reposts(session, b, [{"destination": "telegram-ru", "lang": "ru", "text": "Ещё раз"}],
+                                cfg=CONFIGURED)
+    assert [c["destination"] for c in res["created"]] == ["telegram-ru"]
 
 
 def test_unrendered_short_cannot_be_reposted(session, short, scheduled):
     with pytest.raises(ValueError):
-        repost.create_reposts(session, short(rendered=False), [{"platform": "tg", "text": "x"}], cfg=CONFIGURED)
+        repost.create_reposts(session, short(rendered=False), [{"destination": "telegram-ru", "text": "x"}],
+                              cfg=CONFIGURED)
+
+
+def test_a_second_channel_of_a_network_is_its_own_destination(session, short, scheduled, set_settings):
+    """A JA Telegram channel next to the RU one: the short is live on RU (an old post), JA is still open."""
+    from app.services import destinations
+    from app.services.settings import load_settings
+    set_settings(**CONFIGURED)
+    destinations.migrate_settings()
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]]
+    items.append({"module": "telegram", "lang": "ja", "target": {"chat_id": "-100222"}})
+    assert destinations.save(["ru", "en", "ja"], items)["ok"]
+    b = short(live=("tg",))
+    by = {d["id"]: d for d in repost.page_context(session, b, load_settings())["destinations"]}
+    assert by["telegram-ru"]["existing"]["state"] == "live" and by["telegram-ja"]["existing"] is None
+    assert by["telegram-ja"]["lang"] == "ja" and by["telegram-ja"]["label"] == "Telegram · JA"
+    res = repost.create_reposts(session, b, [{"destination": "telegram-ja", "lang": "ja", "text": "夜"},
+                                             {"destination": "telegram-ru", "lang": "ru", "text": "Ночь"}])
+    assert [c["destination"] for c in res["created"]] == ["telegram-ja"]
+    assert res["skipped"][0]["reason"] == "already"
 
 
 def test_page_context(session, short, set_settings):
@@ -169,11 +209,32 @@ def test_page_context(session, short, set_settings):
     b = short(title="夜のドライブ", text_en="ネオンの街を走る")
     ctx = repost.page_context(session, b, load_settings())
     assert ctx["source"]["lang"] == "ja" and ctx["yt_url"] == "https://yt.test/1"
+    # the short's own language is offered even though Settings has only RU and EN
+    assert [lang["code"] for lang in ctx["langs"]] == ["ru", "en", "ja"]
+    assert ctx["texts"] == {"ja": {"title": "夜のドライブ", "desc": "ネオンの街を走る", "tags": "#Shorts #indiegame"}}
     assert ctx["video_url"] == "/media/short_abc_clip_vertical.mp4"
-    by = {p["key"]: p for p in ctx["platforms"]}
-    assert by["vk_video"]["existing"]["state"] == "live" and by["x"]["existing"] is None
+    by = {d["id"]: d for d in ctx["destinations"]}
+    assert by["vk"]["existing"]["state"] == "live" and by["x"]["existing"] is None
     assert by["x"]["configured"] and not by["bluesky"]["configured"]
-    assert by["discord"]["dual_langs"] == ["ru", "en"]
+    assert by["discord-ru"]["own_only"] and by["discord-en"]["lang"] == "en"
+    assert "youtube" not in by and "tiktok" not in by  # where the short is / has its own pipeline
+
+
+def test_the_page_reuses_the_texts_the_factory_wrote(session, short, set_settings):
+    """A factory clip with a JA description and a JA title on its JA post: the page doesn't translate JA again."""
+    from app.services import languages
+    from app.services.settings import load_settings
+    set_settings(**CONFIGURED, languages=["en", "ja", "ru"])
+    b = short(title="Night drive", text_en="Neon city")
+    languages.set_brief_texts(b, {"ja": "ネオンの街"})
+    session.add(b)
+    session.add(Post(user_id=1, brief_id=b.id, platform="tg", destination_id="telegram-ru",
+                     overrides_json=json.dumps({"title": "Ночная поездка"})))
+    session.commit()
+    texts = repost.page_context(session, b, load_settings())["texts"]
+    assert texts["en"]["title"] == "Night drive"
+    assert "ja" not in texts  # a description without its title: translated as a pair
+    assert "ru" not in texts
 
 
 # ── translation ──────────────────────────────────────────────────────────────
@@ -265,8 +326,8 @@ def test_detect_lang():
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 def test_translate_endpoint(client, monkeypatch):
-    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "de"}).status_code == 400
     monkeypatch.setattr(repost, "translate", lambda data, target: {"title": f"{target}:{data['title']}"})
+    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "not a language"}).status_code == 400
     assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "ja"}).json() == {"title": "ja:Hi"}
 
     def fail(data, target):
@@ -280,11 +341,12 @@ def test_repost_endpoint_and_pages(client, session, short, scheduled, set_settin
     set_settings(**CONFIGURED)
     b = short()
     page = client.get(f"/shorts/repost/{b.id}")
-    assert page.status_code == 200 and "Cross-post Short" in page.text and "Facebook RU" in page.text
+    assert page.status_code == 200 and "Cross-post Short" in page.text and '"facebook-ru"' in page.text
     assert "Cross-post" in client.get("/shorts/board/partial").text
 
-    r = client.post(f"/api/shorts/{b.id}/repost", json={"items": [{"platform": "tg", "lang": "ru", "text": "Привет"}]})
-    assert r.status_code == 200 and [c["platform"] for c in r.json()["created"]] == ["tg"]
+    r = client.post(f"/api/shorts/{b.id}/repost", json={"items": [{"destination": "telegram-ru", "lang": "ru",
+                                                                   "text": "Привет"}]})
+    assert r.status_code == 200 and [c["destination"] for c in r.json()["created"]] == ["telegram-ru"]
 
     assert client.post("/api/shorts/999999/repost", json={"items": []}).status_code == 404
     raw = short(rendered=False)

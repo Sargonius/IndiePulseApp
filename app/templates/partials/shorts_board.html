@@ -39,7 +39,7 @@
 		<div class="sf-chips">
 			{% for ch in c.chips %}
 			<div class="sf-chip">
-				<span class="platform-badge platform-{{ ch.platform }}">{{ ch.platform }}</span>
+				<span class="platform-badge platform-{{ ch.platform }}"{% if ch.destination %} title="{{ ch.destination }}"{% endif %}>{{ ch.platform }}{% if ch.lang %} {{ ch.lang | upper }}{% endif %}</span>
 				{% if ch.status == 'done' %}
 					{% if ch.url %}<a class="badge success" href="{{ ch.url }}" target="_blank" rel="noopener">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</a>
 					{% else %}<span class="badge success">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</span>{% endif %}
