@@ -22,7 +22,9 @@ _COLORS = {  # background, border, text
 
 def _notes(latest: dict) -> tuple[str, str]:
     """(the "What's new" link, the notes block it opens)."""
-    page = latest.get("page") or ""
+    page = str(latest.get("page") or "")
+    if not page.startswith("https://github.com/"):  # it comes from GitHub's API; anything else isn't linked
+        page = ""
     more = (f"<div style='margin-top:6px'><a href='{_e(page)}' target='_blank' rel='noopener'>The release on GitHub ↗</a>"
             f"</div>") if page else ""
     block = (f"<div class='ip-notes' hidden style='flex-basis:100%;white-space:pre-wrap;margin-top:8px;"

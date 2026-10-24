@@ -171,8 +171,23 @@ def test_the_result_of_an_install_is_told_once(env):
 
 
 def test_busy_asks_the_server(monkeypatch):
+    import io
+    import json
+    import urllib.error
+    asked = []
+
+    def server(url, timeout):
+        asked.append(url)
+        if answer["busy"] is None:
+            raise urllib.error.URLError("refused")
+        return io.BytesIO(json.dumps({"busy": answer["busy"]}).encode())
+    answer = {"busy": "1 post being published"}
+    monkeypatch.setattr(tu.urllib.request, "urlopen", server)
     sup = FakeSup()
-    u = tu.TrayUpdater(sup, notify=lambda t: None, refresh=lambda: None, base_url="http://127.0.0.1:9/")
+    u = tu.TrayUpdater(sup, notify=lambda t: None, refresh=lambda: None, base_url="http://127.0.0.1:8812")
+    assert u._busy(manual=False) == "1 post being published"
+    assert asked == ["http://127.0.0.1:8812/api/updates/busy"]
+    answer["busy"] = None
     assert u._busy(manual=True) == ""                         # no server: the user's Install goes ahead
     assert u._busy(manual=False) == "the server to answer"    # auto waits
     sup.phase = "restarting"

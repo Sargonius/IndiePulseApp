@@ -191,6 +191,7 @@ def restore(root: Path, backup: Path, aside: Path) -> dict:
 			_move(root / name, aside / name)
 	for name in record.get("replaced", []):
 		_move(backup / name, root / name)
+	(backup / "previous.json").unlink(missing_ok=True)  # previous/ is empty now: the old code is back in place
 	return record
 
 
@@ -296,7 +297,7 @@ def wait_healthy(url: str, version: str, proc: subprocess.Popen, timeout: float 
 	seen = ""
 	while time.monotonic() < deadline:
 		if proc.poll() is not None:
-			return False, f"the new IndiePulse exited at start (code {proc.returncode})"
+			return False, f"it exited at start, code {proc.returncode}"
 		status, _ = _get_json(base + "/health")
 		if status == 200:
 			vstatus, body = _get_json(base + "/version")
@@ -310,6 +311,13 @@ def wait_healthy(url: str, version: str, proc: subprocess.Popen, timeout: float 
 
 
 # ── the installer ────────────────────────────────────────────────────────────
+def _clean(work: Path) -> None:
+	"""The download and its unpacked folder (emptied by the swap): done with, either way."""
+	shutil.rmtree(work / "staging", ignore_errors=True)
+	for done in [work / "ready.json", *work.glob("IndiePulse-*.zip")]:
+		done.unlink(missing_ok=True)
+
+
 class _Log:
 	def __init__(self, path: Path):
 		self.path = Path(path)
@@ -351,9 +359,7 @@ def run(args: argparse.Namespace) -> int:
 	if ok:
 		log(f"{new} is up")
 		set_progress(work, "installed", new, f"IndiePulse updated to {new}.", from_version=old)
-		shutil.rmtree(work / "staging", ignore_errors=True)  # emptied by the swap
-		for done in [work / "ready.json", *work.glob("IndiePulse-*.zip")]:
-			done.unlink(missing_ok=True)
+		_clean(work)
 		return 0
 	log(f"rolling back to {old}: {why}")
 	if proc is not None:
@@ -367,6 +373,7 @@ def run(args: argparse.Namespace) -> int:
 		set_progress(work, "failed", new, f"IndiePulse {new} didn't start ({why}), and going back to {old} failed: "
 						  f"{exc}. See logs\\update.log.", from_version=old)
 		return 2
+	_clean(work)  # the new code itself is in failed/
 	if not sync_requirements(root, pip_log):
 		log("the old requirements didn't install; the tray will try again")
 	# progress first: the old tray reads it when it starts

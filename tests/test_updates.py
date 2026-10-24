@@ -353,6 +353,11 @@ def test_banner_offers_an_available_version(client, monkeypatch):
     assert "IndiePulse v9.0.0 is available" in html and "What's new" in html
     assert "hx-post='/api/updates/install?view=banner'" in html
     assert "&lt;b&gt;new&lt;/b&gt; stuff" in html  # notes escaped
+    assert "href='https://github.com/x/releases/tag/v9.0.0'" in html
+    state = updates.load_state()
+    state["latest"]["page"] = "javascript:alert(1)"
+    updates.save_state(state)
+    assert "javascript:" not in client.get("/api/updates/banner").text
 
 
 def test_banner_without_the_tray_says_where_to_install(client, monkeypatch):

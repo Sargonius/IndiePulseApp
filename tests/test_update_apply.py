@@ -79,6 +79,7 @@ def test_restore_puts_the_old_code_back(install):
     assert (root / "IndiePulse.pyw").read_text() == "# 2.0.0\n" and (root / "LICENSE").exists()
     assert _kept(root) == before
     assert au.version_of(work / "failed") == "2.1.0"  # the new code, aside for a look
+    assert not (work / "previous/previous.json").exists()  # nothing left to roll back to
 
 
 def test_a_failed_move_undoes_the_whole_swap(install, monkeypatch):
@@ -201,6 +202,7 @@ def test_run_rolls_back_when_the_new_server_doesnt_answer(run_env):
     p = au.read_json(work / "progress.json")
     assert p["phase"] == "rolled_back" and "didn't answer" in p["text"] and "2.0.0 is back" in p["text"]
     assert au.version_of(work / "failed") == "2.1.0"
+    assert not (work / "staging").exists() and not list(work.glob("*.zip"))
 
 
 def test_run_rolls_back_when_the_packages_dont_install(run_env):
