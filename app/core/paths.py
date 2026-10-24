@@ -1,13 +1,21 @@
-"""Where IndiePulse keeps its code and its data. Stdlib only: IndiePulse.pyw imports it before the venv exists.
+"""Where IndiePulse keeps its code, its runtime and its data. Stdlib only: app/desktop/launch.py imports it before the
+venv exists. IndiePulse.exe (launcher/Home.cs) answers the same questions the same way.
 
-The data — the DBs, media/, render/, logs/, .settings.json, vendor/ffmpeg — is opened by paths relative to the
-working directory, and every process (tray, server, worker) makes DATA its working directory first
-(enter_data_dir). The code finds its own files (templates, static) from ROOT. So the code can be replaced by an
-update without touching the data, and the data can live elsewhere than the code:
+The folders:
+- ROOT, the code: the folder app/ is in. A release has it in lib\\ — the zip is IndiePulse.exe, README.md, LICENSE and
+  lib\\ — a checkout is its own root;
+- HOME, what the user sees: the folder with IndiePulse.exe. lib\\'s parent in a release, ROOT in a checkout. A portable
+  copy keeps portable.txt and data\\ here, and a release its runtime\\ (uv, Python, the venv: IndiePulse.exe prepares
+  it). An update replaces the exe, README, LICENSE and lib\\, nothing else;
+- DATA, the data — the DBs, media/, render/, logs/, .settings.json, vendor/ffmpeg, the app window's browser profile.
+
+The data is opened by paths relative to the working directory, and every process (tray, server, worker) makes DATA
+its working directory first (enter_data_dir). The code finds its own files (templates, static) from ROOT. So the code
+can be replaced by an update without touching the data, and the data can live elsewhere than the code:
 
 - INDIEPULSE_DATA set: there (tests, a second instance);
 - a copy that has been running from its own folder (its DB or settings are there): that folder, nothing moves;
-- portable (portable.txt next to the app, or ClubKit on the drive): data/ next to the app;
+- portable (portable.txt next to IndiePulse.exe, or ClubKit on the drive): data\\ next to IndiePulse.exe;
 - installed: %LOCALAPPDATA%\\IndiePulse.
 
 Also: paths saved on one computer, read on another. The drive IndiePulse is on goes from computer to computer and
@@ -19,7 +27,15 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# lib\ of a release (a checkout that happens to be called lib has its .git)
+HOME = ROOT.parent if ROOT.name.lower() == "lib" and not (ROOT / ".git").exists() else ROOT
+RUNTIME = HOME / "runtime"
 TEMPLATES_DIR = str(ROOT / "app" / "templates")
+
+
+def is_release_layout() -> bool:
+	"""The code in lib\\ under IndiePulse.exe's folder (a release), not a checkout (HOME is ROOT)."""
+	return HOME != ROOT
 
 
 def _data_dir() -> Path:
@@ -28,10 +44,10 @@ def _data_dir() -> Path:
 		return Path(env).resolve()
 	if (ROOT / "indiepulse.db").exists() or (ROOT / ".settings.json").exists():
 		return ROOT
-	if (ROOT / "portable.txt").exists() or (Path(ROOT.anchor) / "ClubKit").is_dir():
-		return ROOT / "data"
+	if (HOME / "portable.txt").exists() or (Path(HOME.anchor) / "ClubKit").is_dir():
+		return HOME / "data"
 	local = os.getenv("LOCALAPPDATA")
-	return Path(local) / "IndiePulse" if local else ROOT / "data"
+	return Path(local) / "IndiePulse" if local else HOME / "data"
 
 
 DATA = _data_dir()

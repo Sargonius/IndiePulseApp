@@ -1,12 +1,13 @@
 """Build a release from a v* tag: IndiePulse-<version>.zip, latest.json and the release notes (release.yml runs it).
 
-	python tools/build_release.py --tag v2.0.0 [--repo owner/name] [--out dist]
+	python tools/build_release.py --tag v2.0.0 [--repo owner/name] [--out dist] [--exe IndiePulse.exe]
 	python tools/build_release.py --tag v2.0.0 --check      # only: does the tag match app/__init__.py?
 
-The zip holds what a user needs to run IndiePulse — app/, the launchers, the requirements, README, LICENSE — under
-one IndiePulse/ folder; only files git tracks, so nothing local (a .venv, data, __pycache__) can slip in, and no
-tests, .github, tools or dev notes. latest.json is what the updater reads (app/services/updates.py):
-{version, tag, name, url, sha256, size, notes, published_at}.
+The zip is one IndiePulse/ folder with what a user sees at its top — IndiePulse.exe (built by
+tools/build_launcher.ps1 first), README.md, LICENSE — and everything else in lib\\: app/, the requirements,
+.env.example (app/core/paths.py: HOME and ROOT). Only files git tracks, so nothing local (a .venv, data, __pycache__)
+can slip in, and no tests, .github, tools, launcher sources or dev notes. latest.json is what the updater reads
+(app/services/updates.py): {version, tag, name, url, sha256, size, notes, published_at}.
 
 Notes: the annotated tag's message (tools/release.ps1 writes them there); a lightweight tag gets the commit subjects
 since the previous tag.
@@ -26,7 +27,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FOLDER = "IndiePulse"  # the one folder inside the zip
-TOP_FILES = {"IndiePulse.pyw", "IndiePulse.bat", "requirements.txt", "requirements.lock", "README.md", ".env.example"}
+EXE = "IndiePulse.exe"
+LIB = "lib"            # the code's folder in it
+TOP_FILES = {"README.md"}  # + LICENSE: next to the exe
+LIB_FILES = {"requirements.txt", "requirements.lock", ".env.example"}  # + app/
 _VERSION_RX = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.M)
 _RELEASE_RX = re.compile(r"\d+\.\d+\.\d+(-rc\.\d+)?")
 
@@ -57,15 +61,32 @@ def _git(root: Path, *args: str) -> str:
 						  encoding="utf-8").stdout
 
 
-def included(path: str) -> bool:
-	"""Whether a tracked file (posix path from the repo root) goes into the zip."""
+def destination(path: str) -> str | None:
+	"""Where a tracked file (posix path from the repo root) goes in the IndiePulse folder of the zip; None: not in it."""
 	if path in TOP_FILES or re.fullmatch(r"LICEN[CS]E(\.\w+)?", path):
-		return True
-	return path.startswith("app/") and "__pycache__/" not in path and not path.endswith((".pyc", ".pyo"))
+		return path
+	if path in LIB_FILES or (path.startswith("app/") and "__pycache__/" not in path
+							 and not path.endswith((".pyc", ".pyo"))):
+		return f"{LIB}/{path}"
+	return None
+
+
+def included(path: str) -> bool:
+	return destination(path) is not None
 
 
 def release_files(root: Path = ROOT) -> list[str]:
 	return sorted(p for p in _git(root, "ls-files", "-z").split("\0") if p and included(p))
+
+
+def check_exe(exe: Path) -> None:
+	"""IndiePulse.exe is there and is a Windows program (not, say, a git-lfs pointer or an empty file)."""
+	try:
+		head = Path(exe).read_bytes()[:2]
+	except OSError:
+		raise BuildError(f"no {exe}: build it first (powershell -File tools\\build_launcher.ps1)")
+	if head != b"MZ":
+		raise BuildError(f"{exe} isn't a Windows program")
 
 
 def notes_for_tag(tag: str, root: Path = ROOT) -> str:
@@ -91,23 +112,26 @@ def _sha256(path: Path) -> str:
 	return h.hexdigest()
 
 
-def build(tag: str, out: Path, *, repo: str, notes: str, root: Path = ROOT, files: list[str] | None = None,
-		  published_at: str | None = None) -> dict:
+def _add(z: zipfile.ZipFile, arcname: str, src: Path) -> None:
+	info = zipfile.ZipInfo(f"{FOLDER}/{arcname}", time.localtime(os.path.getmtime(src))[:6])
+	info.external_attr = 0o644 << 16
+	z.writestr(info, src.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+
+
+def build(tag: str, out: Path, *, repo: str, notes: str, exe: Path, root: Path = ROOT,
+		  files: list[str] | None = None, published_at: str | None = None) -> dict:
 	version = check_tag(tag, root)
 	files = release_files(root) if files is None else files
-	if "app/__init__.py" not in files or "IndiePulse.pyw" not in files:
-		raise BuildError("the file list misses app/__init__.py or IndiePulse.pyw")
+	if "app/__init__.py" not in files or "requirements.lock" not in files:
+		raise BuildError("the file list misses app/__init__.py or requirements.lock")
+	check_exe(exe)
 	out.mkdir(parents=True, exist_ok=True)
 	name = f"IndiePulse-{version}.zip"
 	zpath = out / name
 	with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+		_add(z, EXE, Path(exe))
 		for rel in files:
-			data = (root / rel).read_bytes()
-			if rel.lower().endswith((".bat", ".cmd")):  # cmd.exe misreads LF-only batch files
-				data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-			info = zipfile.ZipInfo(f"{FOLDER}/{rel}", time.localtime(os.path.getmtime(root / rel))[:6])
-			info.external_attr = 0o644 << 16
-			z.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED)
+			_add(z, destination(rel) or rel, root / rel)
 	sha = _sha256(zpath)
 	manifest = {
 		"version": version,
@@ -129,12 +153,13 @@ def main(argv: list[str] | None = None) -> int:
 	ap.add_argument("--tag", default=os.getenv("GITHUB_REF_NAME", ""))
 	ap.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "Sargonius/IndiePulseNew"))
 	ap.add_argument("--out", type=Path, default=ROOT / "dist")
+	ap.add_argument("--exe", type=Path, default=ROOT / EXE, help="IndiePulse.exe (tools/build_launcher.ps1)")
 	ap.add_argument("--check", action="store_true", help="only check the tag against __version__")
 	args = ap.parse_args(argv)
 	try:
 		version = check_tag(args.tag)
 		if not args.check:
-			manifest = build(args.tag, args.out, repo=args.repo, notes=notes_for_tag(args.tag))
+			manifest = build(args.tag, args.out, repo=args.repo, notes=notes_for_tag(args.tag), exe=args.exe)
 			print(json.dumps({k: v for k, v in manifest.items() if k != "notes"}, indent=2))
 	except BuildError as exc:
 		print(f"::error::{exc}")

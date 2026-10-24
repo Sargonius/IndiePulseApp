@@ -5,24 +5,27 @@ not depend on the code it replaces. The tray (app/desktop/updater.py) has alread
 sha256 and unpacked it; it starts this, stops the server and the worker, and quits. Then:
 
 1. wait for the tray to exit. From here on no IndiePulse process holds anything: not the .py files, and not the
-   .venv's packages either — the tray itself imports pystray, psutil and Pillow, whose .pyd files Windows won't let
+   venv's packages either — the tray itself imports pystray, psutil and Pillow, whose .pyd files Windows won't let
    an install replace while they are loaded. That is why this is a separate process and not a step of the tray;
-2. swap: every top-level name of the release (app/, the launchers, requirements, README…) is moved out of the code
-   folder into previous/, the new one moved in. Renames within one drive (updates.py picks the folder so), so each
-   is all at once; a locked file (an antivirus scan) is retried, and if a move still fails, everything moved so far
-   goes back. What isn't in the release stays as it is: .venv, .git, .env, portable.txt, data/ — the data
-   (DATA, app/core/paths.py) is never touched;
-3. requirements.lock of the new code into .venv (app/desktop/deps.py of that code, in a child process);
-4. start the new tray (IndiePulse.pyw --background) and wait for its server: /health, and /version saying the new
-   version. Not within HEALTH_TIMEOUT, or the tray exits → roll back: kill it, move the new code aside into failed/,
-   previous/ back, the old requirements, start the old tray. progress.json says how it went (the banner and the
-   tray read it); details in logs/update.log.
+2. swap: every top-level name of the release — IndiePulse.exe, README.md, LICENSE and lib\\ (the code) — is moved out
+   of IndiePulse's folder (HOME, app/core/paths.py) into previous/, the new one moved in. Renames within one drive
+   (updates.py picks the folder so), so each is all at once; a locked file (an antivirus scan) is retried, and if a
+   move still fails, everything moved so far goes back. What isn't in the release stays as it is: runtime\\ (uv,
+   Python, the venv), portable.txt, data\\ — the data (DATA) is never touched;
+3. requirements.lock of the new code into the venv (app/desktop/deps.py of that code, in a child process);
+4. start the new tray (`pythonw -m app.desktop.tray --background` in lib\\) and wait for its server: /health, and
+   /version saying the new version. Not within HEALTH_TIMEOUT, or the tray exits → roll back: kill it, move the new
+   code aside into failed/, previous/ back, the old requirements, start the old tray. progress.json says how it went
+   (the banner and the tray read it); details in logs/update.log.
 
-The update folder keeps previous/ (the version before) until the next update.
+While this runs it holds a named mutex IndiePulse.exe looks for (updating_mutex_name): a double-click in the middle
+waits for it instead of starting a tray of its own. The update folder keeps previous/ (the version before) until the
+next update.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -36,10 +39,13 @@ from pathlib import Path
 HEALTH_TIMEOUT = 240   # s from starting the new tray to its server answering (it may install packages first)
 TRAY_EXIT_TIMEOUT = 300  # s for the old tray to stop the worker (which finishes its task) and quit
 # Never replaced by an update, whatever a release holds: the environment, git, the user's settings and data
-PROTECTED = {".venv", "venv", ".git", ".env", "portable.txt", "data", "updates", ".updates", "logs", "media", "render",
-			 "cache", "tmp", "vendor", ".locks", ".settings.json", ".draft.json", ".draft_news.json", ".autoreload"}
+PROTECTED = {"runtime", ".venv", "venv", ".git", ".env", "portable.txt", "data", "updates", ".updates", "logs", "media",
+			 "render", "cache", "tmp", "vendor", ".locks", "browser", ".settings.json", ".draft.json",
+			 ".draft_news.json", ".autoreload"}
 _PROTECTED_SUFFIXES = (".db", ".db-wal", ".db-shm", ".db-journal", ".log")
-REQUIRED = ("app/__init__.py", "app/main.py", "IndiePulse.pyw", "requirements.lock")
+EXE = "IndiePulse.exe"
+LIB = "lib"  # a release's code folder (app/core/paths.py: ROOT)
+REQUIRED = (EXE, "lib/app/__init__.py", "lib/app/main.py", "lib/requirements.lock")
 _VERSION_RX = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.M)
 
 CREATE_NO_WINDOW = 0x08000000
@@ -83,23 +89,41 @@ def set_progress(work: Path, phase: str, version: str = "", text: str = "", **ex
 	return data
 
 
-def version_of(root: Path) -> str:
+def code_dir(home: Path) -> Path:
+	"""Where app/ is in IndiePulse's folder: lib\\ of a release, the folder itself in a checkout (paths.ROOT)."""
+	home = Path(home)
+	return home / LIB if (home / LIB / "app" / "__init__.py").is_file() else home
+
+
+def version_of(home: Path) -> str:
 	try:
-		m = _VERSION_RX.search((Path(root) / "app" / "__init__.py").read_text(encoding="utf-8"))
+		m = _VERSION_RX.search((code_dir(home) / "app" / "__init__.py").read_text(encoding="utf-8"))
 	except OSError:
 		return ""
 	return m.group(1) if m else ""
 
 
+def instance_key(home: Path) -> str:
+	"""What the named events and mutexes of one IndiePulse folder are called by. IndiePulse.exe passes its own
+	(INDIEPULSE_INSTANCE; launcher/Home.cs: sha1 of the folder's full path in lower case), and the tray's children
+	inherit it; this is the same, for a tray started without the exe."""
+	return os.getenv("INDIEPULSE_INSTANCE") or \
+		hashlib.sha1(str(Path(home).resolve()).lower().encode("utf-8")).hexdigest()[:16]
+
+
+def updating_mutex_name(home: Path) -> str:
+	return f"Local\\IndiePulse-{instance_key(home)}-updating"
+
+
 def find_release_root(staging: Path) -> Path:
 	"""The unpacked release: `staging` itself or its one folder (the zip has IndiePulse/ inside)."""
 	staging = Path(staging)
-	if (staging / "app" / "__init__.py").is_file():
+	if version_of(staging):
 		return staging
 	entries = list(staging.iterdir())
-	if len(entries) == 1 and (entries[0] / "app" / "__init__.py").is_file():
+	if len(entries) == 1 and entries[0].is_dir() and version_of(entries[0]):
 		return entries[0]
-	raise SwapError("the zip has no IndiePulse folder with app/ in it")
+	raise SwapError("the zip has no IndiePulse folder with lib/app/ in it")
 
 
 def release_items(new: Path) -> list[str]:
@@ -255,30 +279,46 @@ def kill_tree(pid: int) -> None:
 			pass
 
 
-def venv_python(root: Path, windowed: bool = False) -> Path:
-	return Path(root) / ".venv" / "Scripts" / ("pythonw.exe" if windowed else "python.exe")
+def venv_python(home: Path, windowed: bool = False) -> Path:
+	"""The venv's Python (deps.VENV): runtime\venv of a release, .venv of a checkout."""
+	home = Path(home)
+	venv = home / "runtime" / "venv" if code_dir(home) != home else home / ".venv"
+	return venv / "Scripts" / ("pythonw.exe" if windowed else "python.exe")
 
 
-# deps.py of whatever code is in root now: the new code's requirements after the swap, the old ones after a rollback
+# deps.py of whatever code is in home now: the new code's requirements after the swap, the old ones after a rollback
 _SYNC = ("import sys; sys.path.insert(0, sys.argv[1]); from pathlib import Path; from app.desktop import deps; "
 		 "sys.exit(0 if not deps.requirements_changed() or deps.install_requirements(Path(sys.argv[2])) else 1)")
 
 
-def sync_requirements(root: Path, log_path: Path) -> bool:
-	python = venv_python(root)
+def sync_requirements(home: Path, log_path: Path) -> bool:
+	python, code = venv_python(home), code_dir(home)
 	if not python.is_file():
-		return True  # nothing to sync into; IndiePulse.pyw makes the .venv
+		return True  # nothing to sync into; IndiePulse.exe makes the venv when it starts
 	try:
-		return subprocess.run([str(python), "-I", "-S", "-c", _SYNC, str(root), str(log_path)], cwd=str(root),
+		return subprocess.run([str(python), "-I", "-S", "-c", _SYNC, str(code), str(log_path)], cwd=str(code),
 							  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 							  creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0, timeout=1200).returncode == 0
 	except (OSError, subprocess.TimeoutExpired):
 		return False
 
 
-def start_tray(root: Path) -> subprocess.Popen:
-	return _popen_detached([str(venv_python(root, windowed=True)), str(Path(root) / "IndiePulse.pyw"),
-							"--background"], root)
+def start_tray(home: Path) -> subprocess.Popen:
+	"""The tray of whatever code is in home now, without opening a window (an open one reloads itself). It gets this
+	process's environment — the old tray's, INDIEPULSE_INSTANCE with it — so IndiePulse.exe finds the new one too."""
+	return _popen_detached([str(venv_python(home, windowed=True)), "-m", "app.desktop.tray", "--background"],
+						   code_dir(home))
+
+
+def hold_updating_mutex(home: Path):
+	"""The mutex IndiePulse.exe waits on while an update runs, held until this process ends (None off Windows)."""
+	if os.name != "nt":
+		return None
+	import ctypes
+	k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+	k32.CreateMutexW.restype = ctypes.c_void_p
+	k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+	return k32.CreateMutexW(None, True, updating_mutex_name(home))
 
 
 def _get_json(url: str):
@@ -334,6 +374,7 @@ def run(args: argparse.Namespace) -> int:
 	new, old = args.version, args.from_version
 	log(f"installing {new} over {old} in {root}")
 	set_progress(work, "installing", new, f"Installing IndiePulse {new}…", from_version=old)
+	_mutex = hold_updating_mutex(root)  # noqa: F841  (held: a double-click on IndiePulse.exe waits for this run)
 	if not wait_for_exit(args.pid, TRAY_EXIT_TIMEOUT):
 		log(f"the tray (pid {args.pid}) is still running after {TRAY_EXIT_TIMEOUT} s: killing it")
 		kill_tree(args.pid)

@@ -48,8 +48,9 @@ def _kill_tree(pid: int) -> None:
 
 
 def _same_dir(path: Optional[str]) -> bool:
+	"""A working directory of this copy's: the code (where the children start) or the data (where they move to)."""
 	try:
-		return bool(path) and Path(path).resolve() == ROOT
+		return bool(path) and Path(path).resolve() in (ROOT, DATA.resolve())
 	except OSError:
 		return False
 
@@ -353,7 +354,7 @@ class Supervisor:
 						parent_cmd = " ".join(psutil.Process(ppid).cmdline())
 					except psutil.Error:
 						pass
-				if "app.desktop.tray" in parent_cmd or "IndiePulse.pyw" in parent_cmd:
+				if "app.desktop.tray" in parent_cmd or "app.desktop.launch" in parent_cmd or "launch.py" in parent_cmd:
 					continue  # belongs to another live tray (same folder, different port)
 				victims.append(p)
 			except psutil.Error:

@@ -18,6 +18,11 @@ ENV/
 build/
 dist/
 *.spec
+# IndiePulse.exe, built by tools/build_launcher.ps1 (into the root of a checkout, to start it from there)
+/IndiePulse.exe
+launcher/obj/
+# what IndiePulse.exe prepares next to itself: uv, Python, a release's venv (launcher/Runtime.cs)
+/runtime/
 
 # OS/Editor
 .DS_Store
@@ -40,8 +45,9 @@ logs/
 .draft_news.json
 .locks/
 .autoreload
-# the data folder of a portable copy (app/core/paths.py)
+# the data folder of a portable copy (app/core/paths.py), and the app window's browser profile in a data folder
 data/
+/browser/
 # the updater's downloads, the previous version and its state (app/services/updates.py)
 /updates/
 /.updates/

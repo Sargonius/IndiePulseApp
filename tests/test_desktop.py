@@ -101,3 +101,13 @@ def test_crash_backoff_then_give_up():
     for _ in range(_MAX_CRASHES - 1):
         sup._crashed(w, "boom")
     assert w.state == "failed" and sup.status() == "error" and notes
+
+
+def test_leftovers_are_known_by_the_code_or_the_data_folder(monkeypatch, tmp_path):
+    """The children start in the code folder and move into the data folder (installed: another folder altogether), so
+    a server left behind by a killed tray is ours when its working directory is either."""
+    from app.desktop import supervisor
+    monkeypatch.setattr(supervisor, "DATA", tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    assert supervisor._same_dir(str(desktop.ROOT)) and supervisor._same_dir(str(tmp_path / "data"))
+    assert not supervisor._same_dir(str(tmp_path)) and not supervisor._same_dir(None)

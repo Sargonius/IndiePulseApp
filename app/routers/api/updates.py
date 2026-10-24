@@ -53,8 +53,8 @@ def banner_html() -> str:
             right = ("<button type='button' class='btn btn-primary' hx-post='/api/updates/install?view=banner' "
                      "hx-target='#update_alert' hx-swap='outerHTML'>Install</button>")
         else:
-            text = f"IndiePulse v{_e(latest['version'])} is available — {link} · start IndiePulse from its tray icon " \
-                   f"(IndiePulse.bat) to install it"
+            text = f"IndiePulse v{_e(latest['version'])} is available — {link} · start IndiePulse with IndiePulse.exe " \
+                   f"(its tray icon) to install it"
     elif kind == "progress":
         text = _e(b["text"])
         attrs = " hx-get='/api/updates/banner' hx-trigger='every 5s' hx-swap='outerHTML'"

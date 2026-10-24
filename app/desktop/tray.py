@@ -1,10 +1,12 @@
-"""IndiePulse tray app: `pythonw -m app.desktop.tray [--background]` (normally via IndiePulse.pyw).
+"""IndiePulse tray app: `pythonw -m app.desktop.tray [--background]`, started by IndiePulse.exe (launcher/).
 
 One icon in the notification area instead of two console windows. Its colour is the
-app state (green ok / amber starting or restarting / red broken), the menu opens the UI,
-restarts, shows logs, checks for and installs updates (app/desktop/updater.py), and "Quit"
-stops the server and worker (the worker finishes the task in progress first). Launching
-again while it runs just opens the browser.
+app state (green ok / amber starting or restarting / red broken), the menu opens the UI —
+IndiePulse's own window (app/desktop/window.py) — restarts, shows logs, checks for and installs
+updates (app/desktop/updater.py), and "Quit" stops the server and worker (the worker finishes
+the task in progress first) and closes the window. IndiePulse.exe started again while this runs
+asks it to bring up the window (winapi.InstanceEvents); its uninstaller asks it to quit.
+`--background` (autostart, after an update): no window.
 """
 from __future__ import annotations
 
@@ -13,10 +15,9 @@ import os
 import sys
 import threading
 import time
-import webbrowser
 
 from app.core.paths import enter_data_dir
-from app.desktop import DATA, ROOT
+from app.desktop import DATA, KIT, ROOT, is_release_layout
 
 enter_data_dir()
 
@@ -26,16 +27,33 @@ load_dotenv(DATA / ".env")
 
 from loguru import logger
 
+from app import __version__
 from app.core import config
-from app.desktop import winapi
+from app.desktop import deps, window, winapi
 from app.desktop.icon import ensure_ico, tray_image
 
 ICO_PATH = ROOT / "app" / "static" / "indiepulse.ico"
-_SHORTCUTS_MARKER = ROOT / ".venv" / "indiepulse-shortcuts"
+# The shortcuts the tray made itself, and for which command (winapi.refresh_shortcuts); in the venv: a new computer's
+# new venv makes them again
+_SHORTCUTS_MARKER = deps.VENV / "indiepulse-shortcuts"
 
 
 def _local_host() -> str:
 	return config.APP_HOST if config.APP_HOST not in ("0.0.0.0", "::", "") else "127.0.0.1"
+
+
+def _refresh_traces(trusted: bool) -> None:
+	"""What an older IndiePulse left pointing at the old way of starting it (IndiePulse.pyw), and the version Settings
+	→ Apps shows: brought up to date. Nothing new is created here."""
+	try:
+		if winapi.refresh_autostart():
+			logger.info("autostart entry now starts IndiePulse.exe")
+		if trusted and winapi.refresh_shortcuts(_SHORTCUTS_MARKER, ensure_ico(ICO_PATH)):
+			logger.info("shortcuts made again for the way IndiePulse starts now")
+		if winapi.refresh_uninstall_entry(__version__):
+			logger.info(f"uninstall entry says {__version__} now")
+	except Exception:
+		logger.exception("refreshing shortcuts / autostart / uninstall entry failed")
 
 
 def run(background: bool) -> None:
@@ -43,8 +61,10 @@ def run(background: bool) -> None:
 	if not winapi.acquire_single_instance(config.APP_PORT):
 		logger.info("already running")
 		if not background:
-			webbrowser.open(url)
+			window.open_window(url)
+		winapi.InstanceEvents.signal_ready()  # an exe waiting for this start: it's up (the other tray's)
 		return
+	events = winapi.InstanceEvents()  # from here on IndiePulse.exe sees this tray running
 
 	import pystray
 	from pystray import Menu, MenuItem as Item
@@ -52,8 +72,8 @@ def run(background: bool) -> None:
 	from app.desktop.supervisor import LOGS, Supervisor
 
 	icon: pystray.Icon
-	want_browser = [not background]  # open the UI once the server answers
-	# A club computer the drive only visits gets no shortcuts and no autostart entry: nothing left behind
+	want_window = [not background]  # open the UI once the server answers
+	# A club computer the drive only visits, or a portable copy, gets no shortcuts and no autostart entry
 	trusted = winapi.trusted_pc()
 
 	def refresh() -> None:
@@ -62,9 +82,10 @@ def run(background: bool) -> None:
 		icon.update_menu()
 
 	def on_ready() -> None:
-		if want_browser[0]:
-			want_browser[0] = False
-			webbrowser.open(url)
+		if want_window[0]:
+			want_window[0] = False
+			window.open_window(url)
+		winapi.InstanceEvents.signal_ready()  # IndiePulse.exe's setup window closes as this one opens
 
 	def notify(text: str) -> None:
 		try:
@@ -80,9 +101,9 @@ def run(background: bool) -> None:
 
 	def open_ui() -> None:
 		if sup.server.state == "running":
-			webbrowser.open(url)
-		else:
-			want_browser[0] = True  # will open as soon as it's up
+			window.open_window(url)
+		elif not window.bring_to_front():
+			want_window[0] = True  # will open as soon as it's up
 
 	def open_logs() -> None:
 		LOGS.mkdir(exist_ok=True)
@@ -95,13 +116,14 @@ def run(background: bool) -> None:
 	def make_shortcuts() -> None:
 		try:
 			winapi.create_shortcuts(ensure_ico(ICO_PATH))
-			_SHORTCUTS_MARKER.touch()
+			_SHORTCUTS_MARKER.write_text(winapi.shortcuts_stamp(), encoding="utf-8")
 			notify("IndiePulse shortcuts created on the desktop and in the Start menu.")
 		except Exception:
 			logger.exception("shortcut creation failed")
 			notify("Couldn’t create shortcuts (logs\\launcher.log).")
 
 	def quit_app() -> None:
+		window.close_windows()
 		sup.quit()
 
 	def youtube_label() -> str:
@@ -114,7 +136,7 @@ def run(background: bool) -> None:
 
 	def reconnect_youtube() -> None:
 		if sup.server.state == "running":
-			webbrowser.open(url + "api/accounts/connect/youtube/go")
+			window.open_window(url + "api/accounts/connect/youtube/go", new=True)
 		else:
 			notify("The server is still starting — try again in a minute.")
 
@@ -162,10 +184,14 @@ def run(background: bool) -> None:
 	def setup(ic: pystray.Icon) -> None:
 		ic.visible = True
 		sup.start()
+		events.listen(on_show=open_ui, on_quit=quit_app)
 		threading.Thread(target=youtube_watch, name="youtube-reminder", daemon=True).start()
 		updater.start()
-		if not _SHORTCUTS_MARKER.exists() and trusted:
-			make_shortcuts()  # first run: behave like an installed program — not on a club computer the drive visits
+		_refresh_traces(trusted)
+		# First run on a computer: shortcuts, like an installed program — on a trusted computer of ClubKit's, or for a
+		# checkout. A release's own Install made them already, and its Portable promised to leave nothing.
+		if not _SHORTCUTS_MARKER.exists() and trusted and (KIT.is_dir() or not is_release_layout()):
+			make_shortcuts()
 
 	logger.info(f"IndiePulse tray starting ({url}, background={background})")
 	icon.run(setup=setup)
@@ -174,7 +200,7 @@ def run(background: bool) -> None:
 
 def main(argv: list[str] | None = None) -> None:
 	parser = argparse.ArgumentParser(prog="IndiePulse")
-	parser.add_argument("--background", action="store_true", help="don't open the browser (autostart)")
+	parser.add_argument("--background", action="store_true", help="don't open the window (autostart, an update)")
 	args = parser.parse_args(argv)
 
 	(DATA / "logs").mkdir(exist_ok=True)
