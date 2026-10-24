@@ -3,7 +3,7 @@
 import io
 import os
 import time
-from app.core.config import STEAM_APP_ID
+from app.services import steam_links
 from fastapi import APIRouter
 from fastapi import File
 from fastapi import Form
@@ -179,7 +179,7 @@ def steam_export(
     return {
         "ok": True,
         "export_dir": export_dir.replace('\\','/'),
-        "steam_create_url": f"https://steamcommunity.com/games/{STEAM_APP_ID}/partnerevents/create"
+        "steam_create_url": steam_links.events_url(),
     }
 
 

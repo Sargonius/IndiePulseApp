@@ -121,7 +121,9 @@ def news_form(request: Request):
 def steam_export_page(request: Request):
     draft = load_draft()
     cfg = load_settings()
-    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en')})
+    from app.services import steam_links
+    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en'),
+                                                            'steam_app_id': steam_links.app_id(cfg), 'steam_events_url': steam_links.events_url(cfg)})
 
 @router.get('/projects', response_class=HTMLResponse)
 def projects_page(request: Request, session: Session = Depends(get_session)):

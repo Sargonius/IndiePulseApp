@@ -141,6 +141,18 @@ def _music_context(cfg: dict) -> dict:
 	return {"music_folders": music_library.folder_rows(cfg)}
 
 
+def _hashtags(v: str) -> str:
+	"""'indiedev, #gamedev  #indiedev' → '#indiedev #gamedev'."""
+	out: list = []
+	for tag in re.split(r"[\s,;]+", v):
+		tag = tag.strip()
+		if tag and tag != "#":
+			tag = tag if tag.startswith("#") else "#" + tag
+			if tag not in out:
+				out.append(tag)
+	return " ".join(out)
+
+
 def _github_repo(v: str) -> str:
 	repo = v.strip().strip("/")
 	if repo.startswith("https://github.com/"):  # pasted from the address bar
@@ -165,6 +177,10 @@ SECTIONS: list[Section] = [
 		elsewhere("destinations", _DESTINATIONS, "Destinations"),
 		elsewhere("ui_language", "nowhere yet: the interface is in English", "Interface language"),
 	)),
+	Section("posts", "Posts", fields=(
+		Field("default_hashtags", "Hashtags for “Suggest”", placeholder="#indiedev #gamedev #screenshotsaturday",
+			  help="the 📷 Post form's Suggest button puts these in the hashtags field", clean=_hashtags),
+	)),
 	Section("discord", "Discord", module="discord", status=True, actions=(
 		Action("Test", "/api/discord/test"),
 	), fields=(
@@ -184,6 +200,10 @@ SECTIONS: list[Section] = [
 		Field("steam_financial_api_key", "Financial API key", "secret",
 			  help="daily wishlists and sales, broken down by country",
 			  placeholder="Web API key of the Financial API group"),
+		Field("steam_app_id", "Steam App ID for the store news export", placeholder="e.g. 480", pattern=r"\d+",
+			  pattern_error="A Steam App ID is a number (the one in store.steampowered.com/app/<ID>)",
+			  help="“Open Steam Partner Events” on Steam → Export opens this game's event editor; each game's "
+			  "own ID for the reports is in <a href=\"/projects\">Projects</a>"),
 		state("steam_traffic_token", "the secret of the “IndiePulse ← Steam” bookmarklet, made on first use"),
 	)),
 	Section("telegram", "Telegram", module="telegram", status=True, actions=(
@@ -332,6 +352,9 @@ SECTIONS: list[Section] = [
 	)),
 	Section("modules", "Modules", fields=(
 		elsewhere("modules_disabled", "the 🧩 Modules page", "Modules turned off"),
+	)),
+	Section("setup", "Setup", fields=(
+		state("setup_state", "the setup wizard's progress (app/services/setup.py)"),
 	)),
 ]
 

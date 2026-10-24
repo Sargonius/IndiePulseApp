@@ -141,27 +141,23 @@ def translate_missing(texts: dict = Depends(form_texts)):
 
 @router.post("/hashtags/suggest")
 def suggest_hashtags(text: str = Form("")):
-    # Default hashtag set for preview/posting (exclude on Discord when publishing)
-    tags = [
-        "#Synthetica",
-        "#UnrealEngine",
-        "#Tycoon",
-        "#Strategy",
-        "#Gamedev",
-        "#Indie",
-    ]
-    # Deduplicate while preserving order
+    # The hashtags of Settings → Posts (left out on Discord when publishing)
+    from app.services.settings import load_settings
     seen = set()
     ordered = []
-    for t in tags:
+    for t in str(load_settings().get("default_hashtags") or "").split():
         if t not in seen:
             seen.add(t)
             ordered.append(t)
     tag_str = " ".join(ordered)
-    save_draft({"tags": tag_str})
+    hint = ""
+    if tag_str:
+        save_draft({"tags": tag_str})
+    else:
+        hint = " placeholder=\"No hashtags to suggest yet: Settings → Posts\""
     # Return an input prefilled so htmx can swap it in place
     return HTMLResponse(
-        f"<input id=\"tags_input\" type=\"text\" name=\"tags\" value=\"{_e(tag_str)}\" style=\"width: 520px;\" />"
+        f"<input id=\"tags_input\" type=\"text\" name=\"tags\" value=\"{_e(tag_str)}\"{hint} style=\"width: 520px;\" />"
     )
 
 
