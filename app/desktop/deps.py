@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from app.core.paths import ROOT, RUNTIME, is_release_layout
@@ -69,6 +70,20 @@ def uv() -> str | None:
 	return shutil.which("uv")
 
 
+DEEP_CACHE = 100  # characters: see uv_cache()
+
+
+def uv_cache() -> Path:
+	"""The runtime's uv cache: runtime\\cache — unless that is deep in the folders. A package without a wheel (huey) is
+	built ~130 characters further down in it, which must stay under Windows' 260; then a short one in %TEMP%, removed
+	once the packages are in. The same rule as IndiePulse.exe's (launcher/Runtime.cs, Cache)."""
+	own = RUNTIME / "cache"
+	if len(str(own)) <= DEEP_CACHE:
+		return own
+	from app.desktop.apply_update import instance_key
+	return Path(tempfile.gettempdir()).resolve() / f"IndiePulse-uv-{instance_key(RUNTIME.parent)[:8]}"
+
+
 def uv_env() -> dict[str, str]:
 	"""Where uv keeps its cache and Pythons. ClubKit: on the drive (not in the profile of a computer it will leave), and
 	only those — a venv made on one computer then runs on the next, if the drive has the same letter there; the same
@@ -80,7 +95,7 @@ def uv_env() -> dict[str, str]:
 		env.setdefault("UV_PYTHON_INSTALL_DIR", str(KIT / "data" / "uv" / "python"))
 		env.setdefault("UV_PYTHON_PREFERENCE", "only-managed")
 	elif RUNTIME.is_dir():
-		env["UV_CACHE_DIR"] = str(RUNTIME / "cache")
+		env["UV_CACHE_DIR"] = str(uv_cache())
 		env["UV_PYTHON_INSTALL_DIR"] = str(RUNTIME / "python")
 		env["UV_PYTHON_PREFERENCE"] = "only-managed"
 	return env
@@ -117,7 +132,11 @@ def install_requirements(log_path: Path) -> bool:
 	"""requirements.lock into the venv: with uv (its cache on the drive or in runtime\\, seconds) or pip."""
 	exe, listed = uv(), str(_installed_list())
 	if exe:
-		ok = _call([exe, "pip", "install", "--python", str(venv_python()), "-r", listed], log_path, uv_env())
+		env = uv_env()
+		ok = _call([exe, "pip", "install", "--python", str(venv_python()), "-r", listed], log_path, env)
+		temp_cache = Path(env.get("UV_CACHE_DIR") or RUNTIME / "cache")
+		if ok and not KIT.is_dir() and RUNTIME.is_dir() and RUNTIME not in temp_cache.parents:
+			shutil.rmtree(temp_cache, ignore_errors=True)  # uv_cache()'s short one in %TEMP%: done with
 	else:
 		ok = _call([str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check", "-r", listed], log_path)
 	if ok:

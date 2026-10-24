@@ -61,8 +61,16 @@ def test_a_release_keeps_uv_and_python_in_its_runtime(monkeypatch, tmp_path):
     monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", r"C:\Users\me\uv-pythons")
     assert deps.uv() == str(runtime / "uv" / "uv.exe")
     env = deps.uv_env()
-    assert env["UV_PYTHON_INSTALL_DIR"] == str(runtime / "python") and env["UV_CACHE_DIR"] == str(runtime / "cache")
+    assert env["UV_PYTHON_INSTALL_DIR"] == str(runtime / "python") and env["UV_CACHE_DIR"] == str(deps.uv_cache())
     assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
+    # the cache: in runtime\, unless that is too deep for a package built from source (then a short one in %TEMP%)
+    shallow = Path("C:/IndiePulse/runtime")
+    monkeypatch.setattr(deps, "RUNTIME", shallow)
+    assert deps.uv_cache() == shallow / "cache"
+    deep = Path("C:/" + "/".join(["a-rather-long-folder-name"] * 4)) / "IndiePulse" / "runtime"
+    monkeypatch.setattr(deps, "RUNTIME", deep)
+    assert deps.uv_cache().parent == Path(deps.tempfile.gettempdir()).resolve()
+    assert deps.uv_cache().name.startswith("IndiePulse-uv-")
 
 
 def test_a_release_has_its_code_in_lib(tmp_path):

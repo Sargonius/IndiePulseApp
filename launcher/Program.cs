@@ -199,25 +199,36 @@ namespace IndiePulse
             }
             else
             {
-                string target = Folders.InstallDir;
                 string installTitle = update
                     ? "Update IndiePulse on this computer (" + installed.Version + " → " + home.Version + ")"
                     : "Install for this user";
                 string installText = update
-                    ? "Replaces the installed IndiePulse in " + installed.Dir + ". Your posts, settings and media stay as they are."
-                    : "Into " + target + " — no admin rights needed — with Start-menu and desktop shortcuts and an entry " +
-                      "in Settings → Apps to remove it. Your posts and settings are kept in " +
-                      Path.Combine(Folders.LocalAppData, "IndiePulse") + ".";
-                string portableText = "Runs from " + home.Dir + " and writes nothing to this computer: no shortcuts, no " +
-                    "registry entries, no autostart. Your posts and settings stay in its data folder, so it can go " +
-                    "on a USB drive." + (home.KitPresent ? " ClubKit is on this drive: its Python is used." : "");
+                    ? "Replaces the installed IndiePulse in " + Short(installed.Dir) + ". Your posts, settings and " +
+                      "media stay as they are."
+                    : "Copies it to " + Short(Folders.InstallDir) + " (no admin rights needed), with Start-menu and " +
+                      "desktop shortcuts and an entry in Settings → Apps to remove it. Posts and settings: " +
+                      Short(Path.Combine(Folders.LocalAppData, "IndiePulse")) + ".";
+                string portableText = "Runs from " + Short(home.Dir) + " and writes nothing to this computer: no " +
+                    "shortcuts, registry entries or autostart. Posts and settings stay in its data folder — good " +
+                    "for a USB drive.";
                 form.ShowChoice("How would you like to use IndiePulse?", installTitle, installText,
                     "Portable — run from this folder", portableText, carried && !update,
-                    "The first start downloads Python and the packages IndiePulse needs (about 100 MB), which takes a " +
-                    "few minutes. Nothing else is installed on the computer.", go);
+                    (home.KitPresent ? "ClubKit is on this drive: its Python and uv are used. " :
+                        "The first start downloads Python and the packages IndiePulse needs (about 100 MB): a few " +
+                        "minutes. ") + "Nothing else is installed on the computer.", go);
             }
             Application.Run(form);
             return ok ? 0 : 1;
+        }
+
+        // A path to show in a line of text: C:\Users\me\…\portable\IndiePulse when it is long
+        static string Short(string path)
+        {
+            if (path.Length <= 56) return path;
+            string root = Path.GetPathRoot(path);
+            string[] parts = path.Substring(root.Length).Split('\\');
+            if (parts.Length <= 4) return path;
+            return root + parts[0] + "\\" + parts[1] + "\\…\\" + parts[parts.Length - 2] + "\\" + parts[parts.Length - 1];
         }
 
         static void RunInstall(SetupForm form, Home source, Action finished)
@@ -234,7 +245,6 @@ namespace IndiePulse
             steps.Add(new Step("register", "Adding shortcuts and an entry in Settings → Apps",
                 delegate(StepContext ctx) { Installer.Register(target, ctx); }));
             steps.Add(new Step("start", "Starting IndiePulse", delegate(StepContext ctx) { rt.StartAndWait(ctx, false); }));
-            form.SetHeading("Installing IndiePulse", null);
             form.Run("Installing IndiePulse", steps, finished);
         }
 
@@ -252,7 +262,6 @@ namespace IndiePulse
             var rt = new Runtime(home);
             var steps = new List<Step>(rt.AllSteps());
             steps.Add(new Step("start", "Starting IndiePulse", delegate(StepContext ctx) { rt.StartAndWait(ctx, false); }));
-            form.SetHeading("Getting IndiePulse ready", null);
             form.Run("Getting IndiePulse ready", steps, finished);
         }
 
@@ -355,7 +364,7 @@ namespace IndiePulse
                 Pair("installed_here", Installer.IsInstalledAt(home) ? "true" : "false"),
                 Pair("key", Json(home.Key)), Pair("version", Json(home.Version)),
                 Pair("requirements_hash", Json(stamp)), Pair("venv_alive", home.VenvAlive() ? "true" : "false"),
-                Pair("uv", Json(rt.Uv)), Pair("plan", "[" + string.Join(", ", plan) + "]"),
+                Pair("uv", Json(rt.Uv)), Pair("uv_cache", Json(rt.Cache)), Pair("plan", "[" + string.Join(", ", plan) + "]"),
                 Pair("install_dir", Json(Folders.InstallDir)), Pair("desktop", Json(Folders.Desktop)),
                 Pair("start_menu", Json(Folders.StartMenuPrograms)), Pair("removable", Drives.Removable(home.Dir) ? "true" : "false"),
             };

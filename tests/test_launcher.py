@@ -143,6 +143,22 @@ def test_the_venv_and_what_is_left_to_prepare(release, clean_env, monkeypatch):
     assert j["venv_alive"] is False and not deps.venv_alive() and j["plan"] == ["python", "venv", "packages"]
 
 
+def test_a_deep_folder_gets_a_short_uv_cache(tmp_path, exe, release, clean_env, monkeypatch):
+    """A package without a wheel (huey) is built ~130 characters down in uv's cache: under a deep folder that passes
+    Windows' 260 (it did in a test run, 2026-10-25), so both sides then use a short cache in %TEMP%."""
+    home = tmp_path.joinpath(*["a-rather-long-folder-name"] * 3) / "IndiePulse"
+    _code(home / "lib", "2.1.0")
+    shutil.copy(exe, home / "IndiePulse.exe")
+    j = ask(home)
+    monkeypatch.setattr(deps, "RUNTIME", home / "runtime")
+    assert len(str(home / "runtime" / "cache")) > deps.DEEP_CACHE
+    assert j["uv_cache"] == str(deps.uv_cache()) and Path(j["uv_cache"]).parent == Path(os.environ["TEMP"]).resolve()
+    shallow = ask(release)
+    monkeypatch.setattr(deps, "RUNTIME", release / "runtime")
+    if len(str(release / "runtime" / "cache")) <= deps.DEEP_CACHE:
+        assert shallow["uv_cache"] == str(deps.uv_cache()) == str(release / "runtime" / "cache")
+
+
 def test_the_same_key_from_a_short_path(release, clean_env):
     """%TEMP% is often spelt with 8.3 names (C:\\Users\\SARGON~1\\...): the exe's key is the long path's, as Python's."""
     buf = ctypes.create_unicode_buffer(1024)

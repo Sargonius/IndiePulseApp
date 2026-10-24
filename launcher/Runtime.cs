@@ -37,6 +37,19 @@ namespace IndiePulse
         string KitUv { get { return Path.Combine(home.Kit, "tools", "uv", "uv.exe"); } }
         string OwnUv { get { return Path.Combine(home.Runtime, "uv", "uv.exe"); } }
 
+        // uv's cache: runtime\cache - unless that is deep in the folders. A package without a wheel (huey) is built
+        // ~130 characters further down in it, which must stay under Windows' 260; then a short one in %TEMP%, removed
+        // once the packages are in. The same rule as deps.uv_cache().
+        public const int DeepCache = 100;
+        public string Cache
+        {
+            get
+            {
+                string own = Path.Combine(home.Runtime, "cache");
+                return own.Length <= DeepCache ? own : Path.Combine(Path.GetTempPath(), "IndiePulse-uv-" + home.Key.Substring(0, 8));
+            }
+        }
+
         // The uv to use ("" = none yet): the same order as deps.uv()
         public string Uv
         {
@@ -232,6 +245,12 @@ namespace IndiePulse
                 if (code != 0) throw new StepFailed("Couldn't install the packages (pip said code " + code + "). See the log, then Retry.");
             }
             File.WriteAllText(home.Stamp, home.RequirementsHash(), Encoding.ASCII);
+            if (!home.KitPresent && !Home.Inside(Cache, home.Runtime))
+            {
+                // the short cache in %TEMP%: the venv has what it needs (a copy or a hard link of each file)
+                try { Files.DeleteTree(Cache); }
+                catch (IOException ex) { ctx.Log.Write("the temporary cache stays", ex); }
+            }
         }
 
         // ── starting ─────────────────────────────────────────────────────────
@@ -290,7 +309,7 @@ namespace IndiePulse
             else
             {
                 // everything in runtime\: a portable copy leaves nothing in the profile, an uninstall takes it all
-                env["UV_CACHE_DIR"] = Path.Combine(home.Runtime, "cache");
+                env["UV_CACHE_DIR"] = Cache;
                 env["UV_PYTHON_INSTALL_DIR"] = Path.Combine(home.Runtime, "python");
                 env["UV_PYTHON_PREFERENCE"] = "only-managed";
             }
@@ -313,26 +332,43 @@ namespace IndiePulse
 
         int RunUvCode(string args, StepContext ctx)
         {
+            return RunUvCode(args, ctx, new StringBuilder());
+        }
+
+        int RunUvCode(string args, StepContext ctx, StringBuilder output)
+        {
             string uv = Uv;
             if (uv.Length == 0) throw new StepFailed("uv is missing (" + OwnUv + "): Retry gets it again.");
-            var output = new StringBuilder();
             int code = RunTool(uv, args, delegate(IDictionary<string, string> env) { ApplyUvEnv(env, false); }, ctx, output);
             string text = output.ToString();
             if (code != 0 && (text.IndexOf("certificate", StringComparison.OrdinalIgnoreCase) >= 0
                               || text.IndexOf("UnknownIssuer", StringComparison.OrdinalIgnoreCase) >= 0))
             {
                 ctx.Log.Write("a TLS certificate problem: once more with Windows' certificate store");
-                code = RunTool(uv, args, delegate(IDictionary<string, string> env) { ApplyUvEnv(env, true); }, ctx, null);
+                output.Length = 0;
+                code = RunTool(uv, args, delegate(IDictionary<string, string> env) { ApplyUvEnv(env, true); }, ctx, output);
             }
             return code;
         }
 
         void RunUv(string args, string what, StepContext ctx)
         {
-            int code = RunUvCode(args, ctx);
-            if (code != 0)
-                throw new StepFailed("Couldn't get " + what + " (uv said code " + code + "). Check the internet " +
-                    "connection; the log has the details. Then Retry.");
+            var output = new StringBuilder();
+            ctx.Log.Write("(" + what + ")");
+            int code = RunUvCode(args, ctx, output);
+            if (code == 0) return;
+            string text = output.ToString();
+            if (text.IndexOf("too long", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("os error 206", StringComparison.OrdinalIgnoreCase) >= 0)
+                throw new StepFailed("Windows refused a path longer than 260 characters: this folder is too deep (" +
+                    home.Dir + "). Move the IndiePulse folder somewhere shorter, like C:\\IndiePulse, and start it again.");
+            if (text.IndexOf("error sending request", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("dns error", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0
+                || text.IndexOf("connection", StringComparison.OrdinalIgnoreCase) >= 0)
+                throw new StepFailed("Couldn't download " + what + ": check the internet connection, then Retry.");
+            throw new StepFailed("Couldn't get " + what + " (uv stopped with code " + code + "). The log says why; " +
+                "then Retry.");
         }
 
         int RunTool(string exe, string args, Action<IDictionary<string, string>> env, StepContext ctx)
