@@ -38,6 +38,33 @@ An update replaces the code — `app\`, the launchers, `requirements.*`, `README
 still says what's released): update it with `git pull`. By hand: download the new zip, Quit IndiePulse from the tray,
 unzip over the old folder, start it.
 
+## First run
+
+A fresh install — no settings yet — opens the **setup wizard** (`/setup`) instead of the home page, one step at a
+time, each of which can be skipped:
+
+1. **Languages**: the one you write in, the ones you publish in.
+2. **Networks & features**: the 🧩 modules you want; the rest is hidden everywhere.
+3. **Accounts**: the Settings sections of the networks you picked (keys, connect buttons, their instructions), and a
+   channel / webhook / Page / subreddit per language if you have several.
+4. **AI & translation**: optional OpenAI / Claude / DeepL keys.
+5. **Updates**: how to handle a new version, and the access token while the repository is private.
+
+The step reached is remembered, so a restart in the middle comes back to it. **Skip setup** leaves it for good;
+⚙️ Settings → **Run setup again** goes through it again (without taking over the home page). An install that already
+has settings is never sent there: its first start of a version with the wizard marks it set up, and writes into its
+settings the values it used to get from built-in defaults that new installs no longer have (a music folder, a
+YouTube playlist, the Steam game of the store-news export, the hashtags of *Suggest*), so it works exactly as before.
+
+**Where settings live.** Everything you enter in ⚙️ Settings or the wizard is in `.settings.json` in the data folder,
+next to the databases: `%LOCALAPPDATA%\IndiePulse`, `data\` of a portable copy, or the IndiePulse folder itself for
+a copy that has always kept its data there (`app/core/paths.py`). An update never touches it. Keys and tokens are
+stored there in plain text — keep that folder to yourself; the logs mask them — and the app shows them as `•••` +
+the last 4 characters. What each setting is (its section, label, type and checks, or that the app writes it itself:
+OAuth tokens, expiry times) is declared in `app/core/settings_schema.py`; the Settings page and the wizard are
+rendered from it, and a test makes every key of `DEFAULTS` in `app/services/settings.py` belong to exactly one
+section.
+
 ## Quick start (Windows)
 
 1. Optional: copy `.env.example` to `.env` (host/port, DB path).
@@ -45,7 +72,8 @@ unzip over the old folder, start it.
    computer without Python too: it takes uv from PATH or from `ClubKit\tools\uv` on the same drive, and uv
    fetches Python 3.12 once into `ClubKit\data\uv` — no install, no admin). The first run on a computer creates
    `.venv`, installs `requirements.lock` and adds **IndiePulse** shortcuts to the Desktop and Start menu.
-3. The browser opens http://127.0.0.1:8000; fill in platform credentials on the ⚙️ Settings page.
+3. The browser opens http://127.0.0.1:8000: the setup wizard on a fresh install (*First run* above), then the
+   ⚙️ Settings page for anything else.
 
 **From the drive on different computers.** A `.venv` made on another computer (its Python in another user's
 profile or on the drive under another letter) is recognised by `pyvenv.cfg` and rebuilt (`logs/venv.log`). With
@@ -128,7 +156,8 @@ successful publish and errors since. Run it after the app has been idle for a wh
 - `app/jobs/tasks.py` — Huey tasks: publish dispatcher, scheduling watchdog, metrics refresh
 - `app/services/` — low-level API clients, settings, tokens, health check
 - `media/` uploads, `render/` rendered videos, `logs/` logs
-- `.settings.json` — all credentials (local only, git-ignored)
+- `.settings.json` (in the data folder) — every setting and credential (local only, git-ignored); what each one is:
+  `app/core/settings_schema.py`
 
 ## Security notes
 The app has no login and must stay bound to 127.0.0.1. It rejects cross-site POSTs
