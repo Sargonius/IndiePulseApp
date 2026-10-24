@@ -9,6 +9,28 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <link href="https://fonts.googleapis.com/css2?family=Staatliches&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v={{ request.app.state.asset_version if request and request.app and request.app.state and request.app.state.asset_version else '1' }}">
+  {% set mui = modules_ui() %}
+  {% if mui.off_sections %}
+  <style>{% for s in mui.off_sections %}#section_{{ s }}{% if not loop.last %}, {% endif %}{% endfor %} { display: none !important; }</style>
+  {% endif %}
+  <script>
+	// Platforms of modules that are off (🧩 Modules): their checkboxes are unchecked, disabled (never submitted) and
+	// hidden on every page, also in parts htmx loads later. Not removed: page scripts look some of them up.
+	window.IP_OFF_PLATFORMS = {{ mui.off_platforms | tojson }};
+	(function () {
+		if (!IP_OFF_PLATFORMS.length) return;
+		function hide(root) {
+			for (const p of IP_OFF_PLATFORMS) {
+				root.querySelectorAll(`input.pf[value="${p}"], input[name="platforms"][value="${p}"], #filter_platform option[value="${p}"]`).forEach(el => {
+					if (el.tagName === 'INPUT') { el.checked = false; el.disabled = true; }
+					(el.closest('label') || el).classList.add('ip-off');
+				});
+			}
+		}
+		document.addEventListener('DOMContentLoaded', () => hide(document));
+		document.addEventListener('htmx:afterSwap', e => hide(e.target));
+	})();
+  </script>
 </head>
 <body class="{{ body_class or '' }}">
 	<header>
@@ -18,16 +40,17 @@
 				<a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Home</a>
 				<a href="/create/post" class="{% if request.url.path.startswith('/create/post') %}active{% endif %}">📷 Post</a>
 				<a href="/create/video" class="{% if request.url.path.startswith('/create/video') %}active{% endif %}">🎬 Video</a>
-				<a href="/shorts" class="{% if request.url.path.startswith('/shorts') %}active{% endif %}">🎞️ Shorts</a>
-				<a href="/tiktok" title="TikTok pipeline: proven Shorts → TikTok, checklist and numbers" class="{% if request.url.path.startswith('/tiktok') %}active{% endif %}">🎵 TikTok</a>
+				{% if module_on('shorts') %}<a href="/shorts" class="{% if request.url.path.startswith('/shorts') %}active{% endif %}">🎞️ Shorts</a>{% endif %}
+				{% if module_on('tiktok_pipeline') %}<a href="/tiktok" title="TikTok pipeline: proven Shorts → TikTok, checklist and numbers" class="{% if request.url.path.startswith('/tiktok') %}active{% endif %}">🎵 TikTok</a>{% endif %}
 				<a href="/calendar" class="{% if request.url.path.startswith('/calendar') %}active{% endif %}">📅 Calendar</a>
 				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
 				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>
 				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
-				<a href="/outreach" title="Creator outreach: YouTubers and streamers" class="{% if request.url.path.startswith('/outreach') %}active{% endif %}">📣 Outreach</a>
+				{% if module_on('outreach') %}<a href="/outreach" title="Creator outreach: YouTubers and streamers" class="{% if request.url.path.startswith('/outreach') %}active{% endif %}">📣 Outreach</a>{% endif %}
 				<a href="/projects" class="{% if request.url.path.startswith('/projects') %}active{% endif %}">Projects</a>
-				<a href="/guide" title="Indie marketing playbook" class="{% if request.url.path.startswith('/guide') %}active{% endif %}">📖</a>
+				{% if module_on('guide') %}<a href="/guide" title="Indie marketing playbook" class="{% if request.url.path.startswith('/guide') %}active{% endif %}">📖</a>{% endif %}
 				<a href="/status" title="API health check" class="{% if request.url.path.startswith('/status') %}active{% endif %}">🩺</a>
+				<a href="/modules" title="Modules: turn off what you don't use" class="{% if request.url.path.startswith('/modules') %}active{% endif %}">🧩</a>
 				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">⚙️</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
 			</nav>
@@ -36,9 +59,9 @@
 	<main>
 		<div class="container">
 			<!-- "YouTube is disconnected" banner; empty (removed) while everything works -->
-			<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>
+			{% if module_on('youtube') %}<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
 			<!-- "X API credits ran out" banner (HTTP 402); empty while X takes requests -->
-			<div id="x_alert" hx-get="/api/x/alert" hx-trigger="load" hx-swap="outerHTML"></div>
+			{% if module_on('x') %}<div id="x_alert" hx-get="/api/x/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
 			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>

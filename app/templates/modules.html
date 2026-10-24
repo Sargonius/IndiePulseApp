@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>🧩 Modules</h2>
+<p class="muted">
+	Turn off what you don't use: its menu items, pages, Settings section and platform checkboxes disappear, and the
+	worker neither publishes there nor collects its numbers. Nothing is deleted — turn it on again and it's all back.
+	Takes effect at once.
+</p>
+<div id="modules_list">
+	{% include "partials/modules_list.html" %}
+</div>
+{% endblock %}

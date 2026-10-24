@@ -10,14 +10,15 @@ load_dotenv()  # before app.core.config reads the environment
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.core import config
-from app.core.paths import ROOT, TEMPLATES_DIR
+from app.core import config, modules
+from app.core.paths import ROOT
+from app.core.templating import make_templates
 from app.core.logging import setup_logging, request_logger
 from app.db.session import create_db_and_tables, migrate_db
 from app.routers import home, pages, api
+from app.routers import modules as modules_router
 
 setup_logging()
 
@@ -70,6 +71,16 @@ async def block_cross_site_writes(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def block_modules_that_are_off(request: Request, call_next):
+    """Pages and API of a module turned off on 🧩 Modules answer 404 (app.core.modules)."""
+    module = modules.blocked(request.url.path)
+    if module is not None:
+        from app.routers.modules import module_off_response
+        return module_off_response(request, module)
+    return await call_next(request)
+
+
 app.middleware("http")(request_logger())
 # added last = runs first
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts())
@@ -77,13 +88,14 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts())
 app.include_router(home.router)
 app.include_router(pages.router)
 app.include_router(api.router)
+app.include_router(modules_router.router)
 
 # Ensure directories exist before mounting (media/ is data: relative to the data folder, see app.core.paths)
 os.makedirs("media", exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 app.mount("/media", StaticFiles(directory="media"), name="media")
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates = make_templates()
 
 
 @app.get("/health")

@@ -4,8 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Request, Form, Depends, UploadFile, File
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from app.core.paths import TEMPLATES_DIR
+from app.core.templating import make_templates
 from sqlmodel import Session
 
 from app.db.session import get_session
@@ -18,7 +17,7 @@ from app.jobs.tasks import refresh_metrics_for_post
 from app.services.settings import load_settings
 
 router = APIRouter()
-templates = Jinja2Templates(directory=TEMPLATES_DIR)
+templates = make_templates()
 
 def _enrich_posts(posts):
     import json as _json

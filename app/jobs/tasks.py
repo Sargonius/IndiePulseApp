@@ -3,6 +3,7 @@ from .huey_app import huey
 from sqlmodel import Session
 from app.db.session import engine
 from huey import crontab
+from app.core import modules
 
 
 @huey.task()
@@ -40,7 +41,7 @@ def _maybe_retry_publish(job_id: int, post_id: int, result: str) -> None:
         from app.services.video_editor import TOO_LARGE
         if TOO_LARGE in (post.error_text or ''):
             return  # compression already failed; a rerun would fail the same way
-        if MISSED in (post.error_text or ''):
+        if MISSED in (post.error_text or '') or MODULE_OFF in (post.error_text or ''):
             return  # not a failure: waits for the user's Retry
         payload = {}
         if job is not None and job.payload_json:
@@ -116,6 +117,19 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
             from loguru import logger
             logger.warning(f"publish post={post_id} skipped: {post.error_text}")
             return 'missed'
+
+        if not modules.platform_on(post.platform):
+            # turned off on 🧩 Modules after the post was queued
+            post.status = PostStatusEnum.error
+            name = getattr(post.platform, 'value', post.platform)
+            post.error_text = f"{MODULE_OFF}: {name} is turned off in 🧩 Modules — turn it on, then Retry"
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
+                session.add(job)
+            session.add(post)
+            session.commit()
+            return 'module_off'
 
         # Never send the same publication twice (a re-submitted form, a second Shorts batch...)
         import json as _json
@@ -245,6 +259,7 @@ STUCK_RUNNING_MIN = 90   # a publish that "runs" this long has died with the wor
 LOST_QUEUED_MIN = 15     # a due post whose queued job hasn't started in this long was lost
 MISSED_AFTER_MIN = 120   # a scheduled post this late isn't published by itself any more (see _missed)
 MISSED = "missed_schedule"
+MODULE_OFF = "module_off"
 
 
 def _missed(post, now=None) -> bool:
@@ -713,8 +728,8 @@ def refresh_recent_metrics() -> str:
                 Post.published_at >= cutoff,
             ).order_by(Post.published_at.desc()).limit(60)
         ).all()
-        ids = [p.id for p in rows]
-        yt_ids = youtube_posts_due(session)
+        ids = [p.id for p in rows if modules.platform_on(p.platform)]
+        yt_ids = youtube_posts_due(session) if modules.on('youtube') else []
     if yt_ids:
         refresh_youtube_metrics.schedule(args=(yt_ids,), delay=0)
     # Stagger requests to be gentle on platform APIs
@@ -735,6 +750,8 @@ def collect_marketing_metrics(force: bool = False) -> str:
 def tiktok_pipeline_tick() -> str:
     """/tiktok: has a draft been posted in the app (status fetch), fresh views and
     likes of live clips (one batched video.query), factory drafts adopted."""
+    if not modules.on('tiktok'):
+        return 'module_off'
     from app.services import tiktok_pipeline
     with Session(engine) as session:
         return str(tiktok_pipeline.sync(session, in_worker=True))
@@ -743,6 +760,8 @@ def tiktok_pipeline_tick() -> str:
 @huey.periodic_task(crontab(minute='40', hour='*/6'))
 def refresh_outreach_creators() -> str:
     """YouTube API data on /outreach must be refreshed (or dropped) within 30 days."""
+    if not modules.on('outreach'):
+        return 'module_off'
     from app.services.outreach_discovery import refresh_stale
     return refresh_stale()
 

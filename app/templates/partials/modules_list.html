@@ -1,0 +1,18 @@
+{% for kind, title in (("platform", "Where to publish"), ("feature", "Features")) %}
+<h3>{{ title }}</h3>
+<div class="modules-grid">
+	{% for r in rows if r.m.kind == kind %}
+	<label class="card module-card{% if not r.effective %} module-off{% endif %}">
+		<input type="checkbox" name="on" value="true" {% if r.on %}checked{% endif %}
+			   hx-post="/api/modules/set" hx-vals='{"module": "{{ r.m.id }}"}' hx-trigger="change"
+			   hx-target="#modules_list" hx-swap="innerHTML" />
+		<span>
+			<strong>{{ r.m.name }}</strong>
+			<span class="muted">{{ r.m.description }}</span>
+			{% if r.requires %}<span class="muted module-note">Needs: {{ r.requires|join(", ") }}</span>{% endif %}
+			{% if r.on and r.blocked_by %}<span class="module-note module-warn">Off while {{ r.blocked_by|join(", ") }} is off</span>{% endif %}
+		</span>
+	</label>
+	{% endfor %}
+</div>
+{% endfor %}

@@ -21,6 +21,7 @@ import httpx
 from loguru import logger
 from sqlmodel import Session, select
 
+from app.core import modules
 from app.models.models import MetricPoint, Project
 from app.services import audience, steam_partner
 from app.services.marketing import (add_samples, day_range, days_between, kv_get, kv_set,
@@ -286,12 +287,14 @@ def _audience_jobs(session: Session, cfg: dict, force: bool) -> list[tuple[str, 
     """(status key, fn(client) -> (rows, info)) for every connected channel that is due."""
     jobs = []
     for ch in audience.CHANNELS:
+        if not any(modules.platform_on(p) for p in ch.platforms):
+            continue  # turned off on 🧩 Modules
         if ch.ready(cfg) and _due(session, ch.key, AUDIENCE_EVERY, force):
             def run(c: httpx.Client, ch=ch):
                 values, info = ch.fetch(cfg, c)
                 return [{"project_id": 0, "metric": m, "value": v} for m, v in values.items()], info
             jobs.append((ch.key, run))
-    games = [(p.id, p.name, int(p.steam_app_id)) for p in steam_projects(session)]
+    games = [(p.id, p.name, int(p.steam_app_id)) for p in steam_projects(session)] if modules.on("steam") else []
     if games and _due(session, audience.STEAM_KEY, AUDIENCE_EVERY, force):
         def run_steam(c: httpx.Client):
             rows, notes, errors = [], [], []
@@ -466,11 +469,11 @@ def collect_all(force: bool = False, budget_s: float = 25.0, steam_background: b
         with Session(engine) as session:
             summary = collect_audience(session, cfg, budget, force)
             summary.update(_run_sources(session, SOURCES, cfg, budget, force))
-            if not steam_background:
+            if not steam_background and modules.on("steam"):
                 summary.update(_run_sources(session, STEAM_SOURCES, cfg, budget, force))
     finally:
         lock.release()
-    if steam_background:
+    if steam_background and modules.on("steam"):
         summary["steam"] = "started" if start_steam_sync(force) else "already running"
     return summary
 

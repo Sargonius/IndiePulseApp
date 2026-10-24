@@ -127,6 +127,8 @@ DEFAULTS: Dict[str, Any] = {
     "openai_model": "gpt-6-luna",
     # Local music directory (Windows default path)
     "music_dir": "E:\\SynthSocial\\Music",
+    # Modules turned off on the 🧩 Modules page (app.core.modules); empty = all on
+    "modules_disabled": [],
 }
 
 

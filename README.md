@@ -39,6 +39,14 @@ start with Windows, **Выход** (stops both; the worker finishes the task in 
   previous run), `logs/app.log` (the app itself).
 - Dev: `python -m app.serve` / `python -m app.worker` still run standalone in a console.
 
+## Modules
+
+🧩 (next to ⚙️) turns off what you don't use — any of the 10 platforms, the Shorts factory, the TikTok pipeline,
+creator outreach, Steam, the guide. A module that is off disappears: its menu items, pages (404), Settings section
+and platform checkboxes; the worker neither publishes there nor collects its numbers. Nothing is deleted. The list
+lives in `app/core/modules.py` (which platforms, URLs and requirements belong to each); what's off is
+`modules_disabled` in the settings.
+
 ## Checking the integrations
 
 The 🩺 page (`/status`) checks every configured platform in one click without posting

@@ -812,3 +812,13 @@ input.or-saved { border-color: var(--success) !important; }
   .or-add-game input { flex: 1; min-width: 0; }
   .or-filter-row .btn { margin-left: 0; }
 }
+
+/* 🧩 Modules (app.core.modules) */
+.ip-off { display: none !important; }
+.modules-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.module-card { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.module-card input { margin-top: 3px; }
+.module-card > span { display: flex; flex-direction: column; gap: 3px; }
+.module-card.module-off { opacity: .6; }
+.module-note { font-size: 12px; }
+.module-warn { color: #b45309; }
