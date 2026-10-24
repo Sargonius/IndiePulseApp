@@ -48,7 +48,7 @@
 					<span class="muted" style="font-size:12px;">Loading...</span>
 				</div>
 				<label>Hashtags (space-separated)</label><br/>
-                <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie" style="width: 520px;" />
+                <input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#indiedev #gamedev — Suggest fills in the ones from Settings → Posts" style="width: 520px;" />
                 <button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML" hx-indicator="#tags_status">Suggest hashtags</button>
                 <span id="tags_status" class="htmx-indicator" style="margin-left:8px;color:#666;display:none;">Generating...</span>
                 <div id="tags_target" style="display:none;"></div>
