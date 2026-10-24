@@ -57,6 +57,7 @@ def repo(tmp_path):
     (r / ".settings.json").write_text('{"tg_bot_token": "secret"}')     # data: never shipped
     _git(r, "commit", "-q", "-am", "Faster calendar")
     _git(r, "commit", "-q", "--allow-empty", "-m", "Fix the Shorts board")
+    _git(r, "commit", "-q", "--allow-empty", "-m", "Release 2.1.0")  # tools/release.ps1's own: not in the notes
     return r
 
 

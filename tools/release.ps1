@@ -35,7 +35,11 @@ function Invoke-Git {
 	# safe.directory: the checkout may belong to another Windows account of the same person.
 	$saved = $ErrorActionPreference
 	$ErrorActionPreference = 'Continue'
-	try { $out = @(& git -c 'safe.directory=*' -C $root @args 2>&1 | ForEach-Object { "$_" }) }
+	try {
+		$out = @(& git -c 'safe.directory=*' -C $root @args 2>&1 | ForEach-Object {
+			if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { "$_" }
+		})
+	}
 	finally { $ErrorActionPreference = $saved }
 	if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed:`n$($out -join "`n")" }
 	return $out
@@ -97,7 +101,9 @@ if ($Version -ne $core) {
 if (-not $Notes) {
 	$range = 'HEAD'
 	if ($last) { $range = "$last..HEAD" }
-	$Notes = (@(Invoke-Git log --no-merges '--pretty=format:- %s' $range) | Select-Object -First 40) -join "`n"
+	# without the version commits this script makes itself
+	$Notes = (@(Invoke-Git log --no-merges --invert-grep '--grep=^Start [0-9.]*-dev$' '--grep=^Release [0-9]' `
+		'--pretty=format:- %s' $range) | Select-Object -First 40) -join "`n"
 }
 if (-not $Notes.Trim()) { $Notes = "IndiePulse $Version" }
 
@@ -108,7 +114,7 @@ Write-Host 'pyflakes...'
 if ($LASTEXITCODE -ne 0) { throw 'pyflakes found problems.' }
 Write-Host 'Tests (a minute or two)...'
 Push-Location $root
-try { & $Python -m pytest -q -p no:cacheprovider } finally { Pop-Location }
+try { & $Python -m pytest -q -p no:cacheprovider -W ignore::DeprecationWarning } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 
 # 4. ask

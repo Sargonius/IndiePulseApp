@@ -78,7 +78,9 @@ def notes_for_tag(tag: str, root: Path = ROOT) -> str:
 		span = [f"{prev}..{tag}"]
 	except subprocess.CalledProcessError:
 		span = [tag, "-n", "30"]  # the first release
-	return _git(root, "log", "--no-merges", "--pretty=format:- %s", *span).strip()
+	# without the version commits tools/release.ps1 makes
+	return _git(root, "log", "--no-merges", "--invert-grep", "--grep=^Start [0-9.]*-dev$", "--grep=^Release [0-9]",
+				"--pretty=format:- %s", *span).strip()
 
 
 def _sha256(path: Path) -> str:
