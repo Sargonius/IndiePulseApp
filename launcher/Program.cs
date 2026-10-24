@@ -214,7 +214,7 @@ namespace IndiePulse
                 form.ShowChoice("How would you like to use IndiePulse?", installTitle, installText,
                     "Portable — run from this folder", portableText, carried && !update,
                     (home.KitPresent ? "ClubKit is on this drive: its Python and uv are used. " :
-                        "The first start downloads Python and the packages IndiePulse needs (about 100 MB): a few " +
+                        "The first start downloads Python and the packages IndiePulse needs (about 70 MB): a few " +
                         "minutes. ") + "Nothing else is installed on the computer.", go);
             }
             Application.Run(form);
