@@ -34,6 +34,19 @@ def folders(cfg: Optional[dict] = None) -> list[str]:
     return out
 
 
+def folder_rows(cfg: Optional[dict] = None) -> list[dict]:
+    """What Settings → Video & music shows under the field: each folder, whether it is there, its tracks."""
+    rows = []
+    for f in folders(cfg):
+        ok = os.path.isdir(f)
+        n = 0
+        if ok:
+            for _root, _dirs, files in os.walk(f):
+                n += sum(1 for x in files if os.path.splitext(x)[1].lower() in AUDIO_EXTS)
+        rows.append({'path': f, 'exists': ok, 'tracks': n})
+    return rows
+
+
 def _ffprobe() -> Optional[str]:
     try:
         from app.services.video_editor import _ffmpeg_path
