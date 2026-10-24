@@ -247,3 +247,100 @@ def test_the_posts_page_builds_the_language_fields_and_opens_the_calendars_edit(
     assert "edit=" in client.get("/posts").text and "openEditModal(editId)" in client.get("/posts").text
     table = client.get("/posts/partial").text
     assert 'id="edit_texts"' in table and 'id="edit_text_ru"' not in table
+
+
+# ── 🩺 health check ──────────────────────────────────────────────────────────
+
+def _mock_http(monkeypatch, handler):
+    """Every httpx.Client answers from `handler` (a MockTransport): nothing leaves the machine."""
+    import httpx
+    real = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda *a, **kw: real(*a, transport=httpx.MockTransport(handler), **kw))
+
+
+def _checked(fn_name, cfg=None):
+    from app.services import health_check
+    r = health_check._Result(fn_name, fn_name)
+    getattr(health_check, f"check_{fn_name}")(cfg or load_settings(), r)
+    return r
+
+
+def test_the_health_check_checks_every_telegram_channel_and_discord_webhook(networks, monkeypatch):
+    import httpx
+    _with_ja(**{"discord-ja": {"enabled": False}})
+    seen = []
+
+    def api(req):
+        seen.append(str(req.url))
+        if "/getMe" in req.url.path:
+            return httpx.Response(200, json={"ok": True, "result": {"id": 7, "username": "ipbot"}})
+        if "/getChatMember" in req.url.path:
+            return httpx.Response(200, json={"ok": True, "result": {"status": "administrator"}})
+        if "/getChat" in req.url.path:
+            names = {"-100111": "Канал", "-100222": "チャンネル"}
+            chat = req.url.params["chat_id"]
+            return httpx.Response(200, json={"ok": True, "result": {"title": names[chat], "type": "channel"}})
+        return httpx.Response(200, json={"name": req.url.path.rsplit("/", 1)[-1], "channel_id": "1"})  # a webhook
+
+    _mock_http(monkeypatch, api)
+    r = _checked("telegram")
+    assert r.status == "ok" and r.summary == "“Канал”, “チャンネル”"
+    assert any("Telegram · JA: chat “チャンネル”" in d for d in r.details)
+    assert any(d.startswith("✓ Telegram · RU: chat") for d in r.details)  # named once there are several
+    r = _checked("discord")
+    hooks = [u for u in seen if "hook/" in u]
+    # the three old keys as before; the JA webhook is turned off: noted, not called
+    assert sorted(hooks) == ["https://hook/default", "https://hook/en", "https://hook/ru"]
+    assert any("Discord · JA: turned off" in d for d in r.details)
+
+
+def test_the_health_check_checks_every_facebook_page_and_subreddit(networks, monkeypatch):
+    import httpx
+    from app.services import reddit_client
+    _with_ja()
+    pages = []
+
+    def graph(req):
+        pid = req.url.path.split("/")[2]
+        pages.append((pid, req.url.params["access_token"]))
+        return httpx.Response(200, json={"id": pid, "name": f"Page {pid}", "data": []})
+
+    _mock_http(monkeypatch, graph)
+    r = _checked("facebook")
+    assert {p for p, _ in pages} == {"11", "22", "33"} and ("33", "tok-ja") in pages
+    assert "Page 33" in r.summary and any("Facebook · JA: page “Page 33”" in d for d in r.details)
+
+    class FakeReddit:
+        def __init__(self, *a):
+            self.reddit = self
+            self.user = self
+
+        def me(self):
+            return type("Me", (), {"name": "dev", "link_karma": 1, "comment_karma": 1})()
+
+        def subreddit(self, name):
+            subs.append(name)
+            return type("Sub", (), {"user_is_banned": False, "subscribers": 5})()
+
+    subs = []
+    monkeypatch.setattr(reddit_client, "RedditClient", FakeReddit)
+    _checked("reddit")
+    assert subs == ["gamedev", "igrodelo", "IndieGamesJP"]
+
+
+def test_the_health_check_of_a_setup_without_destinations_is_unchanged(set_settings, monkeypatch):
+    """Only the old keys (a fresh install): the same calls and lines as before."""
+    import httpx
+    set_settings(tg_bot_token="1:a", tg_chat_id_ru="-100111")
+
+    def api(req):
+        if "/getMe" in req.url.path:
+            return httpx.Response(200, json={"ok": True, "result": {"id": 7, "username": "ipbot"}})
+        if "/getChatMember" in req.url.path:
+            return httpx.Response(200, json={"ok": True, "result": {"status": "administrator"}})
+        return httpx.Response(200, json={"ok": True, "result": {"title": "Канал", "type": "channel"}})
+
+    _mock_http(monkeypatch, api)
+    r = _checked("telegram")
+    assert (r.status, r.summary) == ("ok", "“Канал”")
+    assert r.details == ["✓ bot @ipbot", "✓ chat “Канал” (channel)", "✓ bot is an admin with posting rights"]
