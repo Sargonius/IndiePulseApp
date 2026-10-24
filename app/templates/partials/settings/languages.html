@@ -1,0 +1,170 @@
+	<!-- Languages & destinations: the languages posts are written in, every place they go to, each with its language -->
+	<div class="settings-section" id="section_languages">
+		<div class="settings-row ld-row">
+			<div class="settings-left ld-left">
+				<div class="settings-header">
+					<h3>Languages &amp; destinations</h3>
+				</div>
+				<div class="form-group">
+					<label>Languages <span class="muted" style="font-weight:400;">— the first is the one you write in; the post forms get a text field for each</span></label>
+					<div id="ld_langs" class="ld-langs"></div>
+					<div class="row" style="margin-top:6px;">
+						<input type="text" id="ld_lang_new" list="ld_known_langs" placeholder="ja, de, pt-br…" style="width:150px;" />
+						<datalist id="ld_known_langs"></datalist>
+						<button type="button" class="btn btn-sm" id="ld_lang_add">+ Add language</button>
+					</div>
+				</div>
+				<div class="form-group">
+					<label>Destinations <span class="muted" style="font-weight:400;">— where posts go, each in its language</span></label>
+					<div id="ld_groups"></div>
+					<div id="ld_off_note" class="muted" style="font-size:12px;" hidden></div>
+				</div>
+				<div class="btn-row">
+					<button type="button" class="btn btn-primary" id="ld_save">Save languages &amp; destinations</button>
+				</div>
+				<div id="ld_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>How it works</h4>
+					<ol>
+						<li>Write the post in the <b>first</b> language; <b>Translate missing</b> in the post form fills the others (the AI from “AI &amp; translation”, else DeepL / free translators).</li>
+						<li>Each destination gets the text in <b>its</b> language. No text in it: the first language’s, else any — unless “only its language” is ticked, then nothing goes there.</li>
+						<li>Telegram, Discord, Facebook and Reddit can have several (a channel per language); the others are one account each, so you pick their language.</li>
+						<li>Destinations made from the fields below (Telegram chat ID, Facebook pages, Discord webhooks, subreddit) stay linked to them: change either, both change.</li>
+						<li>Destinations of a module that is off in 🧩 Modules are hidden and nothing is sent to them.</li>
+					</ol>
+				</div>
+			</div>
+		</div>
+	</div>
+	<script>window.IP_DEST = {{ dest_editor | tojson }};</script>
+<script>
+// ── Languages & destinations editor ──────────────────────────────────────────
+// State = what /api/destinations/save takes: the languages in order and every destination (also those of
+// modules that are off: they are kept as they are, just not shown).
+(function () {
+	const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+	let state;
+	function load(data) {
+		state = {
+			langs: data.languages.map(l => l.code),
+			names: Object.fromEntries(data.known_languages.map(l => [l.code, l.name]).concat(data.languages.map(l => [l.code, l.name]))),
+			groups: data.groups,
+		};
+		document.getElementById('ld_known_langs').innerHTML = data.known_languages
+			.map(l => `<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('');
+		render();
+	}
+	const langName = c => state.names[c] || c.toUpperCase();
+	function usedBy(code) {
+		return state.groups.flatMap(g => g.destinations.filter(d => d.lang === code).map(d => d.label || g.name));
+	}
+	function renderLangs() {
+		const box = document.getElementById('ld_langs');
+		box.innerHTML = state.langs.map((c, i) => `
+			<span class="ld-lang${i === 0 ? ' is-source' : ''}" title="${esc(langName(c))}${i === 0 ? ' — you write in this one' : ''}">
+				<b>${esc(c)}</b> <span class="muted">${esc(langName(c))}</span>${i === 0 ? ' ✍' : ''}
+				${i > 0 ? `<button type="button" data-act="up" data-i="${i}" title="${i === 1 ? 'Make it the one you write in' : 'Move left'}">◀</button>` : ''}
+				${state.langs.length > 1 ? `<button type="button" data-act="rm" data-i="${i}" title="Remove">×</button>` : ''}
+			</span>`).join('');
+		box.querySelectorAll('button').forEach(b => b.onclick = () => {
+			const i = +b.dataset.i;
+			if (b.dataset.act === 'up') {
+				[state.langs[i - 1], state.langs[i]] = [state.langs[i], state.langs[i - 1]];
+			} else {
+				const users = usedBy(state.langs[i]);
+				if (users.length) {
+					status(`${state.langs[i].toUpperCase()} is the language of: ${users.join(', ')} — give them another language first.`, 'orange');
+					return;
+				}
+				state.langs.splice(i, 1);
+			}
+			render();
+		});
+	}
+	function langOptions(sel) {
+		const codes = state.langs.includes(sel) ? state.langs : state.langs.concat([sel]);
+		return codes.map(c => `<option value="${esc(c)}"${c === sel ? ' selected' : ''}>${esc(c.toUpperCase())} — ${esc(langName(c))}</option>`).join('');
+	}
+	function renderGroups() {
+		const box = document.getElementById('ld_groups');
+		const off = state.groups.filter(g => !g.on && g.destinations.length);
+		box.innerHTML = state.groups.filter(g => g.on).map((g, gi) => {
+			const rows = g.destinations.map((d, di) => {
+				const fields = g.fields.map(f => {
+					const hint = f.secret && d.target[f.key + '_hint'] ? `saved ${d.target[f.key + '_hint']} — paste a new one to replace it` : f.placeholder;
+					return `<input type="${f.secret ? 'password' : 'text'}" autocomplete="off" data-field="${esc(f.key)}" value="${esc(d.target[f.key] || '')}" placeholder="${esc(f.label)}: ${esc(hint)}" title="${esc(f.label)}" />`;
+				}).join('');
+				return `<div class="ld-dest${d.enabled ? '' : ' is-off'}" data-module="${esc(g.module)}" data-i="${di}">
+					<label title="Turned off: hidden in the post forms, nothing is sent there"><input type="checkbox" data-k="enabled"${d.enabled ? ' checked' : ''}/> on</label>
+					<select data-k="lang" title="The language of its posts">${langOptions(d.lang)}</select>
+					<input type="text" class="ld-label" data-k="label" value="${esc(d.label)}" placeholder="${esc(g.name)}" title="Name in the post forms (empty: ${esc(g.name)})" />
+					${fields}
+					<label title="No text in its language → nothing goes there (instead of the text in another language)"><input type="checkbox" data-k="skip_without_text"${d.skip_without_text ? ' checked' : ''}/> only its language</label>
+					<span class="ld-ready ${d.ready ? 'ok' : 'no'}">${d.ready ? '✓ ready' : (d.id ? 'not set up' : 'new')}</span>
+					${d.linked && d.linked.length ? `<span class="ld-linked" title="Linked: changing it here changes that setting too">↔ ${esc(d.linked.join(', '))}</span>` : ''}
+					${g.multi || g.destinations.length > 1 ? `<button type="button" class="btn-link" data-act="rm" title="Remove this destination (posts already queued to it will fail instead of going elsewhere)">remove</button>` : ''}
+				</div>`;
+			}).join('') || `<div class="muted" style="font-size:12px;padding:6px 0;">No destination — nothing goes to ${esc(g.name)} from the post forms.</div>`;
+			const canAdd = g.multi || !g.destinations.length;
+			return `<div class="ld-group" data-module="${esc(g.module)}">
+				<div class="ld-group-head"><span>${esc(g.name)}${g.multi ? '' : ' <span class="muted" style="font-weight:400;font-size:12px;">(one account)</span>'}</span>
+				${canAdd ? `<button type="button" class="btn btn-sm" data-act="add">+ Add ${esc(g.unit || 'destination')}</button>` : ''}</div>
+				${rows}</div>`;
+		}).join('');
+		const note = document.getElementById('ld_off_note');
+		note.hidden = !off.length;
+		note.textContent = off.length ? `Kept as they are, turned off in 🧩 Modules: ${off.map(g => g.name).join(', ')}.` : '';
+		box.querySelectorAll('.ld-dest').forEach(row => {
+			const g = state.groups.find(x => x.module === row.dataset.module);
+			const d = g.destinations[+row.dataset.i];
+			row.querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
+				d[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value;
+				if (el.dataset.k === 'enabled') row.classList.toggle('is-off', !el.checked);
+			}));
+			row.querySelectorAll('[data-field]').forEach(el => el.addEventListener('input', () => { d.target[el.dataset.field] = el.value; }));
+			const rm = row.querySelector('[data-act="rm"]');
+			if (rm) rm.onclick = () => { g.destinations.splice(+row.dataset.i, 1); render(); };
+		});
+		box.querySelectorAll('.ld-group [data-act="add"]').forEach(btn => btn.onclick = () => {
+			const g = state.groups.find(x => x.module === btn.closest('.ld-group').dataset.module);
+			const used = new Set(g.destinations.map(d => d.lang));
+			g.destinations.push({ id: '', lang: state.langs.find(c => !used.has(c)) || state.langs[0], label: '', enabled: true,
+				skip_without_text: false, target: {}, linked: [], ready: false });
+			render();
+		});
+	}
+	function render() { renderLangs(); renderGroups(); }
+	function status(msg, color) {
+		document.getElementById('ld_status').innerHTML = `<span style="color:${color || 'green'}">${msg}</span>`;
+	}
+	document.getElementById('ld_lang_add').onclick = () => {
+		const el = document.getElementById('ld_lang_new');
+		const code = el.value.trim().toLowerCase().replace('_', '-');
+		if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(code)) { status('A language code is two or three letters: ja, de, pt-br…', 'orange'); return; }
+		if (!state.langs.includes(code)) state.langs.push(code);
+		el.value = '';
+		render();
+	};
+	document.getElementById('ld_save').onclick = async () => {
+		const body = {
+			languages: state.langs,
+			destinations: state.groups.flatMap(g => g.destinations.map(d => {
+				const target = {};
+				g.fields.forEach(f => { target[f.key] = (d.target[f.key] || '').trim(); });
+				return { id: d.id || null, module: g.module, lang: d.lang, label: d.label || '', enabled: !!d.enabled,
+					skip_without_text: !!d.skip_without_text, target };
+			})),
+		};
+		try {
+			const r = await fetch('/api/destinations/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+			const j = await r.json();
+			if (!r.ok || !j.ok) { status('Not saved: ' + esc((j.errors || [j.detail || r.status]).join('; ')), 'red'); return; }
+			load(j.editor);
+			status('Saved ✓ — the post forms show these languages and destinations now');
+		} catch (e) { status('Not saved: ' + esc(e), 'red'); }
+	};
+	load(window.IP_DEST);
+})();
+</script>

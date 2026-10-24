@@ -1,0 +1,71 @@
+	<!-- Facebook -->
+	<div class="settings-section" id="section_facebook">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Facebook</h3>
+					<span class="status-badge" id="status_facebook">Loading...</span>
+				</div>
+				<h4 style="margin:0 0 8px 0;">Easy setup</h4>
+				<form hx-post="/api/facebook/fetch_pages" hx-target="#fb_pages_list" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>App ID</label>
+						<input type="text" name="fb_app_id" value="{{ fb_app_id or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>App Secret</label>
+						<input type="text" name="fb_app_secret" value="{{ fb_app_secret or '' }}" />
+					</div>
+					<div class="form-group">
+						<label>User Access Token (from Graph API Explorer)</label>
+						<input type="text" name="fb_user_token" value="" placeholder="EAAB..." />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Fetch My Pages</button>
+						<button type="button" class="btn" hx-get="/api/facebook/test" hx-target="#fb_status" hx-swap="innerHTML">Test</button>
+					</div>
+				</form>
+				<div id="fb_pages_list" class="status-msg"></div>
+				<div id="fb_status" class="status-msg"></div>
+				<details style="margin-top:12px;">
+					<summary style="cursor:pointer;color:#666;">Manual fields (advanced)</summary>
+					<form hx-post="/api/settings/save" hx-target="#fb_status" hx-swap="innerHTML" style="margin-top:8px;">
+						<div class="form-group">
+							<label>RU Page ID</label>
+							<input type="text" name="fb_ru_page_id" value="{{ fb_ru_page_id or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>RU Page Access Token</label>
+							<input type="text" name="fb_ru_page_access_token" value="{{ fb_ru_page_access_token or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>EN Page ID</label>
+							<input type="text" name="fb_en_page_id" value="{{ fb_en_page_id or '' }}" />
+						</div>
+						<div class="form-group">
+							<label>EN Page Access Token</label>
+							<input type="text" name="fb_en_page_access_token" value="{{ fb_en_page_access_token or '' }}" />
+						</div>
+						<div class="btn-row">
+							<button type="submit" class="btn btn-primary">Save</button>
+						</div>
+					</form>
+				</details>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Easy Setup (one-time, ~5 min)</h4>
+					<ol>
+						<li>Create an app at <a href="https://developers.facebook.com/apps" target="_blank">Meta for Developers</a> (type: <b>Business</b>). Keep it in <b>Development mode</b> — no App Review needed when you are the app admin and Page admin.</li>
+						<li>Copy <b>App ID</b> and <b>App Secret</b> from App Settings → Basic into the fields here.</li>
+						<li>Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a>, pick your app, click <b>Generate Access Token</b> with permissions: <b>pages_show_list</b>, <b>pages_manage_posts</b>, <b>pages_read_engagement</b>.</li>
+						<li>Paste the token here and click <b>Fetch My Pages</b>.</li>
+						<li>Click <b>Use as RU</b> / <b>Use as EN</b> next to your pages. Done.</li>
+					</ol>
+					<div class="info-box">
+						The app exchanges your token for a long-lived one automatically — Page tokens obtained this way effectively don't expire. Re-run this flow only if Facebook invalidates the token (password change, revoked permissions).
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>

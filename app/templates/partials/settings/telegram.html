@@ -1,0 +1,39 @@
+	<!-- Telegram -->
+	<div class="settings-section" id="section_telegram">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Telegram</h3>
+					<span class="status-badge" id="status_telegram">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#tg_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Bot Token</label>
+						<input type="text" name="tg_bot_token" value="" placeholder="123456:ABC-DEF..." />
+					</div>
+					<div class="form-group">
+						<label>Chat ID (group/channel) <span class="muted" style="font-weight:400;">— channels in other languages: <a href="#section_languages">Languages &amp; destinations</a></span></label>
+						<input type="text" name="tg_chat_id_ru" value="" placeholder="-1001234567890" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/telegram/test" hx-target="#tg_status" hx-swap="innerHTML">Test</button>
+						<button type="button" class="btn" hx-post="/api/telegram/check" hx-target="#tg_status" hx-swap="innerHTML">Check</button>
+					</div>
+				</form>
+				<div id="tg_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>Open Telegram, find <a href="https://t.me/BotFather" target="_blank">@BotFather</a></li>
+						<li>Send <code>/newbot</code> and follow instructions</li>
+						<li>Copy the <b>Bot Token</b></li>
+						<li>Add bot to your group/channel with send permissions</li>
+						<li>Get Chat ID via <a href="https://t.me/RawDataBot" target="_blank">@RawDataBot</a></li>
+					</ol>
+				</div>
+			</div>
+		</div>
+	</div>

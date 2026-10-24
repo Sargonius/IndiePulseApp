@@ -1,0 +1,34 @@
+	<!-- Video editor: music folders + upload limits -->
+	<div class="settings-section" id="section_video">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Video &amp; music</h3>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#video_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Music folders <span style="opacity:.6">(one per line; subfolders are read too)</span></label>
+						<textarea name="music_dir" rows="3" placeholder="E:\Music\Shorts&#10;D:\Assets\Music">{{ music_dir }}</textarea>
+						{% for f in music_folders %}
+						<div class="muted" style="font-size:12px;">{% if f.exists %}✓{% else %}✕ folder not found:{% endif %} {{ f.path }}{% if f.exists %} — {{ f.tracks }} {{ 'track' if f.tracks == 1 else 'tracks' }}{% endif %}</div>
+						{% endfor %}
+					</div>
+					<div class="form-group">
+						<label>Discord file limit, MB <span style="opacity:.6">(10 = no boosts; 50 = boost level 2; 100 = level 3)</span></label>
+						<input type="number" name="discord_upload_limit_mb" min="1" max="500" step="1" value="{{ discord_upload_limit_mb }}" style="width:120px;" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+					</div>
+				</form>
+				<div id="video_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Video editor</h4>
+					<p>Opens from the video tile in “📷 Post” and on “🎬 Video”: format (original / 16:9 / 9:16 / 1:1), crop, trim, music from these folders, on-screen text.</p>
+					<p>A video over a network’s limit is re-compressed to fit when publishing (Discord, Telegram 50 MB, Bluesky 100 MB…). If even that doesn’t help, the post fails with an error instead of going out without the video. The editor shows in advance what will happen on each network.</p>
+				</div>
+			</div>
+		</div>
+	</div>

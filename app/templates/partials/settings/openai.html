@@ -1,0 +1,69 @@
+	<!-- AI & translation: OpenAI or Claude (app.services.llm), DeepL (app.services.machine_translate) -->
+	<div class="settings-section" id="section_openai">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>AI &amp; translation</h3>
+					<span class="status-badge" id="status_openai">Loading...</span>
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#ai_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>The AI for translation and outreach letters</label>
+						<select name="llm_provider">
+							<option value="auto" {% if llm_provider == 'auto' %}selected{% endif %}>Auto: OpenAI if it has a key, otherwise Claude</option>
+							<option value="openai" {% if llm_provider == 'openai' %}selected{% endif %}>OpenAI (ChatGPT)</option>
+							<option value="anthropic" {% if llm_provider == 'anthropic' %}selected{% endif %}>Claude</option>
+						</select>
+					</div>
+					<h4 class="ai-sub">OpenAI</h4>
+					<div class="form-group">
+						<label>API Key {% if openai_key_hint %}<span class="muted">{{ openai_key_hint }}</span>{% endif %}</label>
+						<input type="password" name="openai_api_key" value="" placeholder="sk-..." />
+					</div>
+					<div class="form-group">
+						<label>Model</label>
+						<input type="text" id="openai_model_input" name="openai_model" value="{{ openai_model or 'gpt-6-luna' }}" placeholder="gpt-6-luna" />
+					</div>
+					<h4 class="ai-sub">Claude</h4>
+					<div class="form-group">
+						<label>API Key {% if anthropic_key_hint %}<span class="muted">{{ anthropic_key_hint }}</span>{% endif %}</label>
+						<input type="password" name="anthropic_api_key" value="" placeholder="sk-ant-..." />
+					</div>
+					<div class="form-group">
+						<label>Model</label>
+						<input type="text" id="anthropic_model_input" name="anthropic_model" value="{{ anthropic_model or 'claude-opus-5-5' }}" placeholder="claude-opus-5-5" />
+					</div>
+					<h4 class="ai-sub">DeepL <span class="muted">(machine translation, optional)</span></h4>
+					<div class="form-group">
+						<label>API Key {% if deepl_key_hint %}<span class="muted">{{ deepl_key_hint }}</span>{% endif %}</label>
+						<input type="password" name="deepl_api_key" value="" placeholder="…:fx for a free key" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-get="/api/translate/test_openai" hx-include="#openai_model_input" hx-target="#ai_status" hx-swap="innerHTML">Test OpenAI</button>
+						<button type="button" class="btn" hx-get="/api/translate/test_claude" hx-include="#anthropic_model_input" hx-target="#ai_status" hx-swap="innerHTML">Test Claude</button>
+						<button type="button" class="btn" hx-get="/api/translate/test_deepl" hx-target="#ai_status" hx-swap="innerHTML">Test DeepL</button>
+					</div>
+				</form>
+				<div id="ai_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>Setup Instructions</h4>
+					<ol>
+						<li>OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a> → Create new secret key</li>
+						<li>Claude: <a href="https://platform.claude.com/settings/keys" target="_blank">platform.claude.com → API keys</a> → Create Key</li>
+						<li>DeepL: <a href="https://www.deepl.com/your-account/keys" target="_blank">deepl.com → API keys</a> (the free plan's keys end with <code>:fx</code>)</li>
+						<li>Paste the key, Save, then Test</li>
+					</ol>
+					<div class="info-box">
+						All optional. The translate buttons and the outreach letters use the AI picked above; without one, or
+						when it fails, machine translation: DeepL with a key, otherwise the free public translators.<br>
+						Models: <code>gpt-6-luna</code> is OpenAI's cheap current one; <code>claude-opus-5-5</code> is Claude's
+						best (<code>claude-sonnet-5-5</code> and <code>claude-haiku-5-5</code> cost less). Test tries the model
+						typed above before you save it. Keys are kept only in this app's settings, on this drive.
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
