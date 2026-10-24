@@ -332,9 +332,10 @@ SECTIONS: list[Section] = [
 		Field("discord_upload_limit_mb", "Discord file limit, MB", "number", min=1, max=500, blank="default",
 			  module="discord", help="10 = no boosts; 50 = boost level 2; 100 = level 3"),
 	)),
-	# Its Settings panel saves through /api/updates/save; the wizard's step is a group made from the fields.
+	# Its Settings panel saves through /api/updates/save; the wizard's step is a group made from the fields: only the
+	# mode — the repository is public, so the token is for a private fork, in Settings
 	Section("updates", "Updates", custom="partials/settings/updates.html", frame=False,
-			groups=(("setup", ("update_mode", "update_token")),), fields=(
+			groups=(("setup", ("update_mode",)),), fields=(
 		Field("update_mode", "When a new version is out", "select", choices=(
 			("notify", "Tell me (a banner here, a balloon from the tray)"),
 			("auto", "Install it by itself when nothing is publishing"),
@@ -343,7 +344,7 @@ SECTIONS: list[Section] = [
 		Field("update_repo", "GitHub repository", help="owner/name", placeholder="Sargonius/IndiePulseNew",
 			  clean=_github_repo, blank="default", pattern=r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",
 			  pattern_error="The repository is owner/name, e.g. Sargonius/IndiePulseNew."),
-		Field("update_token", "Access token", "secret", help="a private repository needs one",
+		Field("update_token", "Access token", "secret", help="only for a private fork of the repository",
 			  placeholder="github_pat_…", clearable=True),
 	)),
 	Section("outreach", "Creator outreach", module="outreach", fields=(

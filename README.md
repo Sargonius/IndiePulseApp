@@ -6,16 +6,44 @@ Free and open source (MIT); donations welcome: [paypal.me/sargoniusgames](https:
 
 ## Install / update
 
-1. Download `IndiePulse-<version>.zip` from the repository's **Releases** page (under Assets).
-2. Unzip it wherever it should live (`D:\Apps`, a USB drive…): you get an `IndiePulse` folder.
-3. Double-click `IndiePulse.bat` in it. It needs Python 3.12 from python.org (with the `py` launcher) or
-   [uv](https://docs.astral.sh/uv/) on the computer — with uv it fetches Python 3.12 by itself, no admin. The first
-   run makes `.venv` and installs the packages (a minute or two), then the tray icon appears and the browser opens
-   http://127.0.0.1:8000.
+1. Download `IndiePulse-<version>.zip` from the repository's **Releases** page (under Assets) and extract it
+   (right-click → *Extract All…*): you get an `IndiePulse` folder with `IndiePulse.exe`, `README.md`, `LICENSE` and
+   `lib\` (the app itself). Start the exe from the extracted folder, not from inside the zip.
+2. Double-click **`IndiePulse.exe`**. It isn't signed, so Windows SmartScreen says *Windows protected your PC*: click
+   **More info** → **Run anyway** (once). An antivirus may look at it for a moment too.
+3. One window asks how to use it:
+   - **Install for this user** — copies IndiePulse to `%LOCALAPPDATA%\Programs\IndiePulse` (no admin rights), adds
+     Start-menu and desktop shortcuts and an entry in Settings → Apps. Your posts, settings, media and logs live in
+     `%LOCALAPPDATA%\IndiePulse`. The extracted folder isn't needed afterwards.
+   - **Portable — run from this folder** — writes nothing to the computer: no shortcuts, no registry entries, no
+     autostart (the tray menu doesn't offer them). Everything — the app, its Python, your data — stays in the
+     `IndiePulse` folder (`data\` next to the exe; the choice is remembered by a `portable.txt` there), so the folder
+     can live on a USB drive and be moved as a whole. Preselected when the folder is on a removable or USB drive.
+4. The same window then gets IndiePulse ready, step by step with a progress bar: [uv](https://docs.astral.sh/uv/)
+   (a pinned release from GitHub, checked against its SHA-256), Python 3.12 from uv, a Python environment and the
+   packages of `requirements.lock` — about 70 MB to download, 250–300 MB on disk, a few minutes, nothing installed
+   system-wide (`runtime\` in IndiePulse's folder). If a step fails, it says why in the window, with **Retry** and
+   **Open log** (`logs\setup.log` in the data folder).
+5. Then the tray icon appears and IndiePulse opens **in a window of its own**: Edge (or Chrome) in app mode, with a
+   browser profile of IndiePulse's own in the data folder (`browser\`), so it never mixes with your browsing. No Edge
+   or Chrome: the default browser. `INDIEPULSE_BROWSER` (in the environment) picks another Chromium browser's exe,
+   or `default`. A fresh install starts with the setup wizard (*First run* below).
 
-Your settings, posts, media and logs live apart from the code, in `%LOCALAPPDATA%\IndiePulse` — an update or a new
-unzip never touches them. To keep everything inside the folder instead (a drive you carry around), put an empty
-`portable.txt` next to `IndiePulse.bat` before the first run: the data then goes to `IndiePulse\data`.
+Every later double-click on `IndiePulse.exe` (or its shortcut) starts IndiePulse, or brings its window to the front
+when it runs. When something is wrong with its Python — the folder came from another computer, an antivirus took
+`python.exe`, an update needs new packages — the same window shows what it puts right before starting. Starting the
+downloaded copy again after installing it just starts the installed one; a newer download offers **Update IndiePulse
+on this computer** instead.
+
+**Uninstall.** Settings → Apps → IndiePulse → Uninstall (or `IndiePulse.exe --uninstall`): it quits IndiePulse (a
+post being published is finished first), removes the program folder, the shortcuts, the Apps entry and the autostart
+entry, and asks whether your posts, settings and media go too. A portable copy: Quit it from its tray icon and delete
+the folder.
+
+**Command line** (what the shortcuts, the autostart entry and scripts use): `IndiePulse.exe --background` starts
+without opening the window (*Start at Windows sign-in*); `--install` / `--portable` set it up without asking;
+`--uninstall --quiet [--delete-data]` removes it without questions; `--paths <file>` writes what it found (folders,
+the state of its Python) as JSON.
 
 **Updates.** IndiePulse looks at the releases 30 seconds after it starts and then every 6 hours. When there is a newer
 version, every page shows *IndiePulse vX is available — What's new · Install*, and the tray shows a balloon and an
@@ -28,15 +56,17 @@ doesn't come up within 4 minutes, the previous one is put back by itself and the
 check*; **Check now**. The tray menu has **Check for updates**. (Running your own build from a private fork? Point
 *Repository* at it and add a fine-grained GitHub token with Contents: Read-only.)
 
-An update replaces the code — `app\`, the launchers, `requirements.*`, `README.md` — and nothing else: not `.venv`,
-`.env`, `portable.txt` or the data. A **git checkout** is never updated in place and doesn't check by itself (Check now
-still says what's released): update it with `git pull`. By hand: download the new zip, Quit IndiePulse from the tray,
-unzip over the old folder, start it.
+An update replaces `IndiePulse.exe`, `README.md`, `LICENSE` and `lib\` — and nothing else: not `runtime\`,
+`portable.txt` or the data. A **git checkout** is never updated in place and doesn't check by itself (Check now still
+says what's released): update it with `git pull`. By hand: download the new zip and start its `IndiePulse.exe` (an
+installed copy is offered the update); for a portable copy, Quit it from the tray and extract the new zip over its
+folder.
 
 ## First run
 
-A fresh install — no settings yet — opens the **setup wizard** (`/setup`) instead of the home page, one step at a
-time, each of which can be skipped:
+A fresh install — no settings yet — opens the **setup wizard** (`/setup`) in IndiePulse's window right after the
+setup above, instead of the home page: the app's own first screen (its steps on the left, the menu hidden until it is
+done), one step at a time, each of which can be skipped:
 
 1. **Languages**: the one you write in, the ones you publish in.
 2. **Networks & features**: the 🧩 modules you want; the rest is hidden everywhere.
@@ -50,50 +80,45 @@ The step reached is remembered, so a restart in the middle comes back to it. **S
 has settings is never sent there: its first start of a version with the wizard marks it set up.
 
 **Where settings live.** Everything you enter in ⚙️ Settings or the wizard is in `.settings.json` in the data folder,
-next to the databases: `%LOCALAPPDATA%\IndiePulse`, `data\` of a portable copy, or the IndiePulse folder itself for
-a copy that has always kept its data there (`app/core/paths.py`). An update never touches it. Keys and tokens are
-stored there in plain text — keep that folder to yourself; the logs mask them — and the app shows them as `•••` +
-the last 4 characters. What each setting is (its section, label, type and checks, or that the app writes it itself:
-OAuth tokens, expiry times) is declared in `app/core/settings_schema.py`; the Settings page and the wizard are
-rendered from it, and a test makes every key of `DEFAULTS` in `app/services/settings.py` belong to exactly one
-section.
+next to the databases: `%LOCALAPPDATA%\IndiePulse`, `data\` of a portable copy, or the code folder itself for a copy
+that has always kept its data there (`app/core/paths.py`). An update never touches it. Keys and tokens are stored
+there in plain text — keep that folder to yourself; the logs mask them — and the app shows them as `•••` + the last
+4 characters. What each setting is (its section, label, type and checks, or that the app writes it itself: OAuth
+tokens, expiry times) is declared in `app/core/settings_schema.py`; the Settings page and the wizard are rendered from
+it, and a test makes every key of `DEFAULTS` in `app/services/settings.py` belong to exactly one section.
 
-## Quick start (Windows)
+## Running it
 
-1. Optional: copy `.env.example` to `.env` (host/port, DB path).
-2. Double-click `IndiePulse.pyw` (needs Python 3.12 with the `py` launcher) or `IndiePulse.bat` (works on a
-   computer without Python too: it takes uv from PATH or from `ClubKit\tools\uv` on the same drive, and uv
-   fetches Python 3.12 once into `ClubKit\data\uv` — no install, no admin). The first run on a computer creates
-   `.venv`, installs `requirements.lock` and adds **IndiePulse** shortcuts to the Desktop and Start menu.
-3. The browser opens http://127.0.0.1:8000: the setup wizard on a fresh install (*First run* above), then the
-   ⚙️ Settings page for anything else.
-
-**From the drive on different computers.** A `.venv` made on another computer (its Python in another user's
-profile or on the drive under another letter) is recognised by `pyvenv.cfg` and rebuilt (`logs/venv.log`). With
-uv it is built on the Python on the drive, packages come from uv's cache there: seconds, and on any computer with
-the same drive letter it then just works. With ClubKit next to it, shortcuts and the "Start at Windows sign-in"
-item exist only on a trusted computer (`ClubKit\data\trusted-pcs.txt`) — a club computer gets nothing left behind.
-Paths saved where the drive had another letter (`E:\Music` in the settings, music of presets and
-clips) are found under this one. Scheduled posts go out only while IndiePulse runs: one that is more than 2 hours
-late (the drive was unplugged) isn't published on the next start but marked `missed_schedule` — Retry publishes it.
-Dependencies: `requirements.txt` says what the app needs, `requirements.lock` the exact tested versions (what gets
-installed; regenerate it after editing `requirements.txt`, see its header).
+Optional: copy `lib\.env.example` (`.env.example` in a checkout) to `.env` in the data folder (host/port, DB path).
 
 There are no console windows: IndiePulse lives in the tray. The icon runs two processes —
 the web server and the Huey worker (the one that actually publishes; scheduled posts don't
 go out without it) — and its colour shows their state: green ok, amber starting/restarting,
-red broken (hover or open the menu for details). Tray menu: open the UI, restart, logs folder,
-check for updates, start with Windows, **Выход** (stops both; the worker finishes the task in progress first).
+red broken (hover or open the menu for details). Tray menu: open IndiePulse, restart, logs folder,
+check for updates, start with Windows, create shortcuts (installed copies, and trusted computers of ClubKit),
+**Quit** (stops both — the worker finishes the task in progress first — and closes the window).
 
-- Launching again while it runs just opens the browser.
+- Starting `IndiePulse.exe` again while it runs brings up its window.
 - A crashed process is restarted automatically; a hung server (no `/health` answer for 2 min) too.
 - Closing or killing the tray always takes the server and worker down with it (Windows job
-  object), so the port is never left busy; leftovers of old `start.bat` windows are killed on start.
+  object), so the port is never left busy; leftovers of a tray that was killed are killed on start.
 - Open pages show a banner while the server is unreachable and reload themselves when it's back.
 - `requirements.txt` / `requirements.lock` changes are installed automatically on the next launch (`logs/pip.log`).
-- Logs: `logs/launcher.log` (tray), `logs/server.log`, `logs/worker.log` (+ `.prev.log` of the
-  previous run), `logs/app.log` (the app itself).
+- Logs: `logs/setup.log` (IndiePulse.exe), `logs/launcher.log` (tray), `logs/server.log`, `logs/worker.log` (+
+  `.prev.log` of the previous run), `logs/app.log` (the app itself).
 - Dev: `python -m app.serve` / `python -m app.worker` still run standalone in a console.
+
+**From the drive on different computers (ClubKit).** With ClubKit in the root of IndiePulse's drive, IndiePulse is
+portable there and takes ClubKit's uv, and keeps the Pythons and uv's cache in `ClubKit\data\uv` — on the drive, not in
+the profile of a computer it will leave. A Python environment made on another computer (its Python in another user's
+profile, or on the drive under another letter) is recognised by `pyvenv.cfg` and made again; with uv's cache on the
+drive that takes seconds, and on any computer where the drive gets the same letter it just works. Shortcuts and the
+"Start at Windows sign-in" item exist only on a trusted computer (`ClubKit\data\trusted-pcs.txt`) — a club computer
+gets nothing left behind. Paths saved where the drive had another letter (`E:\Music` in the settings, music of
+presets and clips) are found under this one. Scheduled posts go out only while IndiePulse runs: one that is more than
+2 hours late (the drive was unplugged) isn't published on the next start but marked `missed_schedule` — Retry
+publishes it. Dependencies: `requirements.txt` says what the app needs, `requirements.lock` the exact tested versions
+(what gets installed; regenerate it after editing `requirements.txt`, see its header).
 
 ## Modules
 
@@ -163,6 +188,10 @@ successful publish and errors since. Run it after the app has been idle for a wh
 - FFmpeg (auto-detected; `vendor/ffmpeg/ffmpeg.exe` preferred)
 
 ## Layout
+- `launcher/` — `IndiePulse.exe` (C#): the setup, preparing Python, starting the tray, the uninstaller
+- `app/desktop/` — the tray (`tray.py`), its supervisor of the server and the worker, IndiePulse's window
+  (`window.py`), the updater and the installer of updates (`apply_update.py`), the Python environment (`deps.py`)
+- `app/core/paths.py` — where the code, the runtime and the data are (a release: `IndiePulse.exe` + `lib\`)
 - `app/routers/` — pages (`pages.py`) and the JSON/htmx API (`api/`, one module per area)
 - `app/platforms/` — per-platform `publish()` / `fetch_metrics()` (one module per network)
 - `app/jobs/tasks.py` — Huey tasks: publish dispatcher, scheduling watchdog, metrics refresh
@@ -176,12 +205,35 @@ The app has no login and must stay bound to 127.0.0.1. It rejects cross-site POS
 and unknown Host headers so other websites can't drive it from your browser.
 
 ## Development
-```bash
-.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+A checkout is its own code folder (no `lib\`) and keeps its environment in `.venv`:
+
+```powershell
+uv venv --python 3.12 .venv                       # or: py -3.12 -m venv .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements-dev.txt
 .venv\Scripts\python.exe -m pytest
-.venv\Scripts\python.exe tools\lint.py   # pyflakes, as CI runs it
+.venv\Scripts\python.exe tools\lint.py            # pyflakes, as CI runs it
 ```
-CI (`.github/workflows/ci.yml`) runs both on Windows for every push and pull request to `main`.
+
+**IndiePulse.exe** is built from `launcher\*.cs` with the C# compiler that is part of Windows (.NET Framework 4.8,
+`%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe`) — no Visual Studio, SDK or NuGet:
+
+```powershell
+.\tools\build_launcher.ps1                        # IndiePulse.exe in the checkout's root (git ignores it)
+.\tools\build_launcher.ps1 -Out dist\IndiePulse.exe
+```
+
+That compiler knows C# 5 only: no `$"..."`, `?.`, `nameof`, `=>` members or auto-property initialisers. The exe takes
+its version from `app/__init__.py` and its icon from `app/static/indiepulse.ico`. In a checkout it uses `.venv` (made
+or repaired the way a release's `runtime\venv` is) and the data rules of `app/core/paths.py`, so double-clicking the
+built `IndiePulse.exe` in the checkout's root starts IndiePulse from it. Without the exe:
+`.venv\Scripts\pythonw.exe -m app.desktop.tray`, or `py -3.12 -m app.desktop.launch` (makes the `.venv` first;
+what `IndiePulse.pyw` used to do). The first start through the exe rewrites an autostart entry and shortcuts that
+still point at `IndiePulse.pyw`. `tests/test_launcher.py` builds the exe and checks it against the Python side
+(layouts, data rules, the requirements stamp, the names of the events it talks to the tray with).
+
+CI (`.github/workflows/ci.yml`) runs pyflakes and the tests and compiles the exe on Windows for every push and pull
+request to `main`.
 
 ## Releasing
 
@@ -203,11 +255,12 @@ message (default: the commit subjects since the last tag), commits `2.1.1-dev`, 
 together; if any of that fails, it undoes its commits and the tag.
 
 The tag starts `.github/workflows/release.yml`: it fails unless the tag is `v` + `__version__`, runs pyflakes and the
-tests, builds `IndiePulse-2.1.0.zip` and `latest.json` with `tools/build_release.py` (only git-tracked files: `app/`,
-the launchers, requirements, README, `.env.example`, a LICENSE if there is one — no tests, tools or `.github`), and
-creates the GitHub Release with both attached, using only `GITHUB_TOKEN`. Installed copies see it at their next check
-(Install / update above). To look at a build first:
-`python tools\build_release.py --tag v<version> --out dist` (the version must match).
+tests, builds `IndiePulse.exe` (`tools/build_launcher.ps1`, on `windows-latest`), then `IndiePulse-2.1.0.zip` and
+`latest.json` with `tools/build_release.py`, and creates the GitHub Release with both attached, using only
+`GITHUB_TOKEN`. The zip is one `IndiePulse` folder: `IndiePulse.exe`, `README.md` and `LICENSE` at its top, and in
+`lib\` only git-tracked files of the app — `app/`, the requirements, `.env.example`; no tests, tools, launcher
+sources or `.github`. Installed copies see it at their next check (Install / update above). To look at a build first:
+`.\tools\build_launcher.ps1; python tools\build_release.py --tag v<version> --out dist` (the version must match).
 
 A broken release: release a fixed, higher version. Installs that took the broken one went back by themselves only if
 it didn't start; the others update to the fix at their next check.
@@ -282,7 +335,7 @@ curl -H "Authorization: Bearer PAGE_ACCESS_TOKEN" \
 ```
 
 ### Step 4 — Add to IndiePulse settings
-Edit (or create) `.settings.json` in the project root and fill in the fields used by the app:
+Edit (or create) `.settings.json` in the data folder (*Where settings live* above; ⚙️ Settings does the same) and fill in the fields used by the app:
 
 ```json
 {

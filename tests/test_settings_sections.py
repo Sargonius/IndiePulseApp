@@ -64,13 +64,18 @@ def test_a_field_of_a_module_that_is_off_is_neither_shown_nor_saved(client, set_
 
 
 def test_a_secret_with_a_remove_box_can_be_cleared(client, set_settings):
+    from app.core import settings_schema as schema
+    updates = schema.BY_ID["updates"]
+    token = ("update_token",)
+    assert schema.parse_form(updates, {"update_token": ""}, keys=token) == ({}, {})  # empty: the saved one stays
+    assert schema.parse_form(updates, {"update_token": "", "update_token__clear": "1"}, keys=token) == \
+        ({"update_token": ""}, {})
+    # the wizard's group of the section has the mode only: its form never touches a saved token
     set_settings(update_token="github_pat_123456789")
-    client.post("/api/settings/section/updates", data={"_group": "setup", "update_mode": "auto"})
-    cfg = load_settings()
-    assert (cfg["update_mode"], cfg["update_token"]) == ("auto", "github_pat_123456789")
     client.post("/api/settings/section/updates", data={"_group": "setup", "update_mode": "auto",
                                                        "update_token__clear": "1"})
-    assert load_settings()["update_token"] == ""
+    cfg = load_settings()
+    assert (cfg["update_mode"], cfg["update_token"]) == ("auto", "github_pat_123456789")
 
 
 def test_a_group_of_a_hand_written_section(client, set_settings):

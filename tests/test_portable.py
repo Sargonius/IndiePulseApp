@@ -1,9 +1,10 @@
 """IndiePulse on the drive the user carries between computers: a .venv from another one, packages from the lock,
-paths saved when the drive had another letter, a club computer that shouldn't get shortcuts."""
+paths saved when the drive had another letter, a club computer that shouldn't get shortcuts; a release's layout
+(IndiePulse.exe + lib\\, its runtime\\) and where its data goes."""
 from pathlib import Path
 
 from app.core import paths
-from app.desktop import deps, winapi
+from app.desktop import apply_update, deps, winapi
 
 
 def _venv(root: Path, home: Path) -> Path:
@@ -32,17 +33,88 @@ def test_uv_keeps_its_pythons_on_the_drive(monkeypatch, tmp_path):
     (kit / "tools" / "uv").mkdir(parents=True)
     (kit / "tools" / "uv" / "uv.exe").write_bytes(b"")
     monkeypatch.setattr(deps, "KIT", kit)
-    monkeypatch.setattr(deps.shutil, "which", lambda name: None)
+    monkeypatch.setattr(deps, "RUNTIME", tmp_path / "no-runtime")
+    monkeypatch.setattr(deps.shutil, "which", lambda name: r"C:\Tools\uv.exe")
     for k in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_PREFERENCE"):
         monkeypatch.delenv(k, raising=False)
-    assert deps.uv() == str(kit / "tools" / "uv" / "uv.exe")
+    assert deps.uv() == str(kit / "tools" / "uv" / "uv.exe")  # ClubKit's before one on PATH: the exe's own choice
     env = deps.uv_env()
     assert env["UV_PYTHON_INSTALL_DIR"] == str(kit / "data" / "uv" / "python")
     assert env["UV_CACHE_DIR"] == str(kit / "data" / "uv" / "cache") and env["UV_PYTHON_PREFERENCE"] == "only-managed"
     monkeypatch.setenv("UV_CACHE_DIR", r"X:\own")  # ClubKit's scripts already said where
     assert deps.uv_env()["UV_CACHE_DIR"] == r"X:\own"
     monkeypatch.setattr(deps, "KIT", tmp_path / "no-kit")
-    assert deps.uv() is None and "UV_PYTHON_PREFERENCE" not in deps.uv_env()
+    assert deps.uv() == r"C:\Tools\uv.exe" and "UV_PYTHON_PREFERENCE" not in deps.uv_env()
+    monkeypatch.setattr(deps.shutil, "which", lambda name: None)
+    assert deps.uv() is None
+
+
+def test_a_release_keeps_uv_and_python_in_its_runtime(monkeypatch, tmp_path):
+    """No ClubKit: IndiePulse.exe put uv into runtime\\uv and Python into runtime\\python — everything stays there
+    (a portable copy leaves nothing in the profile, an uninstall takes it all), whatever the user's environment says."""
+    runtime = tmp_path / "IndiePulse" / "runtime"
+    (runtime / "uv").mkdir(parents=True)
+    (runtime / "uv" / "uv.exe").write_bytes(b"")
+    monkeypatch.setattr(deps, "KIT", tmp_path / "no-kit")
+    monkeypatch.setattr(deps, "RUNTIME", runtime)
+    monkeypatch.setattr(deps.shutil, "which", lambda name: r"C:\Tools\uv.exe")
+    monkeypatch.setenv("UV_PYTHON_INSTALL_DIR", r"C:\Users\me\uv-pythons")
+    assert deps.uv() == str(runtime / "uv" / "uv.exe")
+    env = deps.uv_env()
+    assert env["UV_PYTHON_INSTALL_DIR"] == str(runtime / "python") and env["UV_CACHE_DIR"] == str(deps.uv_cache())
+    assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
+    # the cache: in runtime\, unless that is too deep for a package built from source (then a short one in %TEMP%)
+    shallow = Path("C:/IndiePulse/runtime")
+    monkeypatch.setattr(deps, "RUNTIME", shallow)
+    assert deps.uv_cache() == shallow / "cache"
+    deep = Path("C:/" + "/".join(["a-rather-long-folder-name"] * 4)) / "IndiePulse" / "runtime"
+    monkeypatch.setattr(deps, "RUNTIME", deep)
+    assert deps.uv_cache().parent == Path(deps.tempfile.gettempdir()).resolve()
+    assert deps.uv_cache().name.startswith("IndiePulse-uv-")
+
+
+def test_a_short_cache_in_temp_goes_once_used(monkeypatch, tmp_path):
+    """A portable copy in a deep folder leaves nothing in %TEMP% after a repair or an install."""
+    runtime = tmp_path.joinpath(*["a-rather-long-folder-name"] * 3) / "IndiePulse" / "runtime"
+    (runtime / "uv").mkdir(parents=True)
+    (runtime / "uv" / "uv.exe").write_bytes(b"")
+    temp = tmp_path / "temp"
+    monkeypatch.setattr(deps, "KIT", tmp_path / "no-kit")
+    monkeypatch.setattr(deps, "RUNTIME", runtime)
+    monkeypatch.setattr(deps.tempfile, "gettempdir", lambda: str(temp))
+    monkeypatch.setattr(deps, "_STAMP", tmp_path / "stamp")
+    cache = deps.uv_cache()
+    assert cache.parent == temp.resolve()
+
+    def fake_call(cmd, log, env=None):
+        assert env["UV_CACHE_DIR"] == str(cache)
+        cache.mkdir(parents=True, exist_ok=True)  # what uv does with it
+        return True
+    monkeypatch.setattr(deps, "_call", fake_call)
+    assert deps.install_requirements(tmp_path / "pip.log") and not cache.exists()
+    assert deps._repair_python(tmp_path / "venv.log") and not cache.exists()
+    monkeypatch.setattr(deps, "RUNTIME", tmp_path / "IndiePulse" / "runtime")  # a shallow one keeps its own cache
+    own = deps.uv_cache()
+    own.mkdir(parents=True)
+    deps._drop_temp_cache()
+    assert own.exists()
+
+
+def test_a_release_has_its_code_in_lib(tmp_path):
+    """IndiePulse.exe, README, LICENSE at the top; lib\\ the code (paths.ROOT); runtime\\venv its venv. A checkout is
+    its own code folder with its .venv."""
+    release = tmp_path / "IndiePulse"
+    (release / "lib" / "app").mkdir(parents=True)
+    (release / "lib" / "app" / "__init__.py").write_text('__version__ = "2.1.0"\n')
+    assert apply_update.code_dir(release) == release / "lib" and apply_update.version_of(release) == "2.1.0"
+    assert apply_update.venv_python(release) == release / "runtime" / "venv" / "Scripts" / "python.exe"
+    checkout = tmp_path / "checkout"
+    (checkout / "app").mkdir(parents=True)
+    (checkout / "app" / "__init__.py").write_text('__version__ = "2.2.0-dev"\n')
+    assert apply_update.code_dir(checkout) == checkout and apply_update.version_of(checkout) == "2.2.0-dev"
+    assert apply_update.venv_python(checkout, windowed=True) == checkout / ".venv" / "Scripts" / "pythonw.exe"
+    # paths.py's rule for HOME: lib\\'s parent, unless "lib" is a checkout of its own
+    assert paths.HOME == paths.ROOT and not paths.is_release_layout()  # the tests run from a checkout
 
 
 def test_the_lock_is_what_gets_installed(monkeypatch, tmp_path):
@@ -98,8 +170,11 @@ def test_music_from_home_is_found_on_the_club_drive(monkeypatch, tmp_path, sessi
 def test_shortcuts_only_on_a_trusted_computer(monkeypatch, tmp_path):
     kit = tmp_path / "ClubKit"
     monkeypatch.setattr(winapi, "KIT", kit)
+    monkeypatch.setattr(winapi, "PORTABLE_MARKER", tmp_path / "portable.txt")
     monkeypatch.setattr(winapi, "_machine_id", lambda: "8DB253B8-0000")
     assert winapi.trusted_pc()  # no ClubKit on the drive: an installed program
+    (tmp_path / "portable.txt").write_text("")
+    assert not winapi.trusted_pc()  # a portable copy: its setup promised to leave nothing on the computer
     (kit / "data").mkdir(parents=True)
     assert not winapi.trusted_pc()  # ClubKit, but no computer is trusted yet
     listed = kit / "data" / "trusted-pcs.txt"
@@ -113,16 +188,18 @@ def test_shortcuts_only_on_a_trusted_computer(monkeypatch, tmp_path):
 
 def test_where_the_data_lives(monkeypatch, tmp_path):
     """The code can be replaced without touching the data; a copy that already runs keeps its data where it is."""
-    code = tmp_path / "IndiePulse"
-    code.mkdir()
+    home = tmp_path / "IndiePulse"  # a release: IndiePulse.exe here, the code in lib\\
+    code = home / "lib"
+    code.mkdir(parents=True)
     monkeypatch.setattr(paths, "ROOT", code)
+    monkeypatch.setattr(paths, "HOME", home)
     monkeypatch.delenv("INDIEPULSE_DATA", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData"))
     no_kit = Path(code.anchor) / "ClubKit"
     if not no_kit.is_dir():  # the drive the tests run on has no ClubKit: an installed program
         assert paths._data_dir() == tmp_path / "AppData" / "IndiePulse"
-    (code / "portable.txt").write_text("", encoding="utf-8")
-    assert paths._data_dir() == code / "data"
+    (home / "portable.txt").write_text("", encoding="utf-8")  # the setup's Portable: data\\ next to IndiePulse.exe
+    assert paths._data_dir() == home / "data"
     (code / ".settings.json").write_text("{}", encoding="utf-8")  # has been running from its own folder
     assert paths._data_dir() == code
     monkeypatch.setenv("INDIEPULSE_DATA", str(tmp_path / "elsewhere"))
@@ -144,5 +221,6 @@ def test_python_taken_by_an_antivirus_comes_back(monkeypatch, tmp_path):
     monkeypatch.setattr(deps, "_call", fake_call)
     monkeypatch.setattr(deps, "uv", lambda: "uv.exe")
     assert deps.ensure_venv(tmp_path / "venv.log")
-    assert calls == [["uv.exe", "python", "install", "--reinstall", "--no-bin", "3.12"]]  # no rebuild, no bin shims
+    # no rebuild; no bin shim in the profile, no registry entry
+    assert calls == [["uv.exe", "python", "install", "--no-bin", "--no-registry", "--reinstall", "3.12"]]
     assert (deps.VENV / "pyvenv.cfg").exists()

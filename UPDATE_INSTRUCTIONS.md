@@ -52,7 +52,7 @@ ALTER TABLE briefs ADD COLUMN media_vertical_path TEXT;
 
 ### 5. Запустите проект
 
-Дважды щёлкните `IndiePulse.pyw` (или ярлык IndiePulse) — появится значок в трее.
+Дважды щёлкните `IndiePulse.exe` (или ярлык IndiePulse) — появится значок в трее и окно IndiePulse.
 
 ## Что изменилось в работе
 

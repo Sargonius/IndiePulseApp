@@ -26,7 +26,7 @@ from typing import Callable
 from loguru import logger
 
 from app import __version__
-from app.desktop import DATA, ROOT, apply_update, deps
+from app.desktop import DATA, HOME, apply_update, deps
 from app.services import updates
 
 MANUAL_WAIT = 15 * 60  # s an install the user asked for waits for a publish in progress, then goes ahead anyway
@@ -168,7 +168,7 @@ class TrayUpdater:
 			updates.set_phase("installing", version, f"Installing IndiePulse {version}: it restarts in a moment…",
 							  from_version=__version__)
 			# the installer first: if it can't start, nothing has been stopped yet
-			apply_update.launch(python=deps.venv_python(windowed=True), work=updates.UPDATES, root=ROOT, data=DATA,
+			apply_update.launch(python=deps.venv_python(windowed=True), work=updates.UPDATES, root=HOME, data=DATA,
 								staged=staged, version=version, from_version=__version__, pid=os.getpid(),
 								url=self.base_url)
 			launched = True

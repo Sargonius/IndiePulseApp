@@ -1,6 +1,6 @@
-# Tests and pyflakes on every push to main and every pull request into it.
-# Windows, because that's the only place IndiePulse runs (tray, job objects, ctypes); Python 3.12 from uv, the
-# packages from requirements.lock (requirements-dev.txt adds pytest and pyflakes on top of it).
+# Tests and pyflakes on every push to main and every pull request into it, and IndiePulse.exe compiled.
+# Windows, because that's the only place IndiePulse runs (tray, job objects, ctypes, the launcher); Python 3.12 from
+# uv, the packages from requirements.lock (requirements-dev.txt adds pytest and pyflakes on top of it).
 name: CI
 
 on:
@@ -39,6 +39,9 @@ jobs:
 
       - name: pyflakes
         run: .venv\Scripts\python.exe tools\lint.py
+
+      - name: IndiePulse.exe
+        run: .\tools\build_launcher.ps1 -Out dist\IndiePulse.exe
 
       - name: pytest
         run: .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider

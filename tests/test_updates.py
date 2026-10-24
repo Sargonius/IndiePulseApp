@@ -1,4 +1,4 @@
-"""Updates: versions, the GitHub check (a private repo, through the API, with a token), latest.json, the download and
+"""Updates: versions, the GitHub check (through the API; a private fork's with a token), latest.json, the download and
 its checksum, unpacking, and the banner / Settings section. GitHub is faked (httpx.MockTransport): no network."""
 import hashlib
 import io
@@ -25,9 +25,9 @@ def work_dir(tmp_path, monkeypatch):
 
 
 def release_zip(version="9.0.0", extra=None, folder="IndiePulse/"):
-    files = {"app/__init__.py": f'__version__ = "{version}"\n', "app/main.py": "app = None\n",
-             "IndiePulse.pyw": "", "IndiePulse.bat": "@echo off\r\n", "requirements.txt": "",
-             "requirements.lock": "", **(extra or {})}
+    """A release as tools/build_release.py makes it: IndiePulse.exe, README, LICENSE and lib\\ in one folder."""
+    files = {"IndiePulse.exe": "MZ", "README.md": "", "LICENSE": "", "lib/app/__init__.py": f'__version__ = "{version}"\n',
+             "lib/app/main.py": "app = None\n", "lib/requirements.txt": "", "lib/requirements.lock": "", **(extra or {})}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         for name, text in files.items():
@@ -239,10 +239,11 @@ def test_build_release_makes_a_manifest_the_updater_accepts(tmp_path):
     repo = tmp_path / "repo"
     (repo / "app").mkdir(parents=True)
     (repo / "app/__init__.py").write_text('__version__ = "9.1.0"\n')
-    (repo / "IndiePulse.pyw").write_text("")
+    (repo / "requirements.lock").write_text("")
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    m = br.build("v9.1.0", tmp_path / "dist", repo=REPO, notes="x", root=repo)
+    (tmp_path / "IndiePulse.exe").write_bytes(b"MZ")
+    m = br.build("v9.1.0", tmp_path / "dist", repo=REPO, notes="x", root=repo, exe=tmp_path / "IndiePulse.exe")
     release = {"tag_name": "v9.1.0", "assets": [{"name": "IndiePulse-9.1.0.zip", "url": "https://api.github.com/a/2"}]}
     assert updates.parse_manifest(json.dumps(m).encode(), release)["sha256"] == m["sha256"]
 
@@ -252,7 +253,8 @@ def test_download_checks_the_sha_and_unpacks(github, work_dir):
     gh = github()
     root = updates.download(updates.available(updates.check()), TOKEN)
     assert root == work_dir / "staging" / "IndiePulse"
-    assert (root / "app" / "__init__.py").read_text() == '__version__ = "9.0.0"\n'
+    assert (root / "lib" / "app" / "__init__.py").read_text() == '__version__ = "9.0.0"\n'
+    assert (root / "IndiePulse.exe").read_bytes() == b"MZ"
     assert (work_dir / "IndiePulse-9.0.0.zip").read_bytes() == gh.zip
     assert json.loads((work_dir / "ready.json").read_text())["version"] == "9.0.0"
     zip_requests = [r for r in gh.log if r.url.path.endswith("/assets/2") or r.url.path.endswith("/blob/2")]
@@ -276,6 +278,7 @@ def test_checksum_mismatch_is_rejected(github, work_dir):
     (release_zip(extra={"/abs.txt": "x"}), "unsafe path"),
     (release_zip(version="8.0.0"), "holds IndiePulse 8.0.0"),
     (release_zip(extra={".venv/pyvenv.cfg": "x"}), "never replaces"),
+    (release_zip(extra={"runtime/venv/pyvenv.cfg": "x"}), "never replaces"),
     (release_zip(extra={"indiepulse.db": "x"}), "never replaces"),
     (b"not a zip at all", "isn't a valid zip"),
 ])

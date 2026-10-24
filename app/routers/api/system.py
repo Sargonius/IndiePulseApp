@@ -41,7 +41,7 @@ def system_restart():
     from app.desktop import RESTART_REQUEST_FILE, is_supervised
     if not is_supervised():
         return HTMLResponse(
-            "<span style='color:red'>Restart works only when IndiePulse runs via IndiePulse.pyw (tray icon)</span>",
+            "<span style='color:red'>Restart works only when IndiePulse runs from IndiePulse.exe (tray icon)</span>",
             status_code=409)
     try:
         RESTART_REQUEST_FILE.touch()

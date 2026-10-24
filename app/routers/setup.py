@@ -40,10 +40,9 @@ def _step_context(step: str, cfg: dict) -> dict:
 	if step == "ai":
 		return {"sections": settings_page.sections_view(cfg, ["openai"])}
 	if step == "updates":
-		from app.services import updates
 		s = schema.BY_ID["updates"]
 		form = schema.form_view(s, cfg, keys=schema.group_keys(s, "setup"), group="setup")
-		return {"sections": [{"section": s, "form": form, "badge": None}], "wizard_repo": updates.config(cfg)["repo"]}
+		return {"sections": [{"section": s, "form": form, "badge": None}]}
 	if step == "done":
 		on = [m for m in modules.MODULES if modules.on(m.id)]
 		return {"langs": languages.configured(cfg), "on_modules": on,
@@ -68,6 +67,7 @@ def _page(request: Request, step: str, errors=None, status_code: int = 200):
 		"state": state,
 		"errors": errors or [],
 		"ld_wizard": True,
+		"body_class": "page-setup",  # the app's first screen: its own frame, not the menu of every page
 		**_step_context(step, cfg),
 	}
 	return templates.TemplateResponse("setup.html", ctx, status_code=status_code)

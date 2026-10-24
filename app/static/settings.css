@@ -178,19 +178,49 @@
 .form-group label.sf-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; margin-top: 4px; }
 .form-group label.sf-check input { width: auto; }
 
-/* The setup wizard (setup.html) */
-.setup-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.setup-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0 0 16px; }
-.setup-steps li a { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: 13px; text-decoration: none; color: var(--muted); }
-.setup-steps li.is-done a { color: var(--success); border-color: var(--success); }
-.setup-steps li.is-current a { color: #fff; background: var(--primary); border-color: var(--primary); font-weight: 600; }
-.setup-card { margin-bottom: 16px; }
-.setup-card h3, .setup-sub { margin: 16px 0 8px; font-size: 16px; }
-.setup-intro { margin: 0 0 12px; }
+/* The setup wizard (setup.html): the app's first screen, opened in its window right after IndiePulse.exe's setup.
+   Its own frame — the steps on a rail at the left, the step on the right — and no menu until it's done. */
+body.page-setup header nav { display: none; }
+body.page-setup footer { display: none; }
+.setup { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 32px; align-items: start; }
+.setup-rail { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 18px; }
+.setup-hello { display: flex; gap: 12px; align-items: center; }
+.setup-hello > div { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.setup-hello strong { font-size: 15px; }
+.setup-mark { width: 40px; height: 40px; flex: none; border-radius: 9px; box-shadow: var(--shadow-md); }
+.setup-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.setup-steps li a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 14px; text-decoration: none; color: var(--muted); }
+.setup-steps li a:hover { background: var(--surface-3); }
+.setup-dot { width: 24px; height: 24px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; border: 1.5px solid var(--border); background: var(--card); color: var(--muted); }
+.setup-steps li.is-done a { color: var(--text); }
+.setup-steps li.is-done .setup-dot { background: var(--success); border-color: var(--success); color: #fff; }
+.setup-steps li.is-current a { color: var(--primary); background: var(--primary-soft); font-weight: 600; }
+.setup-steps li.is-current .setup-dot { background: var(--primary); border-color: var(--primary); color: #fff; }
+.setup-skip { margin: 0; padding: 0 10px; }
+.setup-skip.btn-link, .setup-skip .btn-link { font-size: 12px; text-decoration: none; }
+.setup-skip .btn-link:hover, .setup-skip.btn-link:hover { color: var(--text); text-decoration: underline; }
+.setup-main { min-width: 0; }
+.setup-kicker { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--primary); margin-bottom: 4px; }
+.setup-title { font-size: 26px; margin: 0 0 6px; letter-spacing: -.01em; }
+.setup-lead { color: var(--muted); font-size: 15px; line-height: 1.5; margin: 0 0 20px; max-width: 760px; }
+.setup-card { margin-bottom: 16px; padding: 20px 22px; border-radius: 12px; box-shadow: var(--shadow-md); }
+.setup-card h3, .setup-sub { margin: 18px 0 10px; font-size: 16px; }
+.setup-card > h3.setup-sub:first-child { margin-top: 0; }
+.setup-pick { transition: border-color .15s, box-shadow .15s, background .15s; }
+.setup-pick:hover { border-color: #c7d2fe; }
+.setup-pick:has(input:checked) { border-color: var(--primary); background: #f5f8ff; box-shadow: 0 0 0 1px var(--primary) inset; }
+.setup-later { font-size: 13px; text-decoration: none; padding: 8px 6px; }
+.setup-later:hover { color: var(--text); text-decoration: underline; }
+.setup-done p { font-size: 15px; }
+@media (max-width: 860px) {
+	.setup { grid-template-columns: 1fr; gap: 16px; }
+	.setup-rail { position: static; }
+	.setup-steps { flex-direction: row; flex-wrap: wrap; }
+}
 .setup-langs { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 12px; }
 .setup-langs label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; }
 .form-group .setup-langs input { width: auto; }
-.setup-nav { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.setup-nav { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .setup-nav-gap { flex: 1; }
 .setup-errors { margin: 0 0 12px; padding: 8px 12px; border-left: 4px solid var(--danger); background: #fee2e2; color: #991b1b; border-radius: 6px; }
 .setup-status { list-style: none; padding: 0; display: grid; gap: 4px; }

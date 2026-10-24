@@ -1,12 +1,12 @@
 """Updates from GitHub Releases: is there a newer IndiePulse, and getting it ready to install.
 
-A release (.github/workflows/release.yml, from a v* tag) has two assets: IndiePulse-<version>.zip and latest.json =
-{version, tag, name, url, sha256, size, notes, published_at}. The repo is private, so everything goes through the API
-with `update_token` (a fine-grained token: that repository, Contents: read-only): the release
-(GET /repos/{repo}/releases/latest), then each asset — latest.json, the zip — by its API url with
-Accept: application/octet-stream. GitHub answers that with a redirect to its storage host; the redirect is followed
-here, by hand, and the token never goes along (browser_download_url doesn't work for a private repo at all). A public
-repo works the same without a token.
+A release (.github/workflows/release.yml, from a v* tag) has two assets: IndiePulse-<version>.zip — IndiePulse.exe,
+README.md, LICENSE and lib\\ under one IndiePulse/ folder — and latest.json = {version, tag, name, url, sha256, size,
+notes, published_at}. Everything goes through the API: the release (GET /repos/{repo}/releases/latest), then each
+asset — latest.json, the zip — by its API url with Accept: application/octet-stream. GitHub answers that with a
+redirect to its storage host; the redirect is followed here, by hand. The repo is public, so no token is needed; a
+private fork sets `update_token` (a fine-grained token: that repository, Contents: read-only), which goes to the API
+host only, never along the redirect (browser_download_url doesn't work for a private repo at all).
 
 Who does what:
 - checking: the tray, 30 s after start and every 6 h (app/desktop/updater.py — the process that lives as long as
@@ -16,7 +16,8 @@ Who does what:
 - installing (stop everything, swap the code, start, roll back if it doesn't come up): app/desktop/apply_update.py,
   which also writes progress.json (the tray writes it before that: downloading, waiting for a publish to finish).
 
-A git checkout (ROOT/.git: the developer's copy) is never updated in place, and doesn't check by itself: git pull.
+A checkout (the developer's copy: HOME/.git, or any copy without a release's lib\\) is never updated in place, and
+doesn't check by itself: git pull.
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app import __version__
-from app.core.paths import DATA, ROOT
+from app.core.paths import DATA, HOME
 from app.desktop.apply_update import find_release_root, read_json, release_items, set_progress, version_of, \
 	write_json
 
@@ -57,10 +58,10 @@ _RELEASED = 4
 
 
 def _work_dir() -> Path:
-	"""DATA/updates, or .updates next to the code when the data is on another drive: the swap moves app/ and the rest
-	between this folder and the code folder, and only within one drive is a move a rename — at once, nothing copied."""
-	if os.path.splitdrive(str(DATA))[0].lower() != os.path.splitdrive(str(ROOT))[0].lower():
-		return ROOT / ".updates"
+	"""DATA/updates, or .updates in IndiePulse's folder when the data is on another drive: the swap moves lib\\ and the
+	rest between this folder and HOME, and only within one drive is a move a rename — at once, nothing copied."""
+	if os.path.splitdrive(str(DATA))[0].lower() != os.path.splitdrive(str(HOME))[0].lower():
+		return HOME / ".updates"
 	return DATA / "updates"
 
 
@@ -108,8 +109,11 @@ def valid_repo(name: str) -> bool:
 	return bool(_REPO_RX.fullmatch(name or ""))
 
 
-def is_git_checkout(root: Path = ROOT) -> bool:
-	return (Path(root) / ".git").exists()  # a folder, or a file in a git worktree
+def is_git_checkout(root: Path = HOME) -> bool:
+	"""Not a release install: a git checkout (.git — a folder, or a file in a git worktree), or a copy of the source
+	without the release's IndiePulse.exe + lib\\, which a release zip can't be swapped into."""
+	root = Path(root)
+	return (root / ".git").exists() or not (root / "lib" / "app" / "__init__.py").is_file()
 
 
 # ── state files ──────────────────────────────────────────────────────────────
@@ -379,7 +383,7 @@ def request_install() -> str:
 	if not latest:
 		return "There is no newer version to install."
 	if not is_supervised():
-		return "Installing needs IndiePulse running from its tray icon (IndiePulse.bat or IndiePulse.pyw)."
+		return "Installing needs IndiePulse running from its tray icon (start IndiePulse.exe)."
 	UPDATES.mkdir(parents=True, exist_ok=True)
 	install_request_path().write_text(latest["version"], encoding="utf-8")
 	set_phase("requested", latest["version"], f"Starting the update to IndiePulse {latest['version']}…")

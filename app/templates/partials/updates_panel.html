@@ -24,7 +24,7 @@
 					<input type="text" name="update_repo" value="{{ repo }}" placeholder="Sargonius/IndiePulseNew" />
 				</div>
 				<div class="form-group">
-					<label>Access token <span class="muted">(a private repository needs one){% if token_hint %} · saved {{ token_hint }}{% endif %}</span></label>
+					<label>Access token <span class="muted">(only for a private fork: the repository is public){% if token_hint %} · saved {{ token_hint }}{% endif %}</span></label>
 					<input type="password" name="update_token" value="" placeholder="github_pat_…" autocomplete="off" />
 					{% if token_hint %}<label class="muted" style="font-size:12px;"><input type="checkbox" name="clear_token" value="1" /> remove the saved token</label>{% endif %}
 				</div>
