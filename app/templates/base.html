@@ -68,8 +68,8 @@
 	</main>
     <footer>
 		<div class="container">
-			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '1.0.0' }}</span>
-			<span>Last change: {{ request.app.state.app_last_change if request and request.app and request.app.state and request.app.state.app_last_change else 'Version 1.0.0 - Initial setup' }}</span>
+			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '' }}</span>
+			{% if request and request.app and request.app.state and request.app.state.app_last_change %}<span>Last change: {{ request.app.state.app_last_change }}</span>{% endif %}
 		</div>
 	</footer>
 

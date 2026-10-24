@@ -12,6 +12,7 @@ from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app import __version__
 from app.core import config, modules
 from app.core.paths import ROOT
 from app.core.templating import make_templates
@@ -32,9 +33,9 @@ async def lifespan(app: FastAPI):
     migrate_db()
     # simple cache-busting version for static assets
     app.state.asset_version = str(int(time.time()))
-    # App versioning for footer
-    app.state.app_version = "1.3.1"
-    app.state.app_last_change = "Version 1.3.1 - Steam traffic bookmarklet, Steamworks links, faster wishlist history"
+    # the footer's version: the one in app/__init__.py (what's new in it: the release notes on GitHub)
+    app.state.app_version = __version__
+    app.state.app_last_change = ""
     yield
 
 
@@ -106,8 +107,9 @@ def health():
 
 @app.get("/version")
 def version():
+    # the updater (app/desktop/apply_update.py) checks a new install by this "app_version": keep the key
     return {
-        "app_version": getattr(app.state, "app_version", "1.0.0"),
+        "app_version": __version__,
         "last_change": getattr(app.state, "app_last_change", ""),
         "asset_version": getattr(app.state, "asset_version", "1"),
     }
