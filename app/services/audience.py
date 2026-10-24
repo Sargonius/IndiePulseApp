@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 import httpx
 
@@ -115,24 +115,31 @@ def x(cfg: dict, c: httpx.Client) -> Reading:
     return {"x_followers": count}, f"@{user.get('username') or '?'}: {count}"
 
 
-def telegram(cfg: dict, c: httpx.Client) -> Reading:
-    chat = _s(cfg, "tg_chat_id_ru")
+def _telegram_count(cfg: dict, c: httpx.Client, chat: str, metric: str) -> Reading:
     r = c.get(f"https://api.telegram.org/bot{_s(cfg, 'tg_bot_token')}/getChatMemberCount",
               params={"chat_id": chat})
     data = r.json() if r.content else {}
     if not data.get("ok"):
         raise AudienceError(f"getChatMemberCount: {data.get('description') or r.status_code}")
     count = _count(data.get("result"), "Telegram")
-    return {"tg_subscribers": count}, f"channel {chat}: {count}"
+    return {metric: count}, f"channel {chat}: {count}"
+
+
+def telegram(cfg: dict, c: httpx.Client) -> Reading:
+    return _telegram_count(cfg, c, _s(cfg, "tg_chat_id_ru"), "tg_subscribers")
+
+
+def _page_count(c: httpx.Client, page_id: str, token: str, metric: str) -> Reading:
+    r = c.get(f"{GRAPH}/{page_id}", params={"fields": "name,followers_count,fan_count", "access_token": token})
+    data = _json(r, "page")
+    count = _count(data.get("followers_count", data.get("fan_count")), "Facebook")
+    return {metric: count}, f"“{data.get('name') or '?'}”: {count}"
 
 
 def _facebook(lang: str) -> Callable[[dict, httpx.Client], Reading]:
     def fetch(cfg: dict, c: httpx.Client) -> Reading:
-        r = c.get(f"{GRAPH}/{_s(cfg, f'fb_{lang}_page_id')}", params={
-            "fields": "name,followers_count,fan_count", "access_token": _s(cfg, f"fb_{lang}_page_access_token")})
-        data = _json(r, "page")
-        count = _count(data.get("followers_count", data.get("fan_count")), "Facebook")
-        return {f"fb_{lang}_followers": count}, f"“{data.get('name') or '?'}”: {count}"
+        return _page_count(c, _s(cfg, f"fb_{lang}_page_id"), _s(cfg, f"fb_{lang}_page_access_token"),
+                           f"fb_{lang}_followers")
     return fetch
 
 
@@ -174,14 +181,17 @@ def _subreddits(cfg: dict) -> list[str]:
     return list(dict.fromkeys(n.removeprefix("r/") for n in names if n))
 
 
-def reddit(cfg: dict, c: httpx.Client) -> Reading:
-    """Subscribers of the subreddits posts go to (summed when EN and RU differ)."""
+def _reddit_count(cfg: dict, names: list[str], metric: str) -> Reading:
     from app.services.reddit_client import RedditClient
     rc = RedditClient(_s(cfg, "reddit_client_id"), _s(cfg, "reddit_client_secret"),
                       _s(cfg, "reddit_username"), _s(cfg, "reddit_password"))
-    counts = {name: int(rc.reddit.subreddit(name).subscribers or 0) for name in _subreddits(cfg)}
-    return ({"reddit_subscribers": sum(counts.values())},
-            ", ".join(f"r/{name}: {n}" for name, n in counts.items()))
+    counts = {name: int(rc.reddit.subreddit(name).subscribers or 0) for name in names}
+    return {metric: sum(counts.values())}, ", ".join(f"r/{name}: {n}" for name, n in counts.items())
+
+
+def reddit(cfg: dict, c: httpx.Client) -> Reading:
+    """Subscribers of the subreddits posts go to (summed when EN and RU differ)."""
+    return _reddit_count(cfg, _subreddits(cfg), "reddit_subscribers")
 
 
 def steam_followers(appid: int, c: httpx.Client) -> int:
@@ -205,6 +215,8 @@ class Channel:
     platforms: tuple[str, ...]     # post platforms that publish to this account
     ready: Callable[[dict], bool]  # connected in Settings
     fetch: Callable[[dict, httpx.Client], Reading]
+    # the destinations whose posts reach it, for a destination's own channel; () = a network's own: by platform
+    destinations: tuple[str, ...] = ()
 
 
 def _has(*keys: str) -> Callable[[dict], bool]:
@@ -234,3 +246,85 @@ CHANNELS: list[Channel] = [
 FOLLOWER_METRICS = [ch.metric for ch in CHANNELS]
 STEAM_KEY = "steam_followers"
 LABELS = {**{ch.key: ch.label for ch in CHANNELS}, STEAM_KEY: "Steam: followers"}
+
+# ── a destination's own account ──────────────────────────────────────────────
+# The networks' channels above count what the original keys point at (the RU Telegram channel, the RU and EN
+# Facebook Pages, the subreddits), so the destinations migrated from those keys keep their history. A
+# destination with another target (Settings → Languages & destinations: a JA channel, a third Page) is counted
+# on its own, as "<the network's metric>:<destination id>" (marketing.metric_kind knows these).
+DESTINATION_METRICS = {"telegram": "tg_subscribers", "facebook": "fb_followers", "reddit": "reddit_subscribers"}
+_TARGET_FIELD = {"telegram": "chat_id", "facebook": "page_id", "reddit": "subreddit"}
+
+
+def is_follower_metric(metric: str) -> bool:
+    base, _, dest = str(metric).partition(":")
+    return metric in FOLLOWER_METRICS or (bool(dest) and base in DESTINATION_METRICS.values())
+
+
+def _destination_channel(cfg: dict, dest: dict) -> Channel:
+    from app.services import destinations
+    module, target = dest["module"], dest["target"]
+    metric = f"{DESTINATION_METRICS[module]}:{dest['id']}"
+    chat = str(target.get("chat_id") or "").strip()
+    page, token = str(target.get("page_id") or "").strip(), str(target.get("page_token") or "").strip()
+    sub = str(target.get("subreddit") or "").strip().removeprefix("r/")
+
+    def fetch(cfg: dict, c: httpx.Client) -> Reading:
+        if module == "telegram":
+            return _telegram_count(cfg, c, chat, metric)
+        if module == "facebook":
+            return _page_count(c, page, token, metric)
+        return _reddit_count(cfg, [sub], metric)
+
+    if module == "telegram":
+        ready = _has("tg_bot_token")
+    elif module == "facebook":
+        def ready(cfg: dict) -> bool:
+            return bool(token)
+    else:
+        ready = _has("reddit_client_id", "reddit_client_secret", "reddit_username", "reddit_password")
+    return Channel(f"{module}:{dest['id']}", destinations.title(dest), metric,
+                   (destinations.post_platform(dest, "post"),), ready, fetch, (dest["id"],))
+
+
+def destination_channels(cfg: dict) -> list[Channel]:
+    """A channel per turned-on Telegram / Facebook / Reddit destination whose target isn't one the networks'
+    own channels count already."""
+    from app.services import destinations
+    seen = {"telegram": [_s(cfg, "tg_chat_id_ru")], "facebook": [_s(cfg, "fb_ru_page_id"), _s(cfg, "fb_en_page_id")],
+            "reddit": list(_subreddits(cfg))}
+    out = []
+    for d in destinations.all_destinations(cfg):
+        if d["module"] not in DESTINATION_METRICS or not d["enabled"]:
+            continue
+        val = str(d["target"].get(_TARGET_FIELD[d["module"]]) or "").strip()
+        val = val.removeprefix("r/") if d["module"] == "reddit" else val
+        if not val or val in seen[d["module"]]:
+            continue
+        seen[d["module"]].append(val)
+        out.append(_destination_channel(cfg, d))
+    return out
+
+
+def channels(cfg: Optional[dict] = None) -> list[Channel]:
+    """Every account whose followers are counted: the networks' own, then each destination's own."""
+    if cfg is None:
+        from app.services.settings import load_settings
+        cfg = load_settings()
+    return list(CHANNELS) + destination_channels(cfg)
+
+
+def reached(chans: list[Channel], posts) -> set[str]:
+    """Keys of the channels these posts went to: a post to a destination counted on its own → that one; any
+    other post → the network's channel of its platform."""
+    from app.platforms import platform_key
+    own = {d: ch.key for ch in chans for d in ch.destinations}
+    out = set()
+    for p in posts:
+        did = getattr(p, "destination_id", None)
+        if did in own:
+            out.add(own[did])
+            continue
+        plat = platform_key(p.platform)
+        out |= {ch.key for ch in chans if not ch.destinations and plat in ch.platforms}
+    return out

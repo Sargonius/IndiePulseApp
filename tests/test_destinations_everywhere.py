@@ -344,3 +344,73 @@ def test_the_health_check_of_a_setup_without_destinations_is_unchanged(set_setti
     r = _checked("telegram")
     assert (r.status, r.summary) == ("ok", "“Канал”")
     assert r.details == ["✓ bot @ipbot", "✓ chat “Канал” (channel)", "✓ bot is an admin with posting rights"]
+
+
+# ── follower counts ──────────────────────────────────────────────────────────
+
+def test_a_destination_with_its_own_channel_is_counted_on_its_own(set_settings):
+    from app.services import audience
+    set_settings(**OWNER, reddit_client_id="id", reddit_client_secret="s", reddit_username="u", reddit_password="p")
+    _with_ja()
+    own = {ch.key: ch for ch in audience.destination_channels(load_settings())}
+    # the destinations migrated from the old keys keep the networks' channels (and their history)
+    assert sorted(own) == ["facebook:facebook-ja", "reddit:reddit-ja", "telegram:telegram-ja"]
+    assert own["telegram:telegram-ja"].metric == "tg_subscribers:telegram-ja"
+    assert own["facebook:facebook-ja"].metric == "fb_followers:facebook-ja"
+    assert own["facebook:facebook-ja"].label == "Facebook · JA"
+    assert [ch.metric for ch in audience.channels(load_settings())][:len(audience.CHANNELS)] == audience.FOLLOWER_METRICS
+    assert audience.is_follower_metric("tg_subscribers:telegram-ja") and not audience.is_follower_metric("x:y")
+    from app.services import marketing as mk
+    assert mk.metric_kind("fb_followers:facebook-ja") == "level" and mk.metric_kind("fb_ru_followers") == "level"
+
+
+def test_followers_of_every_channel_are_collected_and_summed(set_settings, session, monkeypatch, client):
+    from sqlalchemy import delete
+    from app.models.models import AudienceSample, MetricPoint
+    from app.services import marketing as mk
+    from app.services import marketing_collect as mc
+    from tests.test_audience import FakeClient, Resp
+    session.execute(delete(AudienceSample))
+    session.execute(delete(MetricPoint).where(mc._follower_metrics()))
+    session.execute(delete(MetricPoint).where(MetricPoint.metric == "followers_total"))
+    session.commit()
+    set_settings(**OWNER)
+    _with_ja()
+
+    def tg(url, kw):
+        return Resp({"ok": True, "result": {"-100111": 120, "-100222": 30}[kw["params"]["chat_id"]]})
+
+    def fb(url, kw):
+        page = url.rsplit("/", 1)[-1]
+        return Resp({"name": f"Page {page}", "followers_count": {"11": 1000, "22": 200, "33": 7}[page]})
+
+    fake = FakeClient({"getChatMemberCount": tg, "graph.facebook.com": fb})
+    monkeypatch.setattr(mc, "_with_client", lambda fn: fn(fake))
+    monkeypatch.setattr(mc, "steam_projects", lambda s: [])
+    summary = mc.collect_audience(session, load_settings(), mc.Budget(5), force=True)
+    assert set(summary) == {"tg", "fb_ru", "fb_en", "telegram:telegram-ja", "facebook:facebook-ja"}
+    today = mk.today_str()
+    level = {m: mk.level_on_or_before(session, 0, m, today).value for m in (
+        "tg_subscribers", "tg_subscribers:telegram-ja", "fb_ru_followers", "fb_en_followers", "fb_followers:facebook-ja")}
+    assert level == {"tg_subscribers": 120, "tg_subscribers:telegram-ja": 30, "fb_ru_followers": 1000,
+                     "fb_en_followers": 200, "fb_followers:facebook-ja": 7}
+    assert mk.level_on_or_before(session, 0, "followers_total", today).value == 1357
+    statuses = {s["source"]: s for s in mc.source_statuses(session)}
+    assert statuses["telegram:telegram-ja"]["label"] == "Telegram · JA" and statuses["telegram:telegram-ja"]["audience"]
+    home = client.get("/")
+    assert home.status_code == 200 and "Telegram · JA" in home.text  # its own row among the followers
+
+
+def test_a_publication_counts_the_channels_it_went_to(set_settings):
+    from app.services import audience
+    set_settings(**OWNER)
+    _with_ja()
+    chans = audience.channels(load_settings())
+
+    def went(*posts):
+        return audience.reached(chans, [Post(user_id=1, brief_id=1, platform=p, destination_id=d) for p, d in posts])
+
+    assert went(("tg", "telegram-ja")) == {"telegram:telegram-ja"}
+    assert went(("tg", "telegram-ru")) == {"tg"} == went(("tg", None))  # the RU channel, as before
+    assert went(("fb_en", "facebook-ja")) == {"facebook:facebook-ja"}  # not the EN Page
+    assert went(("fb_en", "facebook-en"), ("vk", None)) == {"fb_en", "vk"}

@@ -286,7 +286,7 @@ def collect_steam_sales(session: Session, cfg: dict, budget: Budget, force: bool
 def _audience_jobs(session: Session, cfg: dict, force: bool) -> list[tuple[str, Callable]]:
     """(status key, fn(client) -> (rows, info)) for every connected channel that is due."""
     jobs = []
-    for ch in audience.CHANNELS:
+    for ch in audience.channels(cfg):
         if not any(modules.platform_on(p) for p in ch.platforms):
             continue  # turned off on 🧩 Modules
         if ch.ready(cfg) and _due(session, ch.key, AUDIENCE_EVERY, force):
@@ -357,11 +357,19 @@ def collect_audience(session: Session, cfg: dict, budget: Budget, force: bool = 
     return summary
 
 
+def _follower_metrics():
+    """WHERE: a follower count — a network's own, or a destination's (audience.DESTINATION_METRICS)."""
+    from sqlalchemy import or_
+    return or_(MetricPoint.metric.in_(audience.FOLLOWER_METRICS),
+               *[MetricPoint.metric.startswith(base + ":", autoescape=True)
+                 for base in sorted(set(audience.DESTINATION_METRICS.values()))])
+
+
 def _seed_samples_from_daily(session: Session) -> None:
     """Once: turn the daily follower points collected before samples existed (Discord,
     YouTube) into samples at the time of that day's last read, for older publications."""
     old = session.exec(select(MetricPoint).where(MetricPoint.project_id == 0, MetricPoint.dim == "",
-                                                 MetricPoint.metric.in_(audience.FOLLOWER_METRICS))).all()
+                                                 _follower_metrics())).all()
     for p in old:
         if p.updated_at is not None:
             add_samples(session, [{"metric": p.metric, "value": p.value}], p.updated_at)
@@ -371,7 +379,7 @@ def rebuild_followers_total(session: Session) -> None:
     """followers_total per day = sum of every account's last known count. An account
     counts from its first read backwards too, so connecting one isn't "growth"."""
     points = session.exec(select(MetricPoint).where(MetricPoint.project_id == 0, MetricPoint.dim == "",
-                                                    MetricPoint.metric.in_(audience.FOLLOWER_METRICS))
+                                                    _follower_metrics())
                           .order_by(MetricPoint.day)).all()
     if not points:
         return
@@ -505,8 +513,11 @@ def start_steam_sync(force: bool = False) -> bool:
 def source_statuses(session: Session) -> list[dict]:
     """For the home screen: last result of every collector that has run at least once."""
     out = []
-    for source, label in LABELS.items():
+    # a destination counted on its own has a status of its own too (audience.destination_channels)
+    own = {ch.key: ch.label for ch in audience.destination_channels(load_settings())}
+    labels, audience_keys = {**LABELS, **own}, AUDIENCE_KEYS | set(own)
+    for source, label in labels.items():
         st = _status(session, source)
         if st:
-            out.append({"source": source, "label": label, "audience": source in AUDIENCE_KEYS, **st})
+            out.append({"source": source, "label": label, "audience": source in audience_keys, **st})
     return out
