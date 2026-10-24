@@ -50,6 +50,8 @@ def migrate_db() -> None:
             ("crop_scale", "REAL"), ("project_id", "INTEGER"),
             ("trim_start", "REAL"), ("trim_end", "REAL"), ("overlays_json", "TEXT"),
             ("edit_spec_json", "TEXT"),
+            # one text per language of Settings → Languages (app.services.languages)
+            ("texts_json", "TEXT"),
         ],
         # Shorts render-preset columns + marketing fields
         "projects": [
@@ -62,7 +64,9 @@ def migrate_db() -> None:
         # "clip type" preset columns (title/description/music)
         "presets": [("title", "VARCHAR(300)"), ("text_en", "TEXT"), ("music_path", "VARCHAR(500)")],
         # per-network texts of a reposted short (see platforms.common.brief_for_publish)
-        "posts": [("overrides_json", "TEXT")],
+        "posts": [("overrides_json", "TEXT"),
+                  # the destination a post goes to (app.services.destinations); NULL = the platform's old target
+                  ("destination_id", "VARCHAR(80)")],
     }
     with engine.begin() as conn:
         conn.exec_driver_sql(
@@ -89,3 +93,10 @@ def migrate_db() -> None:
                     logger.info(f"migrate_db: added {table}.{col}")
                 except Exception as exc:
                     logger.error(f"migrate_db: could not add {table}.{col}: {exc}")
+    # The settings half of the same upgrade: the server and the worker both run migrate_db at
+    # start, so the destinations list exists before either publishes by it.
+    try:
+        from app.services import destinations
+        destinations.migrate_settings()
+    except Exception as exc:
+        logger.error(f"migrate_db: languages & destinations settings not migrated: {exc}")

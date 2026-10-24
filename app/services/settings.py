@@ -30,6 +30,12 @@ DEFAULTS: Dict[str, Any] = {
 	"steam_traffic_token": "",
 	# UI
 	"ui_language": "en",
+	# Languages the posts are written in (Settings → Languages & destinations); the first
+	# is the one you write in, the rest are translations (app.services.languages).
+	"languages": ["ru", "en"],
+	# Every place posts go to, each with its language (app.services.destinations).
+	# None = not migrated yet: built from the per-language keys below on first start.
+	"destinations": None,
 	"vk_client_id": "",
 	"vk_client_secret": "",
 	"vk_group_id": "",
