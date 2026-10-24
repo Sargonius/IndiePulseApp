@@ -97,6 +97,8 @@ def test_a_factory_clip_goes_to_each_destination_in_its_language(networks, clien
     assert posts[2].overrides_json is None  # the brief's own language: nothing of its own
     for job_id, post_id in scheduled["publish"]:
         assert json.loads(reload(Job, job_id).payload_json)["media_rel"] == reload(Brief, brief_id).media_vertical_path
+    board = client.get("/shorts/board/partial").text
+    assert 'title="telegram-ja">tg JA<' in board and 'title="telegram-ru">tg RU<' in board  # two channels apart
 
 
 def test_a_language_without_texts_falls_back_and_own_only_destinations_are_left_out(networks, client, session,

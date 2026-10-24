@@ -1057,6 +1057,8 @@ def shorts_board_partial(request: Request, session: Session = Depends(get_sessio
             return f"{n/1_000:.1f}K".replace('.0K', 'K')
         return str(n)
 
+    from app.services import destinations as _destinations
+    dest_langs = {d['id']: d['lang'] for d in _destinations.stored()}
     cards = []
     total_views = 0
     published_count = 0
@@ -1100,6 +1102,9 @@ def shorts_board_partial(request: Request, session: Session = Depends(get_sessio
                     pass
             chips.append({
                 'platform': (p.platform.value if hasattr(p.platform, 'value') else str(p.platform)),
+                # two channels of one network differ by their destination (and its language)
+                'destination': p.destination_id,
+                'lang': (dest_langs.get(p.destination_id) or '') if p.destination_id else '',
                 'status': st,
                 'url': p.platform_url,
                 'error': (p.error_text or ''),
