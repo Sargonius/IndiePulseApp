@@ -3,23 +3,12 @@
 <h2>Settings</h2>
 
 <div id="settings_container">
-	<!-- One partial per section (partials/settings/<id>.html); each platform as a two-column row: settings left,
-	     instructions right -->
-	{% include "partials/settings/languages.html" %}
-	{% include "partials/settings/discord.html" %}
-	{% include "partials/settings/steam.html" %}
-	{% include "partials/settings/telegram.html" %}
-	{% include "partials/settings/vk.html" %}
-	{% include "partials/settings/x.html" %}
-	{% include "partials/settings/youtube.html" %}
-	{% include "partials/settings/bluesky.html" %}
-	{% include "partials/settings/facebook.html" %}
-	{% include "partials/settings/instagram.html" %}
-	{% include "partials/settings/reddit.html" %}
-	{% include "partials/settings/tiktok.html" %}
-	{% include "partials/settings/openai.html" %}
-	{% include "partials/settings/video.html" %}
-	{% include "partials/settings/updates.html" %}
+	<!-- The sections of app/core/settings_schema.py in order: made from their fields (partials/settings_section.html)
+	     or hand-written (partials/settings/<id>.html: OAuth connect flows, the destinations editor, Updates). A
+	     module that is off: its section is hidden by base.html. -->
+	{% for sec in sections %}
+	{% if sec.form %}{% include "partials/settings_section.html" %}{% else %}{% include sec.section.custom %}{% endif %}
+	{% endfor %}
 </div>
 
 <link rel="stylesheet" href="/static/settings.css?v={{ request.app.state.asset_version if request and request.app and request.app.state and request.app.state.asset_version else '1' }}">

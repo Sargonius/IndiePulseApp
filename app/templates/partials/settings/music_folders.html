@@ -1,0 +1,4 @@
+{#- Under Settings → Video & music → Music folders: what was found in each (music_library.folder_rows) -#}
+{% for f in form.ctx.music_folders %}
+<div class="muted" style="font-size:12px;">{% if f.exists %}✓{% else %}✕ folder not found:{% endif %} {{ f.path }}{% if f.exists %} — {{ f.tracks }} {{ 'track' if f.tracks == 1 else 'tracks' }}{% endif %}</div>
+{% endfor %}

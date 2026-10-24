@@ -35,3 +35,11 @@ document.addEventListener('DOMContentLoaded', loadSettingsStatus);
 document.addEventListener('htmx:afterSwap', (e) => {
 	setTimeout(loadSettingsStatus, 500);
 });
+
+// A section form that didn't pass its checks comes back as 422 with what to fix: show it (htmx 1.x swaps only 2xx).
+document.addEventListener('htmx:beforeSwap', (e) => {
+	if (e.detail.xhr.status === 422 && e.detail.elt.closest && e.detail.elt.closest('form.settings-form')) {
+		e.detail.shouldSwap = true;
+		e.detail.isError = false;
+	}
+});

@@ -312,7 +312,9 @@ SECTIONS: list[Section] = [
 		Field("discord_upload_limit_mb", "Discord file limit, MB", "number", min=1, max=500, blank="default",
 			  module="discord", help="10 = no boosts; 50 = boost level 2; 100 = level 3"),
 	)),
-	Section("updates", "Updates", custom="partials/settings/updates.html", frame=False, fields=(
+	# Its Settings panel saves through /api/updates/save; the wizard's step is a group made from the fields.
+	Section("updates", "Updates", custom="partials/settings/updates.html", frame=False,
+			groups=(("setup", ("update_mode", "update_token")),), fields=(
 		Field("update_mode", "When a new version is out", "select", choices=(
 			("notify", "Tell me (a banner here, a balloon from the tray)"),
 			("auto", "Install it by itself when nothing is publishing"),
@@ -484,7 +486,6 @@ def form_view(s: Section, cfg: dict, keys=None, group: str = "", submitted=None,
 		"section": s,
 		"id": f"sf_{s.id}" + (f"_{group}" if group else ""),
 		"group": group,
-		"keys": ",".join(f.key for f in fields) if keys is not None else "",
 		"fields": [field_view(f, cfg, submitted, errors.get(f.key, "")) for f in fields],
 		"actions": s.actions if actions and not group else (),
 		"note": note,

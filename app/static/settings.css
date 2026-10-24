@@ -170,3 +170,10 @@
 	border-radius: 4px;
 	font-size: 12px;
 }
+
+/* Forms made from the settings schemas (partials/settings_form.html) */
+.form-group textarea { width: 100%; min-width: 0; }
+.form-group.has-error input, .form-group.has-error select, .form-group.has-error textarea { border-color: var(--danger); }
+.sf-error { color: var(--danger); font-size: 12px; margin-top: 3px; }
+.form-group label.sf-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; margin-top: 4px; }
+.form-group label.sf-check input { width: auto; }

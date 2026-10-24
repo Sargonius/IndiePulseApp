@@ -1,0 +1,22 @@
+{#- A Settings section (app/routers/settings_page.py: sections_view → `sec`): its frame — title, badge, settings on
+    the left, instructions on the right — around the form made from its schema or its hand-written body
+    (partials/settings/<id>.html: the OAuth connect flows, the destinations editor). The right column is
+    partials/settings/help/<id>.html. -#}
+{%- set s = sec.section -%}
+<div class="settings-section" id="section_{{ s.id }}">
+	<div class="settings-row{% if s.wide %} ld-row{% endif %}">
+		<div class="settings-left{% if s.wide %} ld-left{% endif %}">
+			<div class="settings-header">
+				<h3>{{ s.title }}</h3>
+				{% if s.status %}<span class="status-badge" id="status_{{ s.id }}">Loading...</span>
+				{% elif sec.badge %}<span class="status-badge {{ sec.badge[1] }}">{{ sec.badge[0] }}</span>{% endif %}
+			</div>
+			{% if s.intro %}<div class="info-box" style="margin:0 0 12px;">{{ s.intro | safe }}</div>{% endif %}
+			{% if sec.form %}{% with form = sec.form %}{% include "partials/settings_form.html" %}{% endwith %}
+			{% else %}{% include s.custom %}{% endif %}
+		</div>
+		<div class="settings-right">
+			{% include "partials/settings/help/" ~ s.id ~ ".html" ignore missing %}
+		</div>
+	</div>
+</div>
