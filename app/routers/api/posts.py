@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse
 from sqlmodel import Session
 from sqlmodel import select
 from typing import Optional
-from app.routers.api.common import templates_api
+from app.routers.api.common import form_texts, templates_api
 from app.routers.api.x import _x_ensure_token
 
 router = APIRouter()
@@ -188,7 +188,14 @@ def get_post_edit_data(post_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Post not found")
     
     brief = session.get(Brief, post.brief_id) if post.brief_id else None
-    
+    from app.services import destinations, languages
+    cfg = load_settings()
+    texts = languages.brief_texts(brief) if brief else {}
+    # every language of Settings → Languages, then any other one this publication has a text in
+    codes = languages.configured(cfg) + [c for c, t in texts.items() if (t or '').strip()
+                                         and c not in languages.configured(cfg)]
+    dest = destinations.get(post.destination_id, cfg) if post.destination_id else None
+
     return {
         'post': {
             'id': post.id,
@@ -196,11 +203,16 @@ def get_post_edit_data(post_id: int, session: Session = Depends(get_session)):
             'status': post.status.value if hasattr(post.status, 'value') else str(post.status),
             'scheduled_at': post.scheduled_at.isoformat() if post.scheduled_at else None,
             'brief_id': post.brief_id,
+            'destination_id': post.destination_id,
+            # the language this post goes out in (None: the platform's old rules)
+            'lang': dest['lang'] if dest else None,
         },
+        'languages': [{'code': c, 'name': languages.name(c)} for c in codes],
         'brief': {
             'id': brief.id if brief else None,
             'text_ru': brief.text_ru if brief else '',
             'text_en': brief.text_en if brief else '',
+            'texts': {c: texts.get(c) or '' for c in codes},
             'title': brief.title if brief else '',
             'tags_json': brief.tags_json if brief else '',
             'media_path': brief.media_path if brief else None,
@@ -211,28 +223,29 @@ def get_post_edit_data(post_id: int, session: Session = Depends(get_session)):
 @router.post("/posts/{post_id}/update")
 def update_post(
     post_id: int,
-    text_ru: Optional[str] = Form(None),
-    text_en: Optional[str] = Form(None),
+    texts: dict = Depends(form_texts),
     title: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
     scheduled_at: Optional[str] = Form(None),
     session: Session = Depends(get_session)
 ):
-    """Update post and its brief. Updates all queued posts sharing the same brief."""
+    """Update post and its brief. Updates all queued posts sharing the same brief.
+
+    text_<lang> for any language (text_ru, text_en, text_ja...): the languages sent are replaced, the others keep
+    their text."""
     from app.models.models import Post, Brief, PostStatusEnum
+    from app.services.languages import set_brief_texts
     from datetime import datetime as _dt
-    
+
     post = session.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    
+
     if post.brief_id:
         brief = session.get(Brief, post.brief_id)
         if brief:
-            if text_ru is not None:
-                brief.text_ru = text_ru
-            if text_en is not None:
-                brief.text_en = text_en
+            if texts:
+                set_brief_texts(brief, texts)
             if title is not None:
                 brief.title = title
             if tags is not None:

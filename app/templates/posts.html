@@ -34,6 +34,18 @@ document.getElementById('refresh_metrics_btn').addEventListener('click', async (
   setTimeout(() => { htmx.trigger('#posts_table', 'refresh'); btn.disabled = false; status.textContent = 'Done'; setTimeout(()=>status.textContent='', 1500); }, 1200);
 });
 
+// The calendar's Edit opens /posts?edit=<id>: that post's editor opens once the table is there
+(function () {
+  const editId = new URLSearchParams(location.search).get('edit');
+  if (!editId) return;
+  document.body.addEventListener('htmx:afterSettle', function once() {
+    if (typeof openEditModal !== 'function') return;
+    document.body.removeEventListener('htmx:afterSettle', once);
+    history.replaceState(null, '', location.pathname);
+    openEditModal(editId);
+  });
+})();
+
 // Auto refresh toggle
 const toggle = document.getElementById('auto_refresh_toggle');
 const tableDiv = document.getElementById('posts_table');

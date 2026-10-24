@@ -220,3 +220,30 @@ def test_a_factory_post_to_a_tiktok_destination_is_adopted_with_its_language(ses
     assert tp.adopt_factory_posts(session, cfg) == 1
     item = session.exec(select(TikTokItem).where(TikTokItem.post_id == post.id)).one()
     assert (item.caption, item.lang) == ("キャラバンを襲う", "ja")
+
+
+# ── the post-edit API ────────────────────────────────────────────────────────
+
+def test_the_post_editor_edits_every_language(networks, client, session):
+    from tests.test_destinations import _post
+    _with_ja()
+    pid, _ = _post(session, "tg", "telegram-ja", ru="Привет", en="Hello", ja="こんにちは", de="Hallo")
+    data = client.get(f"/api/posts/{pid}/edit_data").json()
+    assert [lang["code"] for lang in data["languages"]] == ["ru", "en", "ja", "de"]  # Settings' order, then the rest
+    assert data["brief"]["texts"] == {"ru": "Привет", "en": "Hello", "ja": "こんにちは", "de": "Hallo"}
+    assert data["post"]["lang"] == "ja" and data["brief"]["text_ru"] == "Привет"  # the old keys stay
+    r = client.post(f"/api/posts/{pid}/update", data={"text_ja": "やあ", "text_en": "Hi", "tags": "#x"})
+    assert r.json()["ok"]
+    brief = reload(Brief, reload(Post, pid).brief_id)
+    assert languages.brief_texts(brief) == {"ru": "Привет", "en": "Hi", "ja": "やあ", "de": "Hallo"}
+    assert (brief.text_en, brief.tags_json) == ("Hi", "#x")
+    # an older page sending only RU / EN
+    client.post(f"/api/posts/{pid}/update", data={"text_ru": "Здравствуй"})
+    assert languages.brief_texts(reload(Brief, brief.id))["ja"] == "やあ"
+    assert reload(Brief, brief.id).text_ru == "Здравствуй"
+
+
+def test_the_posts_page_builds_the_language_fields_and_opens_the_calendars_edit(client):
+    assert "edit=" in client.get("/posts").text and "openEditModal(editId)" in client.get("/posts").text
+    table = client.get("/posts/partial").text
+    assert 'id="edit_texts"' in table and 'id="edit_text_ru"' not in table
