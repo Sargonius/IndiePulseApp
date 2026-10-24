@@ -428,3 +428,90 @@ def test_the_old_news_page_redirects_and_its_form_still_posts(client, session, s
     brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
     post = session.exec(select(Post).where(Post.brief_id == brief_id)).one()
     assert (post.platform.value, post.destination_id) == ("tg", None) and len(scheduled["publish"]) == 1
+
+
+# ── a fresh install: networks set up later, through their old Settings sections ──
+
+def _sent_to_telegram(monkeypatch):
+    from app.services import telegram_client
+    from tests.test_destinations import SENT, _Rec
+    monkeypatch.setattr(telegram_client, "TelegramClient", _Rec)
+    SENT.clear()
+    return SENT
+
+
+def test_a_fresh_install_publishes_to_a_telegram_channel_set_up_later(client, session, monkeypatch, scheduled,
+                                                                     settings_file):
+    """Empty settings: the start migrates them (no chat id yet); the old Telegram fields then fill the linked
+    destination and a post goes there."""
+    assert json.loads(settings_file.read_text(encoding="utf-8"))["destinations"]  # the app's start migrated
+    assert not destinations.ready(destinations.get("telegram-ru"))
+    client.post("/api/settings/save", data={"tg_bot_token": "1:abc", "tg_chat_id_ru": "-100500"})
+    dest = destinations.get("telegram-ru")
+    assert dest["target"] == {"chat_id": "-100500"} and destinations.ready(dest)
+    page = client.get("/create/post").text
+    assert 'value="telegram-ru"' in page
+    r = client.post("/create/post", data={"text_ru": "Первый пост", "destinations": ["telegram-ru"]},
+                    follow_redirects=False)
+    brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
+    post = session.exec(select(Post).where(Post.brief_id == brief_id)).one()
+    sent = _sent_to_telegram(monkeypatch)
+    job = next(j for j in session.exec(select(Job)).all() if json.loads(j.payload_json).get("post_id") == post.id)
+    assert _publish((post.id, job.id)) == "ok"
+    assert sent == [("tg", "-100500", "Первый пост")]
+
+
+def test_a_discord_webhook_typed_into_the_single_field_reaches_a_destination(client, set_settings):
+    # a fresh install: the single webhook's destination is there, linked
+    client.post("/api/discord/webhook", data={"url": "https://hook/one"})
+    assert destinations.get("discord")["target"] == {"webhook": "https://hook/one"}
+    # an install migrated with RU/EN webhooks has no destination for the single field: typing one adds it
+    set_settings(destinations=None, discord_webhook_url="", discord_webhook_ru="https://hook/ru",
+                 discord_webhook_en="https://hook/en")
+    destinations.migrate_settings()
+    assert destinations.get("discord") is None
+    client.post("/api/discord/webhook", data={"url": "https://hook/single"})
+    dest = destinations.get("discord")
+    assert dest["target"] == {"webhook": "https://hook/single"} and dest["linked"] == {"webhook": "discord_webhook_url"}
+    assert destinations.ready(dest) and "discord" in [d["id"] for g in destinations.for_form() for d in g["destinations"]]
+    # saved again as it was: nothing new
+    ids = [d["id"] for d in destinations.stored()]
+    client.post("/api/discord/webhook", data={"url": "https://hook/single"})
+    client.post("/api/discord/webhooks/save", data={"url_ru": "https://hook/ru"})
+    assert [d["id"] for d in destinations.stored()] == ids
+
+
+def test_an_old_field_never_doubles_a_destination_and_follows_the_languages(client, set_settings):
+    # the owner's setup: saving the old single-webhook field with the value it had adds nothing
+    set_settings(**OWNER)
+    destinations.migrate_settings()
+    before = [d["id"] for d in destinations.stored()]
+    client.post("/api/discord/webhook", data={"url": "https://hook/default"})
+    assert [d["id"] for d in destinations.stored()] == before
+    # a destination removed in the editor comes back when its old field is set up again, in a language of Settings
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]
+             if d["id"] != "telegram-ru"]
+    assert destinations.save(["en", "ja"], [dict(i, lang="en") for i in items])["ok"]
+    client.post("/api/settings/save", data={"tg_chat_id_ru": "-100777"})
+    back = destinations.get("telegram-ru")
+    assert back["target"] == {"chat_id": "-100777"} and back["lang"] == "en"
+    # ...and the editor still saves (its language is one of the list)
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]]
+    assert destinations.save(["en", "ja"], items)["ok"]
+    # a target that already has a destination of its own isn't added twice
+    items.append({"module": "reddit", "lang": "ja", "target": {"subreddit": "IndieGamesJP"}})
+    assert destinations.save(["en", "ja"], items)["ok"]
+    before = [d["id"] for d in destinations.stored()]
+    client.post("/api/settings/save", data={"reddit_subreddit_en": "IndieGamesJP"})
+    assert [d["id"] for d in destinations.stored()] == before
+
+
+def test_use_as_ru_brings_back_the_facebook_page(client, set_settings):
+    destinations.migrate_settings()
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]
+             if not d["id"].startswith("facebook")]
+    assert destinations.save(["ru", "en"], items)["ok"]
+    client.post("/api/facebook/assign_page", data={"lang": "ru", "page_id": "11", "page_token": "tok", "page_name": "P"})
+    dest = destinations.get("facebook-ru")
+    assert dest["target"] == {"page_id": "11", "page_token": "tok"} and dest["platform"] == "fb_ru"
+    assert [d["id"] for d in destinations.stored()].count("facebook-ru") == 1

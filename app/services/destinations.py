@@ -176,6 +176,67 @@ def migrate_settings() -> bool:
 	return True
 
 
+# ── a network set up later, through its old Settings section ─────────────────
+# The migration ran once, with the keys of that day; a target typed into an old field afterwards (the Telegram
+# chat id, the Discord webhook, "Use as RU/EN" for a Page, the subreddit) must still reach a destination. The
+# slot each old key fills: (destination id, module, language, linked fields, extra).
+_SLOTS = {
+	"tg_chat_id_ru": ("telegram-ru", "telegram", "ru", {"chat_id": "tg_chat_id_ru"}, {}),
+	"discord_webhook_url": ("discord", "discord", "en", {"webhook": "discord_webhook_url"}, {}),
+	"discord_webhook_ru": ("discord-ru", "discord", "ru", {"webhook": "discord_webhook_ru"},
+						   {"skip_without_text": True}),
+	"discord_webhook_en": ("discord-en", "discord", "en", {"webhook": "discord_webhook_en"},
+						   {"skip_without_text": True}),
+	"reddit_subreddit_en": ("reddit-en", "reddit", "en", {"subreddit": "reddit_subreddit_en"}, {}),
+	"reddit_subreddit_ru": ("reddit-ru", "reddit", "ru", {"subreddit": "reddit_subreddit_ru"}, {}),
+	**{f"fb_{lang}_{part}": (f"facebook-{lang}", "facebook", lang,
+							 {"page_id": f"fb_{lang}_page_id", "page_token": f"fb_{lang}_page_access_token"}, {})
+	   for lang in ("ru", "en") for part in ("page_id", "page_access_token")},
+}
+
+
+def adopt_keys(before: dict, cfg: Optional[dict] = None) -> list[str]:
+	"""After an old Settings section saved: every slot key that got a new value and that no destination is
+	linked to gets the destination the migration would have made of it (linked to the key; in the first
+	language when the slot's isn't in Settings). Not when a destination already goes to that very target. → the
+	ids added. Before the migration ran nothing is stored, and the destinations come from the keys anyway."""
+	from app.services.settings import save_settings
+	cfg = _cfg(cfg)
+	raw = cfg.get(SETTINGS_KEY)
+	if not isinstance(raw, list):
+		return []
+	langs = languages.configured(cfg)
+	dests = stored(cfg)
+	out, added = list(raw), []
+	for key, (did, module, lang, linked, extra) in _SLOTS.items():
+		value = str(cfg.get(key) or "").strip()
+		if not value or value == str(before.get(key) or "").strip():
+			continue  # not set, or saved again as it was
+		if any(key in d["linked"].values() for d in dests):
+			continue  # its destination is there: it reads the new value already
+		field = next(f for f, k in linked.items() if k == key)
+		if any(d["module"] == module and resolve(d, cfg)["target"].get(field) == value for d in dests):
+			continue
+		taken = {d["id"] for d in dests}
+		dest = _dest(did if did not in taken else _new_id(module, lang, taken), module,
+					 lang if lang in langs else langs[0], linked, platform=KINDS[module].platform_for(lang), **extra)
+		out.append(dest)
+		dests.append(_clean(dest, langs))
+		added.append(dest["id"])
+	if added:
+		save_settings({SETTINGS_KEY: out})
+		logger.info(f"destinations: set up through the old Settings fields: {', '.join(added)}")
+	return added
+
+
+def save_keys(updates: dict) -> list[str]:
+	"""save_settings for an old Settings section, then adopt_keys: what it set up reaches a destination."""
+	from app.services.settings import load_settings, save_settings
+	before = load_settings()
+	save_settings(updates)
+	return adopt_keys(before)
+
+
 # ── reading ──────────────────────────────────────────────────────────────────
 
 def _clean(raw, langs: list[str]) -> Optional[dict]:
