@@ -14,6 +14,11 @@ from loguru import logger
 def main() -> None:
 	setup_logging()
 	logger.info("Huey worker starting...")
+	# The worker may start before the server's lifespan migration has run, and the
+	# models it loads expect the new columns (e.g. posts.overrides_json).
+	from app.db.session import create_db_and_tables, migrate_db
+	create_db_and_tables()
+	migrate_db()
 	consumer = Consumer(huey, workers=1, periodic=True)
 
 	def _stop_gracefully() -> None:

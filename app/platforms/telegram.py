@@ -16,7 +16,8 @@ def publish(session, post, job) -> Optional[str]:
         cfg = load_settings()
         bot = (cfg.get('tg_bot_token') or '').strip()
         chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
-        brief = session.get(Brief, post.brief_id)
+        from app.platforms.common import brief_for_publish
+        brief = brief_for_publish(session, post)
         if not (bot and chat_id and brief):
             raise RuntimeError('tg_not_configured')
         # No hashtags on Telegram — post the body text as-is, keeping its formatting.

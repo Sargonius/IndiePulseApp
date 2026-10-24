@@ -13,8 +13,14 @@
           {% endif %}
         </div>
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:700; font-size:15px;">{{ p.name }}</div>
-          <div class="muted" style="font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ p.tags_json or '—' }}</div>
+          <div style="font-weight:700; font-size:15px;">
+            {{ p.name }}
+            {% if p.stage_label %}<span class="stage-badge" style="margin-left:6px;">{{ p.stage_label }}</span>{% endif %}
+            {% if p.status != 'active' %}<span class="goal-badge" style="margin-left:4px;">{{ statuses[p.status] }}</span>{% endif %}
+          </div>
+          <div class="muted" style="font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            {% if p.steam_app_id %}Steam {{ p.steam_app_id }} · {% endif %}{{ p.tags_json or '—' }}
+          </div>
         </div>
         <div style="display:flex; gap:8px; flex-shrink:0;">
           <button class="btn btn-sm" onclick="toggleProjectEdit({{ p.id }})">Edit</button>
@@ -22,7 +28,7 @@
                   hx-post="/api/projects/{{ p.id }}/delete"
                   hx-target="#projects_list"
                   hx-swap="outerHTML"
-                  hx-confirm="Delete project '{{ p.name }}'?">Delete</button>
+                  hx-confirm="Delete project “{{ p.name }}”?">Delete</button>
         </div>
       </div>
       <!-- Edit mode (hidden) -->
@@ -36,38 +42,57 @@
             <input type="text" name="name" value="{{ p.name }}" style="max-width:320px;" />
           </div>
           <div class="form-group" style="margin-bottom:10px;">
-            <label style="font-size:13px;">Default Tags</label>
+            <label style="font-size:13px;">Default tags</label>
             <input type="text" name="tags_json" value="{{ p.tags_json }}" style="max-width:480px;" placeholder="#Gamedev #Indie" />
           </div>
+          <div class="row" style="margin-bottom:10px; gap:12px; align-items:flex-end;">
+            <div class="form-group">
+              <label style="font-size:13px;">Steam App ID</label>
+              <input type="text" name="steam_app_id" value="{{ p.steam_app_id or '' }}" placeholder="1156500 or link" style="width:200px;" />
+            </div>
+            <div class="form-group">
+              <label style="font-size:13px;">Stage</label>
+              <select name="stage">
+                <option value="">—</option>
+                {% for key, label in stages.items() %}<option value="{{ key }}" {% if p.stage == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label style="font-size:13px;">Status</label>
+              <select name="status">
+                {% for key, label in statuses.items() %}<option value="{{ key }}" {% if p.status == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
           <div class="form-group" style="margin-bottom:10px;">
-            <label style="font-size:13px;">Replace Icon (leave empty to keep current)</label>
+            <label style="font-size:13px;">Replace icon (leave empty to keep the current one)</label>
             {% if p.icon_url %}
               <div style="margin-bottom:6px;"><img src="{{ p.icon_url }}" style="width:36px; height:36px; border-radius:6px; object-fit:cover;" /></div>
             {% endif %}
             <input type="file" name="icon" accept="image/*" />
           </div>
           <div class="form-group" style="margin-bottom:10px;">
-            <label style="font-size:13px;">Sort Order</label>
+            <label style="font-size:13px;">Sort order</label>
             <input type="number" name="sort_order" value="{{ p.sort_order }}" style="width:80px;" />
           </div>
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:13px;">Platform Overrides (JSON, advanced)</label>
+            <label style="font-size:13px;">Platform overrides (JSON, advanced)</label>
             <textarea name="platforms_json" rows="3"
                       style="max-width:480px; font-family:monospace; font-size:12px;">{{ p.platforms_json }}</textarea>
           </div>
           <details style="margin-bottom:12px;">
-            <summary style="cursor:pointer; font-weight:600; font-size:13px;">🎞️ Пресет рендера шортсов</summary>
+            <summary style="cursor:pointer; font-weight:600; font-size:13px;">🎞️ Shorts render preset</summary>
             <div style="padding-top:8px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-width:480px;">
-              <div class="form-group"><label style="font-size:12px;">Площадки</label>
+              <div class="form-group"><label style="font-size:12px;">Networks</label>
                 <input type="text" name="platforms_csv" value="{{ p.platforms_csv or '' }}" placeholder="yt,tiktok,ig_reels" /></div>
-              <div class="form-group"><label style="font-size:12px;">Музыка</label>
-                <select class="preset-music" name="music_path" data-current="{{ p.music_path or '' }}"><option value="">Без музыки</option></select></div>
-              <div class="form-group"><label style="font-size:12px;">Кроп X %</label><input type="number" name="crop_x" value="{{ p.crop_x if p.crop_x is not none else 50 }}" /></div>
-              <div class="form-group"><label style="font-size:12px;">Кроп Y %</label><input type="number" name="crop_y" value="{{ p.crop_y if p.crop_y is not none else 50 }}" /></div>
-              <div class="form-group"><label style="font-size:12px;">Зум ×</label><input type="number" name="crop_scale" value="{{ p.crop_scale if p.crop_scale is not none else 1.0 }}" step="0.1" /></div>
-              <div class="form-group"><label style="font-size:12px;">Смещение, с</label><input type="number" name="music_offset_sec" value="{{ p.music_offset_sec if p.music_offset_sec is not none else 0 }}" /></div>
-              <div class="form-group"><label style="font-size:12px;">Fade in, мс</label><input type="number" name="fade_in_ms" value="{{ p.fade_in_ms if p.fade_in_ms is not none else 0 }}" /></div>
-              <div class="form-group"><label style="font-size:12px;">Fade out, мс</label><input type="number" name="fade_out_ms" value="{{ p.fade_out_ms if p.fade_out_ms is not none else 0 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Music</label>
+                <select class="preset-music" name="music_path" data-current="{{ p.music_path or '' }}"><option value="">No music</option></select></div>
+              <div class="form-group"><label style="font-size:12px;">Crop X %</label><input type="number" name="crop_x" value="{{ p.crop_x if p.crop_x is not none else 50 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Crop Y %</label><input type="number" name="crop_y" value="{{ p.crop_y if p.crop_y is not none else 50 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Zoom ×</label><input type="number" name="crop_scale" value="{{ p.crop_scale if p.crop_scale is not none else 1.0 }}" step="0.1" /></div>
+              <div class="form-group"><label style="font-size:12px;">Offset, s</label><input type="number" name="music_offset_sec" value="{{ p.music_offset_sec if p.music_offset_sec is not none else 0 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Fade in, ms</label><input type="number" name="fade_in_ms" value="{{ p.fade_in_ms if p.fade_in_ms is not none else 0 }}" /></div>
+              <div class="form-group"><label style="font-size:12px;">Fade out, ms</label><input type="number" name="fade_out_ms" value="{{ p.fade_out_ms if p.fade_out_ms is not none else 0 }}" /></div>
             </div>
           </details>
           <div style="display:flex; gap:8px;">

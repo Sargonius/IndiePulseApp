@@ -2,7 +2,7 @@
 
 No console windows: it makes sure .venv exists with the required packages, then runs
 the tray app (app/desktop/tray.py), which starts the server and the worker.
-`--background` = don't open the browser (used by "Запускать при входе в Windows").
+`--background` = don't open the browser (used by "Start at Windows sign-in").
 """
 import subprocess
 import sys
@@ -29,14 +29,14 @@ def _tray_importable() -> bool:
 def main() -> None:
 	first_run = not deps.venv_python().exists()
 	if first_run:
-		_message("Первый запуск IndiePulse: установлю зависимости (пара минут).\n"
-				 "Когда всё будет готово, появится значок в трее и откроется браузер.")
+		_message("First IndiePulse launch: installing dependencies (a couple of minutes).\n"
+				 "When it’s done, an icon appears in the tray and the browser opens.")
 	deps.ensure_venv()
 	# The tray syncs requirements itself (with a status in the icon); here only make
 	# sure it can start at all.
 	if deps.requirements_changed() and not _tray_importable():
 		if not deps.install_requirements(ROOT / "logs" / "pip.log"):
-			_message("Не удалось установить зависимости. Подробности: logs\\pip.log")
+			_message("Couldn’t install dependencies. Details: logs\\pip.log")
 			sys.exit(1)
 
 	if Path(sys.prefix).resolve() == (ROOT / ".venv").resolve():

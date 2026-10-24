@@ -40,22 +40,23 @@ def console_links(client_id: str) -> dict:
 def auth_reason(error: str) -> str:
     """Human wording for a yt_refresh_failed error."""
     if "invalid_grant" in error:
-        return "refresh token протух или отозван (invalid_grant)"
+        return "the refresh token expired or was revoked (invalid_grant)"
     if "invalid_client" in error:
-        return "Client ID или Client Secret не подходят (invalid_client) — проверь шаг 2"
+        return "the Client ID or Client Secret is wrong (invalid_client) — check step 2"
     if "unauthorized_client" in error:
-        return "этот OAuth-клиент не может выдавать такие токены (unauthorized_client) — проверь шаг 2"
+        return "this OAuth client can’t issue these tokens (unauthorized_client) — check step 2"
     return error
 
 
 def fmt_when(ts) -> str:
-    """Local 'dd.mm HH:MM' for a unix timestamp or a naive-UTC ISO string."""
+    """Local 'Oct 4, 14:30' for a unix timestamp or a naive-UTC ISO string."""
     try:
         if isinstance(ts, str):
             dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
         else:
             dt = datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        return dt.astimezone().strftime("%d.%m %H:%M")
+        loc = dt.astimezone()
+        return f"{loc:%b} {loc.day}, {loc:%H:%M}"
     except (TypeError, ValueError, OverflowError, OSError):
         return ""
 
@@ -88,12 +89,16 @@ def metrics_summary(session) -> dict:
 
 
 def left_text(seconds: int) -> str:
-    """'6 дн. 23 ч' / '5 ч 12 мин' / '40 мин'."""
+    """'6 d 23 h' / '5 h 12 min' / '40 min'."""
     minutes = max(0, int(seconds)) // 60
     days, hours, mins = minutes // 1440, minutes % 1440 // 60, minutes % 60
     if days:
-        return f"{days} дн. {hours} ч"
-    return f"{hours} ч {mins} мин" if hours else f"{mins} мин"
+        return f"{days} d {hours} h"
+    return f"{hours} h {mins} min" if hours else f"{mins} min"
+
+
+def _videos(n: int) -> str:
+    return "video" if n == 1 else "videos"
 
 
 def _client_problem(error: str) -> bool:
@@ -143,87 +148,87 @@ def setup_state(cfg: dict, metrics: dict, now: float | None = None) -> dict:
     error_at = conn["error_at"]
     connected_at = int(cfg.get("yt_connected_at") or 0)
     expires_at = conn["expires_at"]
-    until = f"{fmt_when(expires_at)} (осталось {conn['left']})" if expires_at else ""
+    until = f"{fmt_when(expires_at)} ({conn['left']} left)" if expires_at else ""
     channel = s("yt_channel")
     last_metric_error = metrics.get("error") or ""
 
     # 1. YouTube Data API v3 enabled
     if "accessNotConfigured" in last_metric_error or "SERVICE_DISABLED" in last_metric_error:
-        api = _step("error", "API выключен — Google отвечает accessNotConfigured")
+        api = _step("error", "API is disabled — Google answers accessNotConfigured")
     elif metrics.get("ok") or channel:
-        api = _step("done", "работает")
+        api = _step("done", "working")
     else:
-        api = _step("unknown", "проверится после подключения")
+        api = _step("unknown", "checked once you connect")
 
     # 2. OAuth client
-    client = (_step("done", "Client ID и Client Secret сохранены") if client_ok
-              else _step("todo", "заполни Client ID и Client Secret слева и нажми Save"))
+    client = (_step("done", "Client ID and Client Secret saved") if client_ok
+              else _step("todo", "fill in Client ID and Client Secret on the left and click Save"))
 
     # 3. App published (In production) — optional: staying in Testing only means a
     #    reconnect every 7 days, which IndiePulse reminds about
     lived = error_at - connected_at if (error_at and connected_at) else 0
     if expires_at or (error and 6 * DAY <= lived <= 8 * DAY):
-        publish = _step("optional", "не обязательно: приложение в Testing — токен живёт 7 дней, "
-                                    "переподключай раз в неделю (IndiePulse напомнит)")
+        publish = _step("optional", "optional: the app is in Testing — the token lives 7 days, "
+                                    "reconnect once a week (IndiePulse will remind you)")
     elif connected and not error and connected_at and now - connected_at > TESTING_TOKEN_DAYS * DAY:
-        publish = _step("done", "проверено: токен живёт дольше 7 дней")
+        publish = _step("done", "verified: the token lives longer than 7 days")
     elif "invalid_grant" in error:
-        publish = _step("optional", "не обязательно: если приложение в Testing, токен живёт 7 дней — "
-                                    "переподключай раз в неделю")
+        publish = _step("optional", "optional: if the app is in Testing, the token lives 7 days — "
+                                    "reconnect once a week")
     else:
-        publish = _step("unknown", "автоматически не проверить; в Testing просто переподключай раз в неделю")
+        publish = _step("unknown", "can’t be checked automatically; in Testing just reconnect once a week")
 
     # 4. Channel connected, token refreshes
-    who = f"канал «{channel}»" if channel else ""
+    who = f"channel “{channel}”" if channel else ""
     if conn["state"] == "off":
-        connect = _step("todo", "ещё не подключено")
+        connect = _step("todo", "not connected yet")
     elif conn["state"] == "error":
-        since = f" (с {fmt_when(error_at)})" if error_at else ""
+        since = f" (since {fmt_when(error_at)})" if error_at else ""
         connect = _step("error", f"{auth_reason(error)}{since}")
     elif conn["state"] == "expired":
-        connect = _step("error", f"токен истёк {fmt_when(expires_at)} — переподключи")
+        connect = _step("error", f"token expired on {fmt_when(expires_at)} — reconnect")
     elif conn["state"] == "expiring":
-        connect = _step("warn", f"токен истекает через {conn['left']} ({fmt_when(expires_at)}) — переподключи")
+        connect = _step("warn", f"token expires in {conn['left']} ({fmt_when(expires_at)}) — reconnect")
     elif expires_at:
-        connect = _step("done", f"работает до {until}" + (f", {who}" if who else ""))
+        connect = _step("done", f"working until {until}" + (f", {who}" if who else ""))
     else:
-        parts = [p for p in (who, f"подключено {fmt_when(connected_at)}" if connected_at else "") if p]
-        connect = _step("done", "работает" + (": " + ", ".join(parts) if parts else ""))
+        parts = [p for p in (who, f"connected {fmt_when(connected_at)}" if connected_at else "") if p]
+        connect = _step("done", "working" + (": " + ", ".join(parts) if parts else ""))
 
     # 5. Stats are flowing
     total, ok, failed = metrics.get("total", 0), metrics.get("ok", 0), metrics.get("failed", 0)
-    checked = f", последняя проверка {fmt_when(metrics['checked_at'])}" if metrics.get("checked_at") else ""
+    checked = f", last checked {fmt_when(metrics['checked_at'])}" if metrics.get("checked_at") else ""
     if not total:
-        stats = _step("unknown", "пока нет опубликованных видео")
+        stats = _step("unknown", "no published videos yet")
     elif conn["state"] in ("error", "expired"):
-        stats = _step("error", f"не собирается, пока не починен шаг 4 ({ok} из {total} видео со статистикой)")
+        stats = _step("error", f"not collected until step 4 is fixed ({ok} of {total} {_videos(total)} have stats)")
     elif failed:
-        stats = _step("error", f"{failed} из {total} видео с ошибкой{checked}")
+        stats = _step("error", f"{failed} of {total} {_videos(total)} failed{checked}")
     elif ok == total:
-        stats = _step("done", f"{total} видео со статистикой{checked}")
+        stats = _step("done", f"{total} {_videos(total)} with stats{checked}")
     else:
-        stats = _step("todo", f"{ok} из {total} видео со статистикой — остальные подтянутся в течение 30 минут")
+        stats = _step("todo", f"{ok} of {total} {_videos(total)} have stats — the rest will arrive within 30 min")
 
     # Verdict on top of the checklist
     state = conn["state"]
     if not (client_ok or connected):
-        overall = _step("todo", "YouTube не подключён — пройди шаги 1–4 по порядку.")
+        overall = _step("todo", "YouTube isn’t connected — go through steps 1–4 in order.")
     elif state == "error":
-        fix = "проверь Client ID и Secret (шаг 2)" if _client_problem(error) else "переподключи (шаг 4)"
-        overall = _step("error", f"YouTube сейчас не работает: {auth_reason(error)}. "
-                                 f"Загрузки на YouTube и статистика стоят — {fix}.")
+        fix = "check the Client ID and Secret (step 2)" if _client_problem(error) else "reconnect (step 4)"
+        overall = _step("error", f"YouTube isn’t working right now: {auth_reason(error)}. "
+                                 f"YouTube uploads and stats are on hold — {fix}.")
     elif state == "expired":
-        overall = _step("error", f"Токен YouTube истёк {fmt_when(expires_at)} — загрузки и статистика стоят. "
-                                 "Переподключи (шаг 4).")
+        overall = _step("error", f"The YouTube token expired on {fmt_when(expires_at)} — uploads and stats are on hold. "
+                                 "Reconnect (step 4).")
     elif state == "expiring":
-        overall = _step("warn", f"Токен YouTube истекает через {conn['left']} ({fmt_when(expires_at)}) — "
-                                "переподключи (шаг 4), иначе загрузки и статистика остановятся.")
+        overall = _step("warn", f"The YouTube token expires in {conn['left']} ({fmt_when(expires_at)}) — "
+                                "reconnect (step 4), or uploads and stats will stop.")
     elif not connected:
-        overall = _step("todo", "Осталось подключить канал — шаг 4.")
+        overall = _step("todo", "Only the channel is left to connect — step 4.")
     else:
-        overall = _step("done", "YouTube работает" + (f": канал «{channel}»." if channel else ".")
-                        + (f" Токен до {until} — за {EXPIRY_WARN_DAYS} дня IndiePulse напомнит переподключиться."
-                           if expires_at else ""))
+        overall = _step("done", "YouTube is working" + (f": channel “{channel}”." if channel else ".")
+                        + (f" Token valid until {until} — IndiePulse will remind you to reconnect "
+                           f"{EXPIRY_WARN_DAYS} days ahead." if expires_at else ""))
 
     return {"overall": overall, "steps": {"api": api, "client": client, "publish": publish,
                                           "connect": connect, "stats": stats},
@@ -236,21 +241,21 @@ def alert(cfg: dict, now: float | None = None) -> dict | None:
     conn = connection(cfg, now)
     state, exp = conn["state"], conn["expires_at"]
     if state == "error":
-        since = f" с {fmt_when(conn['error_at'])}" if conn["error_at"] else ""
-        text = (f"YouTube отключён{since}: {auth_reason(conn['error'])}. "
-                "Загрузки на YouTube и статистика не работают.")
+        since = f" (since {fmt_when(conn['error_at'])})" if conn["error_at"] else ""
+        text = (f"YouTube is disconnected{since}: {auth_reason(conn['error'])}. "
+                "YouTube uploads and stats aren’t working.")
     elif state == "expired":
-        text = f"Токен YouTube истёк {fmt_when(exp)} — загрузки на YouTube и статистика остановились."
+        text = f"The YouTube token expired on {fmt_when(exp)} — YouTube uploads and stats have stopped."
     elif state == "expiring":
-        text = (f"Токен YouTube истекает через {conn['left']} ({fmt_when(exp)}) — переподключи, "
-                "иначе загрузки на YouTube и статистика остановятся.")
+        text = (f"The YouTube token expires in {conn['left']} ({fmt_when(exp)}) — reconnect, "
+                "or YouTube uploads and stats will stop.")
     else:
         return None  # ok, or YouTube isn't used at all: nothing to nag about
     return {"level": "warn" if state == "expiring" else "error", "text": text, "reconnect": conn["reconnect"]}
 
 
 TRAY_REMIND_BEFORE = DAY  # the tray balloon comes on the last day, the page banner earlier
-_TRAY_HOW = "Правый клик по значку IndiePulse → «YouTube: переподключить»."
+_TRAY_HOW = "Right-click the IndiePulse tray icon → “YouTube: reconnect”."
 
 
 def tray_reminder(cfg: dict, now: float | None = None) -> tuple[str, str] | None:
@@ -261,11 +266,11 @@ def tray_reminder(cfg: dict, now: float | None = None) -> tuple[str, str] | None
     conn = connection(cfg, now)
     state, exp = conn["state"], conn["expires_at"]
     if state in ("error", "expired"):
-        how = _TRAY_HOW if conn["reconnect"] else "Открой настройки YouTube — Client ID / Secret не подходят."
+        how = _TRAY_HOW if conn["reconnect"] else "Open the YouTube settings — the Client ID / Secret is wrong."
         return (f"off:{conn['error_at'] or exp}",
-                f"YouTube отключён — загрузки и статистика стоят. {how}")
+                f"YouTube is disconnected — uploads and stats are on hold. {how}")
     if state == "expiring" and exp - now <= TRAY_REMIND_BEFORE:
-        return (f"soon:{exp}", f"Токен YouTube истекает {fmt_when(exp)} (через {conn['left']}). {_TRAY_HOW}")
+        return (f"soon:{exp}", f"The YouTube token expires on {fmt_when(exp)} (in {conn['left']}). {_TRAY_HOW}")
     return None
 
 
@@ -275,7 +280,7 @@ def tray_menu_label(cfg: dict, now: float | None = None) -> str:
     if conn["state"] == "off":
         return ""
     if conn["state"] in ("error", "expired"):
-        return "⚠ YouTube отключён — переподключить"
+        return "⚠ YouTube disconnected — reconnect"
     if conn["expires_at"]:
-        return f"YouTube: переподключить (токен до {fmt_when(conn['expires_at'])})"
-    return "YouTube: переподключить"
+        return f"YouTube: reconnect (token expires {fmt_when(conn['expires_at'])})"
+    return "YouTube: reconnect"

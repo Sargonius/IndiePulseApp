@@ -13,6 +13,10 @@ from app.routers.api.common import templates_api
 router = APIRouter()
 
 
+GROUPS = 50          # publications in the table
+METRIC_KEYS = ('m_like', 'm_repost', 'm_reply', 'm_views', 'm_total')
+
+
 def _analytics_rows(session):
     """The 100 newest posts, minus IG/TikTok drafts left in the platform's inbox
     ('awaiting_finish') — those never actually went out."""
@@ -24,43 +28,108 @@ def _analytics_rows(session):
     ).all()
 
 
+def _groups(session):
+    """The newest publications (a Brief and all its posts), newest first. Each has the
+    per-network rows (best performer first) and their counters summed."""
+    from sqlalchemy import func
+    from sqlmodel import select
+    from app.models.models import Brief, Post, PostStatusEnum, Project
+    from app.routers.pages import _enrich_posts
+    from app.services import marketing as mk
+    shown = Post.status != PostStatusEnum.awaiting_finish
+    brief_ids = session.exec(
+        select(Post.brief_id).where(shown).group_by(Post.brief_id)
+        .order_by(func.max(Post.created_at).desc()).limit(GROUPS)
+    ).all()
+    if not brief_ids:
+        return []
+    posts = session.exec(select(Post).where(shown, Post.brief_id.in_(brief_ids))).all()
+    briefs = {b.id: b for b in session.exec(select(Brief).where(Brief.id.in_(brief_ids))).all()}
+    projects = {p.id: p.name for p in session.exec(select(Project)).all()}
+    rows_by_brief = {}
+    for row in _enrich_posts(posts):
+        rows_by_brief.setdefault(row['brief_id'], []).append(row)
+    order = {'done': 0, 'running': 1, 'queued': 2}
+    groups = []
+    for bid in brief_ids:
+        rows = rows_by_brief.get(bid) or []
+        brief = briefs.get(bid)
+        if not rows or brief is None:
+            continue
+        rows.sort(key=lambda r: (order.get(r['status_text'], 3), -(r['m_total'] or 0), -(r['m_views'] or 0), r['id']))
+        sums = {k: None for k in METRIC_KEYS}
+        for r in rows:
+            for k in METRIC_KEYS:
+                if r[k] is not None:
+                    sums[k] = (sums[k] or 0) + r[k]
+        counts = {}
+        for r in rows:
+            counts[r['status_text']] = counts.get(r['status_text'], 0) + 1
+        published = [r['published_at'] for r in rows if r['published_at']]
+        first = rows[0]
+        groups.append({
+            'brief_id': bid,
+            'title': mk._brief_title(brief),
+            'preview': first['preview'],
+            'project': projects.get(brief.project_id) if brief.project_id else None,
+            'thumb_url': first['thumb_url'],
+            'thumb_is_video': first['thumb_is_video'],
+            'is_short': first['is_short'],
+            'posts': rows,
+            'counts': counts,
+            'published_at': min(published) if published else None,
+            'has_metrics': any(r['has_metrics'] for r in rows),
+            'metric_errors': sum(1 for r in rows if r['m_error']),
+            **sums,
+        })
+    return groups
+
+
 @router.get("/analytics/table", response_class=HTMLResponse)
 def analytics_table(request: Request, session: Session = Depends(get_session)):
-    rows = _analytics_rows(session)
-    # Reuse pages enrichment to attach preview/thumb and mapped metrics
-    try:
-        from app.routers.pages import _enrich_posts as _ep
-        data = _ep(rows)
-    except Exception:
-        data = []
-    return templates_api.TemplateResponse('partials/analytics_table.html', {'request': request, 'posts': data})
+    return templates_api.TemplateResponse('partials/analytics_table.html',
+                                          {'request': request, 'groups': _groups(session)})
+
+
+def _refresh_posts(posts):
+    """Refresh metrics synchronously so the re-rendered table shows fresh numbers."""
+    from app.models.models import PostStatusEnum
+    from app.platforms import platform_key
+    from app.jobs.tasks import refresh_metrics_for_post as _refresh, refresh_youtube_metrics
+    # Published YouTube videos go in one batched videos.list call instead of one each
+    yt_ids = [p.id for p in posts if platform_key(p.platform) == 'yt'
+              and p.status == PostStatusEnum.done and p.platform_post_id]
+    if yt_ids:
+        try:
+            refresh_youtube_metrics.call_local(yt_ids)
+        except Exception:
+            pass
+    for p in posts:
+        if p.id in yt_ids:
+            continue
+        try:
+            _refresh.call_local(p.id)
+        except Exception:
+            pass
 
 
 @router.post("/analytics/refresh", response_class=HTMLResponse)
 def analytics_refresh(request: Request, session: Session = Depends(get_session)):
-    from app.models.models import PostStatusEnum
-    from app.platforms import platform_key
-    rows = _analytics_rows(session)
-    # Published YouTube videos go in one batched videos.list call instead of one each
-    yt_ids = [p.id for p in rows if platform_key(p.platform) == 'yt'
-              and p.status == PostStatusEnum.done and p.platform_post_id]
-    ids = [p.id for p in rows if p.id not in yt_ids]
-    # Run metrics refresh synchronously
-    try:
-        from app.jobs.tasks import refresh_metrics_for_post as _refresh, refresh_youtube_metrics
-        if yt_ids:
-            try:
-                refresh_youtube_metrics.call_local(yt_ids)
-            except Exception:
-                pass
-        for pid in ids:
-            try:
-                _refresh.call_local(pid)
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # Return fresh table
+    _refresh_posts(_analytics_rows(session))
+    session.expire_all()  # the refresh wrote through other sessions
+    return analytics_table(request, session)
+
+
+@router.post("/analytics/refresh_brief", response_class=HTMLResponse)
+def analytics_refresh_brief(request: Request, id: Optional[int] = Form(None), session: Session = Depends(get_session)):
+    """Refresh every network of one publication."""
+    from sqlmodel import select
+    from app.models.models import Post, PostStatusEnum
+    if not id:
+        return HTMLResponse("<span style='color:red'>missing_id</span>", status_code=400)
+    _refresh_posts(session.exec(select(Post).where(
+        Post.brief_id == id, Post.status != PostStatusEnum.awaiting_finish)).all())
+    session.expire_all()
     return analytics_table(request, session)
 
 

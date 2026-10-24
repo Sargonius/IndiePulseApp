@@ -14,7 +14,8 @@ def publish(session, post, job) -> Optional[str]:
     from app.services.settings import load_settings
     from loguru import logger as _logger
     cfg = load_settings()
-    brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     media_rel = None
     try:
         import json as _json
@@ -111,8 +112,8 @@ def publish(session, post, job) -> Optional[str]:
         post.status = PostStatusEnum.error
         err_text = str(exc)
         if 'invalid_grant' in err_text:
-            err_text = ("yt_reauth_needed: refresh token протух/отозван — "
-                        "нажми Connect YouTube в настройках аккаунтов. " + err_text)
+            err_text = ("yt_reauth_needed: refresh token expired/revoked — "
+                        "click Connect YouTube in Settings. " + err_text)
         post.error_text = err_text
         if job is not None:
             job.status = JobStatusEnum.error

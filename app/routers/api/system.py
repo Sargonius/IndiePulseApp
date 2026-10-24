@@ -15,7 +15,7 @@ router = APIRouter()
 
 def _render_autoreload_button_html(enabled: bool) -> str:
     cls = "icon-btn" + (" active" if enabled else "")
-    title = "Автообновление включено" if enabled else "Включить автообновление"
+    title = "Auto-reload is on" if enabled else "Turn on auto-reload"
     # Render two controls inside the fixed wrapper span (#nav_ar_btn):
     # 1) Autoreload toggle button
     # 2) Restart button that triggers full app restart
@@ -23,7 +23,7 @@ def _render_autoreload_button_html(enabled: bool) -> str:
         f"<div class=\"row\" style=\"gap:6px;flex-wrap:nowrap;\">"
         f"<button class=\"{cls}\" title=\"{title}\" "
         f"hx-post=\"/api/system/toggle_autoreload\" hx-target=\"#nav_ar_btn\" hx-swap=\"innerHTML\">↻</button>"
-        f"<button class=\"icon-btn\" title=\"Перезапустить приложение\" "
+        f"<button class=\"icon-btn\" title=\"Restart the app\" "
         f"hx-post=\"/api/system/restart\" hx-target=\"#nav_ar_btn\" hx-swap=\"innerHTML\">⟲</button>"
         f"</div>"
     )
@@ -36,13 +36,13 @@ def system_restart():
     from app.desktop import RESTART_REQUEST_FILE, is_supervised
     if not is_supervised():
         return HTMLResponse(
-            "<span style='color:red'>Перезапуск работает, когда IndiePulse запущен через IndiePulse.pyw (значок в трее)</span>",
+            "<span style='color:red'>Restart works only when IndiePulse runs via IndiePulse.pyw (tray icon)</span>",
             status_code=409)
     try:
         RESTART_REQUEST_FILE.touch()
     except OSError as exc:
         return HTMLResponse(f"<span style='color:red'>Restart failed: {_e(str(exc))}</span>", status_code=500)
-    return HTMLResponse("<span style='color:orange'>Перезапуск…</span>")
+    return HTMLResponse("<span style='color:orange'>Restarting…</span>")
 
 
 @router.post("/system/toggle_autoreload")
@@ -119,8 +119,12 @@ def save_settings_endpoint(
 	tg_chat_id_ru: str = Form(""),
 	# Discord (bot token for reading message reactions into analytics)
 	discord_bot_token: str = Form(""),
-	# UI
-	ui_language: str = Form(""),
+	discord_guild_id: str = Form(""),
+	# Steamworks Financial API key (wishlist + sales reports)
+	steam_financial_api_key: str = Form(""),
+	# Video editor: music folders (one per line) + Discord file limit
+	music_dir: str = Form(""),
+	discord_upload_limit_mb: str = Form(""),
 ):
 	# Only update keys that are non-empty to avoid wiping other settings
 	updates = {}
@@ -211,11 +215,18 @@ def save_settings_endpoint(
 		updates["tg_chat_id_ru"] = tg_chat_id_ru.strip()
 	if discord_bot_token.strip():
 		updates["discord_bot_token"] = discord_bot_token.strip()
-	# UI language
-	if ui_language.strip():
-		lang = ui_language.strip().lower()
-		if lang in ("en", "ru"):
-			updates["ui_language"] = lang
+	if discord_guild_id.strip():
+		updates["discord_guild_id"] = discord_guild_id.strip()
+	if steam_financial_api_key.strip():
+		updates["steam_financial_api_key"] = steam_financial_api_key.strip()
+	if music_dir.strip():
+		dirs = [d.strip().strip('"') for d in music_dir.replace(";", "\n").splitlines()]
+		updates["music_dir"] = "\n".join(d for d in dirs if d)
+	if discord_upload_limit_mb.strip():
+		try:
+			updates["discord_upload_limit_mb"] = max(1, min(500, int(float(discord_upload_limit_mb))))
+		except ValueError:
+			pass
 	save_settings(updates)
 	# Ask htmx to reload the page so new values are visible
 	return Response(content="", headers={"HX-Redirect": "/accounts"})
@@ -272,6 +283,8 @@ def settings_status():
         token = (cfg.get('x_access_token') or '').strip()
         if not token:
             return {'status': 'not_configured', 'message': 'No access token'}
+        if cfg.get('x_credits_error_at'):
+            return {'status': 'not_configured', 'message': '💳 Out of X API credits — see on the right'}
         api_key = (cfg.get('x_api_key') or '').strip()
         oauth_token = (cfg.get('x_oauth_token') or '').strip()
         if not (api_key and oauth_token):
@@ -289,13 +302,13 @@ def settings_status():
         from app.services.youtube_setup import connection, fmt_when
         conn = connection(cfg)
         if conn['state'] == 'error':
-            return {'status': 'not_configured', 'message': 'Нужно переподключить — см. шаги справа'}
+            return {'status': 'not_configured', 'message': 'Reconnect needed — see the steps on the right'}
         if conn['state'] == 'expired':
-            return {'status': 'not_configured', 'message': 'Токен истёк — переподключи'}
+            return {'status': 'not_configured', 'message': 'Token expired — reconnect'}
         if conn['state'] == 'expiring':
-            return {'status': 'partial', 'message': f"Токен до {fmt_when(conn['expires_at'])} — переподключи"}
+            return {'status': 'partial', 'message': f"Token valid until {fmt_when(conn['expires_at'])} — reconnect"}
         if conn['expires_at']:
-            return {'status': 'configured', 'message': f"Токен до {fmt_when(conn['expires_at'])}"}
+            return {'status': 'configured', 'message': f"Token valid until {fmt_when(conn['expires_at'])}"}
         return {'status': 'configured', 'message': 'OAuth tokens set'}
     
     def check_facebook():

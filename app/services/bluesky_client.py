@@ -13,6 +13,8 @@ from loguru import logger
 MAX_POST_GRAPHEMES = 300
 MAX_IMAGE_BYTES = 976 * 1024  # ~1MB blob limit, keep margin
 MAX_IMAGES_PER_POST = 4
+VIDEO_SERVICE = "https://video.bsky.app"
+VIDEO_PROCESSING_TIMEOUT_S = 300
 
 
 class BlueskyClient:
@@ -31,6 +33,7 @@ class BlueskyClient:
         self.access_jwt: Optional[str] = None
         self.did: Optional[str] = None
         self.handle: Optional[str] = None
+        self.did_doc: dict = {}
 
     # ── auth ────────────────────────────────────────────────────────────────
     def login(self) -> dict:
@@ -43,6 +46,7 @@ class BlueskyClient:
         self.access_jwt = data.get('accessJwt')
         self.did = data.get('did')
         self.handle = data.get('handle') or self.identifier
+        self.did_doc = data.get('didDoc') or {}
         if not (self.access_jwt and self.did):
             raise RuntimeError(f"Bluesky login failed: {data}")
         return data
@@ -55,29 +59,101 @@ class BlueskyClient:
         return {"Authorization": f"Bearer {self.access_jwt}"}
 
     # ── media ───────────────────────────────────────────────────────────────
-    def upload_image(self, path: str) -> Optional[dict]:
+    def upload_image(self, path: str) -> dict:
         """Upload an image blob, compressing to fit the ~1MB limit.
-        Returns an app.bsky.embed.images image dict, or None on failure."""
+        Returns an app.bsky.embed.images image dict; raises on failure (a post
+        with media must not go out without it)."""
         self._ensure_session()
-        try:
-            data, mime, width, height = self._prepare_image(path)
-        except Exception as exc:
-            logger.error(f"bsky.upload_image prepare failed {path}: {exc}")
-            return None
+        data, mime, width, height = self._prepare_image(path)
         url = f"{self.service}/xrpc/com.atproto.repo.uploadBlob"
         headers = self._headers()
         headers["Content-Type"] = mime
         with httpx.Client(timeout=60) as client:
             r = client.post(url, content=data, headers=headers)
             logger.info(f"bsky.upload_blob status={r.status_code} size={len(data)}")
-            r.raise_for_status()
+            if r.status_code >= 400:
+                raise RuntimeError(f"bluesky image upload HTTP {r.status_code}: {r.text[:300]}")
             blob = (r.json() or {}).get('blob')
         if not blob:
-            return None
+            raise RuntimeError(f"bluesky image upload returned no blob: {os.path.basename(path)}")
         image = {"alt": "", "image": blob}
         if width and height:
             image["aspectRatio"] = {"width": width, "height": height}
         return image
+
+    def _pds_host(self) -> str:
+        """Host of the account's own PDS: the video service uploads the blob there, so the
+        service token's audience is did:web:<that host> (bsky.social is only the entryway)."""
+        from urllib.parse import urlparse
+        for svc in (self.did_doc.get('service') or []):
+            if str(svc.get('id', '')).endswith('#atproto_pds') or svc.get('type') == 'AtprotoPersonalDataServer':
+                host = urlparse(str(svc.get('serviceEndpoint') or '')).hostname
+                if host:
+                    return host
+        if (self.did or '').startswith('did:plc:'):
+            with httpx.Client(timeout=15) as client:
+                r = client.get(f"https://plc.directory/{self.did}")
+            if r.status_code < 400:
+                for svc in (r.json() or {}).get('service') or []:
+                    if str(svc.get('id', '')).endswith('#atproto_pds'):
+                        return urlparse(str(svc.get('serviceEndpoint') or '')).hostname or ''
+        return urlparse(self.service).hostname or ''
+
+    def upload_video(self, path: str) -> dict:
+        """Upload a video through Bluesky's video service and wait until it is processed.
+        Returns an app.bsky.embed.video embed; raises on any failure."""
+        import mimetypes
+        import time
+        self._ensure_session()
+        with httpx.Client(timeout=20) as client:
+            r = client.get(f"{self.service}/xrpc/com.atproto.server.getServiceAuth", headers=self._headers(),
+                           params={"aud": f"did:web:{self._pds_host()}", "lxm": "com.atproto.repo.uploadBlob",
+                                   "exp": int(time.time()) + 30 * 60})
+        if r.status_code >= 400:
+            raise RuntimeError(f"bluesky video auth HTTP {r.status_code}: {r.text[:300]}")
+        video_auth = {"Authorization": f"Bearer {(r.json() or {}).get('token')}"}
+        name = os.path.basename(path)
+        with open(path, 'rb') as fh:
+            data = fh.read()
+        timeout = httpx.Timeout(connect=15, read=120, write=600, pool=30)
+        with httpx.Client(timeout=timeout) as client:
+            r = client.post(f"{VIDEO_SERVICE}/xrpc/app.bsky.video.uploadVideo", params={"did": self.did, "name": name},
+                            content=data,
+                            headers={**video_auth, "Content-Type": mimetypes.guess_type(name)[0] or "video/mp4"})
+        logger.info(f"bsky.video upload status={r.status_code} size={len(data)} body={r.text[:300]}")
+        try:
+            body = r.json() or {}
+        except Exception:
+            body = {}
+        job = body.get('jobStatus') or body
+        # 409 already_exists: this exact file was processed before; the job still has the blob
+        if r.status_code >= 400 and not (r.status_code == 409 and job.get('jobId')):
+            raise RuntimeError(f"bluesky video upload HTTP {r.status_code}: {r.text[:300]}")
+        deadline = time.time() + VIDEO_PROCESSING_TIMEOUT_S
+        with httpx.Client(timeout=20) as client:
+            while not job.get('blob'):
+                if job.get('state') == 'JOB_STATE_FAILED':
+                    raise RuntimeError(f"bluesky video processing failed: {job.get('error') or ''} "
+                                       f"{job.get('message') or ''}".strip())
+                if not job.get('jobId'):
+                    raise RuntimeError(f"bluesky video upload returned no job: {str(body)[:300]}")
+                if time.time() > deadline:
+                    raise RuntimeError(f"bluesky video processing timeout ({job.get('state')}, {job.get('progress')}%)")
+                time.sleep(2)
+                r = client.get(f"{VIDEO_SERVICE}/xrpc/app.bsky.video.getJobStatus",
+                               params={"jobId": job['jobId']}, headers=video_auth)
+                if r.status_code >= 400:
+                    raise RuntimeError(f"bluesky video status HTTP {r.status_code}: {r.text[:300]}")
+                job = (r.json() or {}).get('jobStatus') or {}
+        embed = {"$type": "app.bsky.embed.video", "video": job['blob']}
+        try:
+            from app.services.video_editor import _probe_video_info
+            info = _probe_video_info(path)
+            if info.get('width') and info.get('height'):
+                embed["aspectRatio"] = {"width": info['width'], "height": info['height']}
+        except Exception:
+            pass
+        return embed
 
     @staticmethod
     def _prepare_image(path: str) -> Tuple[bytes, str, int, int]:
@@ -141,8 +217,10 @@ class BlueskyClient:
         reply_root: Optional[dict] = None,
         reply_parent: Optional[dict] = None,
         langs: Optional[list[str]] = None,
+        video_path: Optional[str] = None,
     ) -> Tuple[str, str, str]:
-        """Create a single post. Returns (uri, cid, web_url)."""
+        """Create a single post (a video replaces images: one embed per post).
+        Returns (uri, cid, web_url)."""
         self._ensure_session()
         record: dict = {
             "$type": "app.bsky.feed.post",
@@ -154,13 +232,12 @@ class BlueskyClient:
         facets = self._facets_for(text)
         if facets:
             record["facets"] = facets
-        images = []
-        for p in (image_paths or [])[:MAX_IMAGES_PER_POST]:
-            img = self.upload_image(p)
-            if img:
-                images.append(img)
-        if images:
-            record["embed"] = {"$type": "app.bsky.embed.images", "images": images}
+        if video_path:
+            record["embed"] = self.upload_video(video_path)
+        else:
+            images = [self.upload_image(p) for p in (image_paths or [])[:MAX_IMAGES_PER_POST]]
+            if images:
+                record["embed"] = {"$type": "app.bsky.embed.images", "images": images}
         if reply_parent and reply_root:
             record["reply"] = {"root": reply_root, "parent": reply_parent}
         url = f"{self.service}/xrpc/com.atproto.repo.createRecord"
@@ -182,9 +259,10 @@ class BlueskyClient:
         hashtags: str = '',
         image_paths: Optional[list[str]] = None,
         langs: Optional[list[str]] = None,
+        video_path: Optional[str] = None,
     ) -> Tuple[str, str]:
         """Post text (split into a reply thread if over 300 chars) with optional
-        images on the first post. Hashtags are kept in the first post.
+        images or a video on the first post. Hashtags are kept in the first post.
         Returns (first_uri, first_web_url)."""
         body = (text or '').strip()
         tags = (hashtags or '').strip()
@@ -194,7 +272,7 @@ class BlueskyClient:
         first_text = (chunks[0] + suffix).strip() or tags
         rest = chunks[1:]
 
-        uri, cid, web_url = self.post(first_text, image_paths=image_paths, langs=langs)
+        uri, cid, web_url = self.post(first_text, image_paths=image_paths, langs=langs, video_path=video_path)
         root = {"uri": uri, "cid": cid}
         parent = root
         for chunk in rest:

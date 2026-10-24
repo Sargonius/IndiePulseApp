@@ -2,17 +2,23 @@
 
 import os
 import time
+from typing import Optional
+from app.db.session import get_session
 from app.services.draft_store import save_draft
 from app.services.settings import load_settings
 from app.services.video_editor import _ffmpeg_path
 from app.services.video_editor import install_ffmpeg_win
 from app.services.video_editor import render_vertical_with_music
 from fastapi import APIRouter
+from fastapi import Body
+from fastapi import Depends
 from fastapi import File
 from fastapi import Form
+from fastapi import HTTPException
 from fastapi import Query
 from fastapi import UploadFile
 from fastapi.responses import HTMLResponse
+from sqlmodel import Session
 from app.routers.api.common import _e
 
 router = APIRouter()
@@ -183,44 +189,146 @@ def video_install_ffmpeg():
         return HTMLResponse(f"<span style='color:red'>FFmpeg install failed: {_e(str(exc))}</span>", status_code=500)
 
 
+# Shown when a video has no readable frame (file gone, ffmpeg missing)
+_VIDEO_PLACEHOLDER = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">'
+                      '<rect width="48" height="48" rx="6" fill="#e2e8f0"/>'
+                      '<path d="M19 15v18l14-9z" fill="#64748b"/></svg>')
+
+
+@router.get("/media/poster/{brief_id}")
+def media_poster(brief_id: int, session: Session = Depends(get_session)):
+    """Poster frame of a post's video for the post tables (grabbed on first request)."""
+    from fastapi.responses import FileResponse, Response
+    from app.models.models import Brief
+    from app.services import thumbs
+    brief = session.get(Brief, brief_id)
+    path = thumbs.ensure_poster(brief) if brief is not None else None
+    if path:
+        return FileResponse(path, media_type="image/jpeg")
+    return Response(content=_VIDEO_PLACEHOLDER, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/music/list")
 def music_list():
-    """List all music files in configured music directory with metadata."""
+    """Tracks from every music folder in Settings (subfolders included), with durations."""
+    from app.services import music_library
     try:
         cfg = load_settings()
-        base = (cfg.get("music_dir") or "").strip()
-        if not base:
-            return {"ok": True, "tracks": []}
-        import os
-        if not os.path.isdir(base):
-            return {"ok": True, "tracks": []}
-        exts = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma'}
-        items = []
-        for name in sorted(os.listdir(base)):
-            p = os.path.join(base, name)
-            if not os.path.isfile(p):
-                continue
-            ext = os.path.splitext(name)[1].lower()
-            if ext in exts:
-                # Get duration using pydub
-                try:
-                    from pydub import AudioSegment
-                    seg = AudioSegment.from_file(p)
-                    duration_ms = len(seg)
-                    duration_sec = duration_ms / 1000.0
-                except Exception:
-                    duration_ms = 0
-                    duration_sec = 0.0
-                
-                items.append({
-                    "name": name,
-                    "path": p,
-                    "duration_ms": duration_ms,
-                    "duration_sec": round(duration_sec, 2),
-                })
-        return {"ok": True, "tracks": items}
+        dirs = [{"path": d, "exists": os.path.isdir(d)} for d in music_library.folders(cfg)]
+        return {"ok": True, "tracks": music_library.list_tracks(cfg), "folders": dirs}
     except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": str(exc), "tracks": []}
+
+
+@router.get("/music/file")
+def music_file(path: str = Query(""), session: Session = Depends(get_session)):
+    """Play a library track in the editor (only files from the music folders/presets)."""
+    from fastapi.responses import FileResponse
+    from app.services import music_library
+    if not music_library.is_allowed(path, extra=music_library.preset_music_paths(session)):
+        raise HTTPException(status_code=404, detail="not a library track")
+    return FileResponse(path)
+
+
+@router.get("/music/peaks")
+def music_peaks(path: str = Query(""), session: Session = Depends(get_session)):
+    """Waveform of a library track: {duration, peaks: [0..1]}."""
+    from app.services import music_library
+    if not music_library.is_allowed(path, extra=music_library.preset_music_paths(session)):
+        raise HTTPException(status_code=404, detail="not a library track")
+    try:
+        return {"duration": music_library.duration(path), "peaks": music_library.peaks(path)}
+    except Exception as exc:
+        return {"duration": music_library.duration(path), "peaks": [], "error": str(exc)}
+
+
+# ---- Video editor (static/video_editor.js), used wherever a video is attached --------
+def _edit_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/video/probe")
+def video_probe(rel: str = Query("")):
+    """A media/ video: its size/length/frame, and — for a file this editor made — the
+    source and settings it was made from (so the editor reopens with them)."""
+    from app.services import video_edit as ve
+    try:
+        path = ve.media_abs(rel)
+    except ve.EditError as exc:
+        raise _edit_error(exc)
+    rel = ve.media_rel(path)
+    out = {"rel": rel, "url": f"/media/{rel}", **ve.probe(path), "edit": None}
+    edit = ve.load_edit(rel)
+    if edit:
+        try:
+            src = ve.media_abs(edit["src"])
+            out["edit"] = {"src": edit["src"], "spec": edit.get("spec") or {}}
+            out["source"] = {"rel": edit["src"], "url": f"/media/{edit['src']}", **ve.probe(src)}
+        except ve.EditError:
+            out["edit"] = None  # the source was deleted: edit the result itself
+    if not out.get("source"):
+        out["source"] = {k: out[k] for k in ("rel", "url", "duration", "width", "height", "has_audio", "fps", "size_mb")}
+    return out
+
+
+@router.post("/video/edit")
+def video_edit_start(data: Optional[dict] = Body(None), session: Session = Depends(get_session)):
+    """{src, spec} → a render job (polled at /video/edit/{id}); done at once when the
+    same settings were rendered before or nothing changed."""
+    from app.services import music_library, video_edit as ve
+    data = data or {}
+    extra = music_library.preset_music_paths(session)
+    try:
+        return ve.start_render(str(data.get("src") or ""), data.get("spec"),
+                               music_ok=lambda p: music_library.is_allowed(p, extra=extra))
+    except ve.EditError as exc:
+        raise _edit_error(exc)
+
+
+@router.get("/video/edit/{job_id}")
+def video_edit_status(job_id: str):
+    from app.services import video_edit as ve
+    job = ve.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="render not found (server restarted?)")
+    return job
+
+
+@router.post("/video/edit/{job_id}/cancel")
+def video_edit_cancel(job_id: str):
+    from app.services import video_edit as ve
+    return {"ok": ve.cancel_job(job_id)}
+
+
+@router.post("/video/overlay_preview")
+def video_overlay_preview(data: Optional[dict] = Body(None)):
+    """The exact PNG the editor will burn in for one text line at a w×h frame."""
+    from fastapi.responses import Response
+    from app.services.text_overlay import MAX_TEXT_LEN, POSITIONS, SIZES, render_overlay_png
+    data = data or {}
+    text = str(data.get("text") or "").strip()[:MAX_TEXT_LEN]
+    pos = data.get("pos") if data.get("pos") in POSITIONS else "middle"
+    size = data.get("size") if data.get("size") in SIZES else "m"
+    try:
+        frame = (int(data.get("w") or 1080), int(data.get("h") or 1920))
+    except (TypeError, ValueError):
+        frame = (1080, 1920)
+    try:
+        png = render_overlay_png(text, pos, size, frame=frame)
+    except RuntimeError as exc:  # no usable font
+        raise HTTPException(status_code=500, detail=str(exc))
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/video/fit")
+def video_fit(rel: str = Query(""), platforms: str = Query("")):
+    """Will this video go to each platform as is, be compressed on publish, or not fit?"""
+    from app.services import video_edit as ve
+    try:
+        path = ve.media_abs(rel)
+    except ve.EditError as exc:
+        raise _edit_error(exc)
+    return ve.fit_report(path, [p.strip() for p in platforms.split(",") if p.strip()])
 
 
 @router.get("/music/scan")

@@ -34,6 +34,12 @@ def _maybe_retry_publish(job_id: int, post_id: int, result: str) -> None:
             return
         if getattr(post, 'platform_post_id', None):
             return  # already landed on the platform — don't double-post
+        from app.services.x_billing import DEPLETED
+        if DEPLETED in (post.error_text or ''):
+            return  # an empty X balance isn't transient; Retry after the top-up
+        from app.services.video_editor import TOO_LARGE
+        if TOO_LARGE in (post.error_text or ''):
+            return  # compression already failed; a rerun would fail the same way
         payload = {}
         if job is not None and job.payload_json:
             try:
@@ -103,6 +109,27 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
         except Exception:
             pass
 
+        # Never send the same publication twice (a re-submitted form, a second Shorts batch...)
+        import json as _json
+        from app.services import duplicates
+        try:
+            allow_dup = bool((_json.loads(job.payload_json or '{}') or {}).get(duplicates.ALLOW)) if job else False
+        except Exception:
+            allow_dup = False
+        twin = None if allow_dup else duplicates.published_twin(session, post)
+        if twin is not None:
+            post.status = PostStatusEnum.canceled
+            post.error_text = duplicates.reason(twin)
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
+                session.add(job)
+            session.add(post)
+            session.commit()
+            from loguru import logger
+            logger.warning(f"publish post={post_id} skipped: {post.error_text}")
+            return 'duplicate'
+
         # mark running
         post.status = PostStatusEnum.running
         if job is not None:
@@ -124,7 +151,29 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
             session.add(post)
             session.commit()
             return 'error'
-        result = publisher(session, post, job)
+        try:
+            # follower counts right before the post, for its "+N followers" report
+            from app.services.marketing_collect import snapshot_before_publish
+            snapshot_before_publish()
+        except Exception as exc:
+            from loguru import logger
+            logger.warning(f"pre-publish follower snapshot failed: {exc}")
+        try:
+            result = publisher(session, post, job)
+        except Exception as exc:
+            # A publisher that raises must not leave the post stuck in 'running'.
+            from loguru import logger
+            logger.exception(f"publish {post.platform} post={post_id} crashed")
+            session.rollback()
+            post.status = PostStatusEnum.error
+            post.error_text = f"{type(exc).__name__}: {exc}"
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
+                session.add(job)
+            session.add(post)
+            session.commit()
+            return 'error'
         if result is not None:
             return result
         # mark done
@@ -256,6 +305,70 @@ def enqueue_due_posts() -> str:
         return f"scheduled={scheduled} stuck={len(stuck)}"
 
 
+def _short_edit(brief) -> dict:
+    """Trim + overlays stored on a Shorts brief, validated, plus a file-name
+    suffix that changes whenever they do ('' for an unedited clip)."""
+    import hashlib, json
+    from app.services.text_overlay import clean_overlays, clean_trim
+    ts, te = clean_trim(getattr(brief, 'trim_start', None), getattr(brief, 'trim_end', None))
+    try:
+        raw = json.loads(getattr(brief, 'overlays_json', None) or '[]')
+    except Exception:
+        raw = []
+    overlays = clean_overlays(raw, (te - (ts or 0)) if te else None)
+    suffix = ''
+    if ts or te or overlays:
+        sig = json.dumps([ts, te, overlays], ensure_ascii=False, sort_keys=True)
+        suffix = '_' + hashlib.sha1(sig.encode('utf-8')).hexdigest()[:8]
+    return {'trim_start': ts or 0.0, 'trim_end': te or 0.0, 'overlays': overlays, 'suffix': suffix}
+
+
+def _short_spec(brief, duration=None):
+    """The video-editor spec stored on a Shorts brief (always 9:16), or None for a
+    clip queued before the factory used the shared editor."""
+    import json
+    from app.services.video_edit import short_spec
+    raw = getattr(brief, 'edit_spec_json', None)
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    return short_spec(data, duration) if isinstance(data, dict) else None
+
+
+def _render_short_file(brief, src_abs: str, out_abs: str, music_abs, edit: dict) -> None:
+    """Render one Shorts clip: overlay PNGs go to a temp folder that is removed
+    afterwards, whatever happens."""
+    import shutil, tempfile, os
+    from app.services.video_editor import render_vertical_with_music
+    from app.services.text_overlay import render_overlay_png
+    tmp = tempfile.mkdtemp(prefix='ip_overlays_') if edit['overlays'] else None
+    try:
+        pngs = []
+        for i, o in enumerate(edit['overlays']):
+            path = os.path.join(tmp, f'ovl_{i}.png')
+            render_overlay_png(o['text'], o['pos'], o['size'], out_path=path)
+            pngs.append((path, o['start'], o['end']))
+        render_vertical_with_music(
+            src_abs, out_abs,
+            crop_x_pct=(brief.crop_x if brief.crop_x is not None else 50) / 100.0,
+            crop_y_pct=(brief.crop_y if brief.crop_y is not None else 50) / 100.0,
+            music_path=music_abs,
+            music_offset_s=float(brief.music_offset_sec or 0),
+            fade_in_s=float(brief.fade_in_ms or 0) / 1000.0,
+            fade_out_s=float(brief.fade_out_ms or 0) / 1000.0,
+            start_time=edit['trim_start'],
+            end_time=edit['trim_end'],
+            zoom=float(brief.crop_scale or 1.0),
+            overlays=pngs or None,
+        )
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @huey.task()
 def render_short(job_id: int, brief_id: int) -> str:
     """Render a batched short (9:16 vertical + poster frame), then create the
@@ -265,7 +378,7 @@ def render_short(job_id: int, brief_id: int) -> str:
     enqueue_due_posts cron can never publish a not-yet-rendered clip.
     """
     from app.models.models import Brief, Post, Job, PostStatusEnum, JobKindEnum, JobStatusEnum, PlatformEnum
-    from app.services.video_editor import render_vertical_with_music, extract_poster_frame
+    from app.services.video_editor import extract_poster_frame
     from loguru import logger
     import os, json
     from datetime import datetime as _dt
@@ -303,26 +416,37 @@ def render_short(job_id: int, brief_id: int) -> str:
                 src = f"media/{src}"
             src_abs = os.path.abspath(src)
             base = os.path.splitext(os.path.basename(src_abs))[0]
-            out_rel = f"{base}_vertical.mp4"
+            spec = None
+            if getattr(brief, 'edit_spec_json', None):
+                from app.services import video_edit
+                info = video_edit.probe(src_abs)
+                spec = _short_spec(brief, info['duration'])
+            if spec is not None:
+                # Edited in the shared video editor: the same one-pass render as the
+                # editor's own, so the clip looks exactly like its preview.
+                from app.services import music_library
+                if spec['music'] and not music_library.is_allowed(
+                        spec['music']['path'], extra=music_library.preset_music_paths(session)):
+                    logger.warning(f"render_short brief={brief_id}: track not found, rendering without music: "
+                                   f"{spec['music']['path']}")
+                    spec['music'] = None
+                out_rel = f"{base}_vertical_{video_edit.spec_hash(spec)}.mp4"
+            else:
+                # Trim + text overlays go into the file name, so an edited clip never
+                # reuses a stale render (plain clips keep the old `_vertical.mp4`).
+                edit = _short_edit(brief)
+                out_rel = f"{base}_vertical{edit['suffix']}.mp4"
             out_abs = os.path.abspath(os.path.join('media', out_rel))
-            already = bool(vertical_rel) and os.path.exists(
-                os.path.abspath(os.path.join('media', os.path.basename(vertical_rel)))
-            )
+            already = bool(vertical_rel) and os.path.basename(vertical_rel) == out_rel and os.path.exists(out_abs)
             if not already:
-                music_abs = None
-                mp = getattr(brief, 'music_path', None)
-                if mp and os.path.exists(mp):
-                    music_abs = mp
-                render_vertical_with_music(
-                    src_abs, out_abs,
-                    crop_x_pct=(brief.crop_x if brief.crop_x is not None else 50) / 100.0,
-                    crop_y_pct=(brief.crop_y if brief.crop_y is not None else 50) / 100.0,
-                    music_path=music_abs,
-                    music_offset_s=float(brief.music_offset_sec or 0),
-                    fade_in_s=float(brief.fade_in_ms or 0) / 1000.0,
-                    fade_out_s=float(brief.fade_out_ms or 0) / 1000.0,
-                    zoom=float(brief.crop_scale or 1.0),
-                )
+                if spec is not None:
+                    video_edit.render_file(src_abs, out_abs, spec, info)
+                else:
+                    music_abs = None
+                    mp = getattr(brief, 'music_path', None)
+                    if mp and os.path.exists(mp):
+                        music_abs = mp
+                    _render_short_file(brief, src_abs, out_abs, music_abs, edit)
                 vertical_rel = out_rel
                 brief.media_vertical_path = vertical_rel
                 session.add(brief)
@@ -540,7 +664,8 @@ def refresh_recent_metrics() -> str:
         rows = session.exec(
             select(Post).where(
                 Post.status == PostStatusEnum.done,
-                Post.platform != PlatformEnum.yt,
+                # TikTok: tiktok_pipeline_tick reads it in batches and keeps a history
+                Post.platform.not_in([PlatformEnum.yt, PlatformEnum.tiktok]),
                 Post.published_at.is_not(None),
                 Post.published_at >= cutoff,
             ).order_by(Post.published_at.desc()).limit(60)
@@ -553,6 +678,30 @@ def refresh_recent_metrics() -> str:
     for i, pid in enumerate(ids):
         refresh_metrics_for_post.schedule(args=(pid,), delay=i * 2)
     return f"scheduled={len(ids)} youtube={len(yt_ids)}"
+
+
+@huey.periodic_task(crontab(minute='*/15'))
+def collect_marketing_metrics(force: bool = False) -> str:
+    """Home-screen metrics: followers and publication stats time-boxed (this worker
+    also publishes); Steam wishlists/sales go to a background thread."""
+    from app.services.marketing_collect import collect_all
+    return str(collect_all(force=force))
+
+
+@huey.periodic_task(crontab(minute='*/10'))
+def tiktok_pipeline_tick() -> str:
+    """/tiktok: has a draft been posted in the app (status fetch), fresh views and
+    likes of live clips (one batched video.query), factory drafts adopted."""
+    from app.services import tiktok_pipeline
+    with Session(engine) as session:
+        return str(tiktok_pipeline.sync(session, in_worker=True))
+
+
+@huey.periodic_task(crontab(minute='40', hour='*/6'))
+def refresh_outreach_creators() -> str:
+    """YouTube API data on /outreach must be refreshed (or dropped) within 30 days."""
+    from app.services.outreach_discovery import refresh_stale
+    return refresh_stale()
 
 
 @huey.task()

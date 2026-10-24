@@ -2,7 +2,7 @@
 
 One icon in the notification area instead of two console windows. Its colour is the
 app state (green ok / amber starting or restarting / red broken), the menu opens the UI,
-restarts, shows logs, and "Выход" stops the server and worker (the worker finishes the
+restarts, shows logs, and "Quit" stops the server and worker (the worker finishes the
 task in progress first). Launching again while it runs just opens the browser.
 """
 from __future__ import annotations
@@ -89,10 +89,10 @@ def run(background: bool) -> None:
 		try:
 			winapi.create_shortcuts(ensure_ico(ICO_PATH))
 			_SHORTCUTS_MARKER.touch()
-			notify("Ярлыки IndiePulse созданы на рабочем столе и в меню Пуск.")
+			notify("IndiePulse shortcuts created on the desktop and in the Start menu.")
 		except Exception:
 			logger.exception("shortcut creation failed")
-			notify("Не удалось создать ярлыки (logs\\launcher.log).")
+			notify("Couldn’t create shortcuts (logs\\launcher.log).")
 
 	def quit_app() -> None:
 		sup.quit()
@@ -109,40 +109,43 @@ def run(background: bool) -> None:
 		if sup.server.state == "running":
 			webbrowser.open(url + "api/accounts/connect/youtube/go")
 		else:
-			notify("Сервер ещё запускается — попробуй через минуту.")
+			notify("The server is still starting — try again in a minute.")
 
 	def youtube_watch() -> None:
 		"""Weekly-reconnect reminder (apps in Google's Testing status get 7-day YouTube
-		tokens): one balloon on the last day, one when YouTube stops; fresh menu label."""
+		tokens): one balloon on the last day, one when YouTube stops; fresh menu label.
+		Also one balloon each time the prepaid X API credits run out."""
+		from app.services import x_billing
 		from app.services.settings import load_settings
 		from app.services.youtube_setup import tray_reminder
 		shown: set = set()
 		while True:
 			try:
-				reminder = tray_reminder(load_settings())
-				if reminder and reminder[0] not in shown:
-					shown.add(reminder[0])
-					notify(reminder[1])
+				cfg = load_settings()
+				for reminder in (tray_reminder(cfg), x_billing.tray_reminder(cfg)):
+					if reminder and reminder[0] not in shown:
+						shown.add(reminder[0])
+						notify(reminder[1])
 				icon.update_menu()
 			except Exception:
-				logger.exception("youtube reminder failed")
+				logger.exception("tray reminder failed")
 			time.sleep(600)
 
 	icon = pystray.Icon(
-		"IndiePulse", tray_image("busy"), "IndiePulse — запуск…",
+		"IndiePulse", tray_image("busy"), "IndiePulse — starting…",
 		menu=Menu(
-			Item("Открыть IndiePulse", open_ui, default=True),
+			Item("Open IndiePulse", open_ui, default=True),
 			Item(lambda _: youtube_label() or "YouTube", reconnect_youtube, visible=lambda _: bool(youtube_label())),
 			Menu.SEPARATOR,
 			Item(lambda _: sup.child_line(sup.server), None, enabled=False),
 			Item(lambda _: sup.child_line(sup.worker), None, enabled=False),
 			Menu.SEPARATOR,
-			Item("Перезапустить", sup.restart, enabled=lambda _: sup.phase in ("running",)),
-			Item("Открыть папку логов", open_logs),
-			Item("Запускать при входе в Windows", toggle_autostart, checked=lambda _: winapi.autostart_enabled()),
-			Item("Создать ярлыки (рабочий стол, Пуск)", make_shortcuts),
+			Item("Restart", sup.restart, enabled=lambda _: sup.phase in ("running",)),
+			Item("Open logs folder", open_logs),
+			Item("Start at Windows sign-in", toggle_autostart, checked=lambda _: winapi.autostart_enabled()),
+			Item("Create shortcuts (desktop, Start menu)", make_shortcuts),
 			Menu.SEPARATOR,
-			Item("Выход", quit_app),
+			Item("Quit", quit_app),
 		),
 	)
 
@@ -171,7 +174,7 @@ def main(argv: list[str] | None = None) -> None:
 		run(args.background)
 	except Exception as exc:
 		logger.exception("tray crashed")
-		winapi.message_box(f"IndiePulse не смог запуститься:\n{exc}\n\nПодробности: logs\\launcher.log")
+		winapi.message_box(f"IndiePulse couldn’t start:\n{exc}\n\nDetails: logs\\launcher.log")
 		sys.exit(1)
 
 

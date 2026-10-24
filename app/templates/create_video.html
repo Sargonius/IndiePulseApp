@@ -5,109 +5,51 @@
 
 <form method="post" action="/create/video" enctype="multipart/form-data" id="video_form">
 	<div class="video-layout">
-		<!-- Left: Video Editor -->
+		<!-- Left: source video + the two outputs, each made in the shared editor -->
 		<div class="video-editor">
 			<div class="editor-section">
-				<h3>🎬 Video Editor</h3>
-				
+				<h3>🎬 Video</h3>
+
 				<div class="form-group">
-					<label>Source Video</label>
+					<label>Source video</label>
 					<div id="drop_zone_video" class="drop-zone">
-						<span>🎥 Drag & drop video here or click</span>
+						<span>🎥 Drop a video here or click</span>
 					</div>
 					<input type="file" id="video_input" accept="video/*" style="display:none;" />
+					<div id="upload_status" class="muted" style="font-size:12px;margin-top:6px;"></div>
 				</div>
-				
-				<!-- Live Preview -->
-				<div id="live_preview" class="live-preview" style="display:none;">
-					<label>Preview</label>
-					<div class="preview-wrapper">
-						<video id="source_video" controls></video>
-						<div id="crop_overlay" class="crop-overlay"></div>
+
+				<div class="slots" id="slots" hidden>
+					<div class="slot" data-slot="horizontal">
+						<div class="slot-head"><b>16:9</b> <span class="muted">YouTube, VK Video</span></div>
+						<div class="slot-media"></div>
+						<div class="slot-info muted"></div>
+						<div class="btn-row">
+							<button type="button" class="btn btn-sm btn-primary slot-edit">✂ Editor</button>
+							<button type="button" class="btn btn-sm slot-src" title="No processing">Source</button>
+							<button type="button" class="btn btn-sm slot-clear" title="Don’t publish this format">✕</button>
+						</div>
 					</div>
-					<div class="crop-info" id="crop_info"></div>
-				</div>
-				
-				<!-- Crop Controls -->
-				<div class="crop-controls" id="crop_controls" style="display:none;">
-					<div class="slider-group">
-						<label>X Position: <span id="crop_x_val">50</span>%</label>
-						<input type="range" id="crop_x" min="0" max="100" value="50" />
-					</div>
-					<div class="slider-group">
-						<label>Y Position: <span id="crop_y_val">50</span>%</label>
-						<input type="range" id="crop_y" min="0" max="100" value="50" />
-					</div>
-					<div class="slider-group">
-						<label>Zoom: <span id="zoom_val">1.0</span>x</label>
-						<input type="range" id="zoom" min="100" max="200" value="100" />
-					</div>
-				</div>
-				
-				<!-- Timeline -->
-				<div class="timeline-section" id="timeline_section" style="display:none;">
-					<label>Timeline</label>
-					<div class="timeline-controls">
-						<button type="button" class="btn btn-sm" id="set_start">Set Start</button>
-						<button type="button" class="btn btn-sm" id="set_end">Set End</button>
-						<span id="timeline_info" class="muted">Full video</span>
-					</div>
-					<div class="timeline">
-						<div class="timeline-bar" id="timeline_bar">
-							<div class="timeline-selection" id="timeline_selection"></div>
-							<div class="timeline-handle start" id="timeline_start"></div>
-							<div class="timeline-handle end" id="timeline_end"></div>
-							<div class="timeline-current" id="timeline_current"></div>
+					<div class="slot" data-slot="vertical">
+						<div class="slot-head"><b>9:16</b> <span class="muted">Shorts, TikTok</span></div>
+						<div class="slot-media"></div>
+						<div class="slot-info muted"></div>
+						<div class="btn-row">
+							<button type="button" class="btn btn-sm btn-primary slot-edit">✂ Editor</button>
+							<button type="button" class="btn btn-sm slot-src" title="No processing">Source</button>
+							<button type="button" class="btn btn-sm slot-clear" title="Don’t publish this format">✕</button>
 						</div>
 					</div>
 				</div>
-				
-				<!-- Music -->
-				<details class="music-section">
-					<summary>🎵 Add Music (optional)</summary>
-					<div class="music-controls">
-						<div class="form-group">
-							<label>Music File</label>
-							<div class="row">
-								<select id="music_select" style="flex:1;">
-									<option value="">No music</option>
-								</select>
-								<button type="button" class="btn" id="refresh_music">Refresh</button>
-							</div>
-							<input type="file" id="music_input" accept="audio/*" style="margin-top:8px;" />
-						</div>
-						<div class="slider-group">
-							<label>Music Offset: <span id="music_offset_val">0</span>s</label>
-							<input type="range" id="music_offset" min="0" max="60" value="0" step="0.5" />
-						</div>
-						<div class="row">
-							<div class="form-group" style="flex:1;">
-								<label>Fade In (s)</label>
-								<input type="number" id="fade_in" value="1" min="0" max="10" step="0.5" />
-							</div>
-							<div class="form-group" style="flex:1;">
-								<label>Fade Out (s)</label>
-								<input type="number" id="fade_out" value="1" min="0" max="10" step="0.5" />
-							</div>
-						</div>
-					</div>
-				</details>
-				
-				<!-- Render Buttons -->
-				<div class="render-buttons">
-					<button type="button" class="btn btn-primary" id="render_horizontal">Render 16:9 (YouTube)</button>
-					<button type="button" class="btn btn-primary" id="render_vertical">Render 9:16 (Shorts/TikTok)</button>
-					<span id="render_status" class="muted"></span>
+				<div class="muted" style="font-size:12px;margin-top:8px;">
+					Editor: frame for the format, trim, music from your folders (Settings → Video & music), on-screen text.
+					YouTube takes 16:9, or 9:16 if there’s none (then it’s a Short); TikTok — 9:16 only.
 				</div>
-				
-				<!-- Rendered Previews -->
-				<div id="rendered_previews" class="rendered-previews"></div>
-				
+
 				<input type="hidden" name="media_horizontal" id="media_horizontal_hidden" />
 				<input type="hidden" name="media_vertical" id="media_vertical_hidden" />
 			</div>
 		</div>
-		
 		<!-- Right: Content -->
 		<div class="video-content">
 			<div class="form-group">
@@ -135,6 +77,11 @@
 				<div id="project_tiles" class="project-tiles-row">
 					<span class="muted" style="font-size:12px;">Loading...</span>
 				</div>
+				<input type="hidden" name="project_id" id="project_id_hidden" value="" />
+			</div>
+			<div class="form-group">
+				<label>Goal <span class="muted" style="font-weight:400;">(optional) — the post shows up in “What I did” on the goal page</span></label>
+				<select name="goal_id" id="goal_select"><option value="">— no goal —</option></select>
 			</div>
 
 			<div class="form-group">
@@ -191,6 +138,7 @@
 		<button type="submit" class="btn btn-primary btn-lg">Save and Queue</button>
 		<button type="button" id="clear_btn" class="btn">Clear</button>
 		<button type="button" id="install_ffmpeg" class="btn">Install FFmpeg</button>
+		<label class="muted" title="Same text and files already went to these networks in the last 7 days? Without this box, no repeat is created."><input type="checkbox" name="allow_duplicate" value="1"> Publish again</label>
 	</div>
 </form>
 
@@ -238,105 +186,30 @@
 	background: #f0f9ff;
 }
 
-.live-preview {
-	margin-top: 16px;
+.slots {
+	display: grid;
+	grid-template-columns: 1.4fr 1fr;
+	gap: 12px;
+	margin-top: 14px;
 }
 
-.preview-wrapper {
-	position: relative;
-	display: inline-block;
-	border: 2px solid #ccc;
-	border-radius: 8px;
-	overflow: hidden;
-}
-
-.preview-wrapper video {
-	display: block;
-	max-width: 100%;
-	max-height: 300px;
-}
-
-.crop-overlay {
-	position: absolute;
-	border: 2px solid #ef4444;
-	background: rgba(239, 68, 68, 0.2);
-	pointer-events: none;
-}
-
-.crop-info {
-	margin-top: 8px;
-	font-size: 12px;
-	color: #666;
-}
-
-.crop-controls {
-	margin-top: 16px;
-}
-
-.slider-group {
-	margin-bottom: 12px;
-}
-
-.slider-group label {
-	display: block;
-	margin-bottom: 4px;
-	font-size: 13px;
-}
-
-.slider-group input[type="range"] {
-	width: 100%;
-}
-
-.timeline-section {
-	margin-top: 16px;
-}
-
-.timeline-controls {
+.slot {
+	background: white;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 10px;
 	display: flex;
-	gap: 8px;
-	align-items: center;
-	margin-bottom: 8px;
+	flex-direction: column;
+	gap: 6px;
 }
 
-.timeline {
-	background: #e5e7eb;
-	border-radius: 4px;
-	height: 40px;
-	position: relative;
-}
+.slot.slot-empty { border-style: dashed; }
+.slot-head { font-size: 13px; }
+.slot-media video { width: 100%; max-height: 260px; background: #000; border-radius: 6px; }
+.slot-placeholder { height: 120px; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 13px; background: #f1f5f9; border-radius: 6px; }
+.slot-info { font-size: 12px; }
+.slot .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
-.timeline-bar {
-	position: relative;
-	height: 100%;
-	cursor: pointer;
-}
-
-.timeline-selection {
-	position: absolute;
-	top: 0;
-	height: 100%;
-	background: rgba(37, 99, 235, 0.3);
-	border: 1px solid var(--primary);
-}
-
-.timeline-handle {
-	position: absolute;
-	top: 0;
-	width: 4px;
-	height: 100%;
-	background: var(--primary);
-	cursor: ew-resize;
-}
-
-.timeline-current {
-	position: absolute;
-	top: 0;
-	width: 2px;
-	height: 100%;
-	background: #ef4444;
-}
-
-.music-section,
 .youtube-section {
 	margin-top: 16px;
 	padding: 12px;
@@ -345,34 +218,9 @@
 	border-radius: 8px;
 }
 
-.music-section summary,
 .youtube-section summary {
 	cursor: pointer;
 	font-weight: 600;
-}
-
-.music-controls {
-	padding-top: 12px;
-}
-
-.render-buttons {
-	margin-top: 20px;
-	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
-	align-items: center;
-}
-
-.rendered-previews {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 12px;
-	margin-top: 16px;
-}
-
-.rendered-previews video {
-	width: 100%;
-	border-radius: 8px;
 }
 
 .video-content .form-group {
@@ -436,207 +284,126 @@
 }
 </style>
 
+<script src="/static/goal_picker.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/video_editor.js?v={{ request.app.state.asset_version }}"></script>
 <script>
+// Source video → two outputs (16:9 and 9:16). Each output is the source as is or a
+// file made in the shared editor (/static/video_editor.js); reopening an edited
+// output brings back its settings.
 const videoInput = document.getElementById('video_input');
 const dropZone = document.getElementById('drop_zone_video');
-const sourceVideo = document.getElementById('source_video');
-const livePreview = document.getElementById('live_preview');
-const cropControls = document.getElementById('crop_controls');
-const timelineSection = document.getElementById('timeline_section');
-const cropOverlay = document.getElementById('crop_overlay');
+const uploadStatus = document.getElementById('upload_status');
+const SLOT_FORMATS = { horizontal: ['landscape', 'original', 'square'], vertical: ['vertical', 'original'] };
+const SLOT_DEFAULT = { horizontal: 'landscape', vertical: 'vertical' };
+const hiddenOf = slot => document.getElementById(slot === 'horizontal' ? 'media_horizontal_hidden' : 'media_vertical_hidden');
+const projectsById = {};
+let sourceRel = '';
+let sourceInfo = null;
 
-let videoLoaded = false;
-let videoWidth = 0;
-let videoHeight = 0;
-let videoDuration = 0;
-let timelineStart = 0;
-let timelineEnd = 1;
+const mmss = s => { s = Math.round(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+const mediaUrl = rel => '/media/' + String(rel).split('/').map(encodeURIComponent).join('/');
 
-// Drop zone
 dropZone.addEventListener('click', () => videoInput.click());
 dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; });
 dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#94a3b8'; });
 dropZone.addEventListener('drop', (e) => {
 	e.preventDefault();
 	dropZone.style.borderColor = '#94a3b8';
-	if (e.dataTransfer.files[0]) handleVideoFile(e.dataTransfer.files[0]);
+	if (e.dataTransfer.files[0]) uploadSource(e.dataTransfer.files[0]);
 });
-videoInput.addEventListener('change', () => {
-	if (videoInput.files[0]) handleVideoFile(videoInput.files[0]);
-});
+videoInput.addEventListener('change', () => { if (videoInput.files[0]) uploadSource(videoInput.files[0]); });
 
-function handleVideoFile(file) {
-	const url = URL.createObjectURL(file);
-	sourceVideo.src = url;
-	sourceVideo.onloadedmetadata = () => {
-		videoWidth = sourceVideo.videoWidth;
-		videoHeight = sourceVideo.videoHeight;
-		videoDuration = sourceVideo.duration;
-		videoLoaded = true;
-		
-		livePreview.style.display = 'block';
-		cropControls.style.display = 'block';
-		timelineSection.style.display = 'block';
-		
-		updateCropOverlay();
-		updateTimeline();
-		
-		document.getElementById('crop_info').textContent = 
-			`Video: ${videoWidth}x${videoHeight} (${videoDuration.toFixed(1)}s)`;
-	};
-	sourceVideo.addEventListener('timeupdate', updateTimelineCurrent);
-}
-
-// Crop controls
-['crop_x', 'crop_y', 'zoom'].forEach(id => {
-	document.getElementById(id)?.addEventListener('input', (e) => {
-		document.getElementById(id + '_val').textContent = 
-			id === 'zoom' ? (e.target.value / 100).toFixed(1) : e.target.value;
-		updateCropOverlay();
-	});
-});
-
-function updateCropOverlay() {
-	if (!videoLoaded) return;
-	
-	const displayW = sourceVideo.clientWidth;
-	const displayH = sourceVideo.clientHeight;
-	const zoom = document.getElementById('zoom').value / 100;
-	const xPct = document.getElementById('crop_x').value / 100;
-	const yPct = document.getElementById('crop_y').value / 100;
-	
-	// For 9:16 vertical crop
-	const overlayH = displayH / zoom;
-	const overlayW = overlayH * (9/16);
-	
-	const maxX = displayW - overlayW;
-	const maxY = displayH - overlayH;
-	
-	cropOverlay.style.width = overlayW + 'px';
-	cropOverlay.style.height = overlayH + 'px';
-	cropOverlay.style.left = (maxX * xPct) + 'px';
-	cropOverlay.style.top = (maxY * yPct) + 'px';
-}
-
-// Timeline
-function updateTimeline() {
-	if (!videoDuration) return;
-	
-	const bar = document.getElementById('timeline_bar');
-	const sel = document.getElementById('timeline_selection');
-	const startEl = document.getElementById('timeline_start');
-	const endEl = document.getElementById('timeline_end');
-	const info = document.getElementById('timeline_info');
-	
-	const w = bar.offsetWidth;
-	sel.style.left = (timelineStart * w) + 'px';
-	sel.style.width = ((timelineEnd - timelineStart) * w) + 'px';
-	startEl.style.left = (timelineStart * w) + 'px';
-	endEl.style.left = (timelineEnd * w) + 'px';
-	
-	const startTime = (timelineStart * videoDuration).toFixed(1);
-	const endTime = (timelineEnd * videoDuration).toFixed(1);
-	const duration = (endTime - startTime).toFixed(1);
-	info.textContent = timelineStart === 0 && timelineEnd === 1 
-		? `Full video (${duration}s)` 
-		: `${startTime}s - ${endTime}s (${duration}s)`;
-}
-
-function updateTimelineCurrent() {
-	if (!videoDuration) return;
-	const curr = document.getElementById('timeline_current');
-	const bar = document.getElementById('timeline_bar');
-	curr.style.left = ((sourceVideo.currentTime / videoDuration) * bar.offsetWidth) + 'px';
-}
-
-document.getElementById('set_start')?.addEventListener('click', () => {
-	if (videoLoaded && videoDuration) {
-		timelineStart = sourceVideo.currentTime / videoDuration;
-		if (timelineStart >= timelineEnd) timelineStart = timelineEnd - 0.01;
-		updateTimeline();
-	}
-});
-
-document.getElementById('set_end')?.addEventListener('click', () => {
-	if (videoLoaded && videoDuration) {
-		timelineEnd = sourceVideo.currentTime / videoDuration;
-		if (timelineEnd <= timelineStart) timelineEnd = timelineStart + 0.01;
-		updateTimeline();
-	}
-});
-
-// Music
-document.getElementById('refresh_music')?.addEventListener('click', async () => {
-	try {
-		const r = await fetch('/api/music/list');
-		const j = await r.json();
-		const sel = document.getElementById('music_select');
-		sel.innerHTML = '<option value="">No music</option>';
-		(j.tracks || []).forEach(t => {
-			const opt = document.createElement('option');
-			opt.value = t.path;
-			opt.textContent = t.name;
-			sel.appendChild(opt);
-		});
-	} catch (e) {}
-});
-
-document.getElementById('music_offset')?.addEventListener('input', (e) => {
-	document.getElementById('music_offset_val').textContent = e.target.value;
-});
-
-// Render buttons
-async function renderVideo(type) {
-	if (!videoInput.files[0]) {
-		alert('Please select a video first');
-		return;
-	}
-	
-	const status = document.getElementById('render_status');
-	status.textContent = `Rendering ${type}...`;
-	
+async function uploadSource(file) {
+	if (!file.type.startsWith('video/')) { uploadStatus.textContent = 'That’s not a video'; return; }
+	uploadStatus.textContent = `Uploading ${file.name}…`;
 	const fd = new FormData();
-	fd.append('video', videoInput.files[0]);
-	fd.append('crop_x_pct', document.getElementById('crop_x').value / 100);
-	fd.append('crop_y_pct', document.getElementById('crop_y').value / 100);
-	fd.append('zoom', document.getElementById('zoom').value / 100);
-	fd.append('start_time', (timelineStart * videoDuration).toFixed(2));
-	fd.append('end_time', (timelineEnd * videoDuration).toFixed(2));
-	fd.append('music_offset_s', document.getElementById('music_offset').value);
-	fd.append('fade_in_s', document.getElementById('fade_in').value);
-	fd.append('fade_out_s', document.getElementById('fade_out').value);
-	
-	const musicInput = document.getElementById('music_input');
-	if (musicInput.files[0]) {
-		fd.append('music', musicInput.files[0]);
-	}
-	
+	fd.append('media', file);
+	fd.append('slot', 'video_src');
 	try {
-		const endpoint = type === 'horizontal' ? '/api/video/render_horizontal' : '/api/video/render_vertical';
-		const r = await fetch(endpoint, { method: 'POST', body: fd });
+		const r = await fetch('/api/uploads/draft_media', { method: 'POST', body: fd });
 		const j = await r.json();
-		
-		if (j.output_url) {
-			status.textContent = `${type} rendered ✓`;
-			
-			const prev = document.getElementById('rendered_previews');
-			const v = document.createElement('video');
-			v.src = j.output_url;
-			v.controls = true;
-			prev.appendChild(v);
-			
-			const hidden = type === 'horizontal' ? 'media_horizontal_hidden' : 'media_vertical_hidden';
-			document.getElementById(hidden).value = j.output_rel;
-		} else {
-			status.textContent = 'Render failed';
-		}
+		if (!j.media_path) throw new Error('upload failed');
+		sourceRel = j.media_path;
+		const pr = await fetch('/api/video/probe?rel=' + encodeURIComponent(sourceRel));
+		sourceInfo = pr.ok ? await pr.json() : null;
+		uploadStatus.textContent = sourceInfo
+			? `${file.name}: ${sourceInfo.width}×${sourceInfo.height} · ${mmss(sourceInfo.duration)} · ${(+sourceInfo.size_mb).toFixed(1)} MB`
+			: file.name;
+		// the source already has the right shape for one of the slots: use it as is there
+		hiddenOf('horizontal').value = '';
+		hiddenOf('vertical').value = '';
+		if (sourceInfo && sourceInfo.height > sourceInfo.width) hiddenOf('vertical').value = sourceRel;
+		else hiddenOf('horizontal').value = sourceRel;
+		document.getElementById('slots').hidden = false;
+		renderSlots();
 	} catch (e) {
-		status.textContent = 'Error: ' + e.message;
+		uploadStatus.textContent = 'Upload failed: ' + e.message;
 	}
 }
 
-document.getElementById('render_horizontal')?.addEventListener('click', () => renderVideo('horizontal'));
-document.getElementById('render_vertical')?.addEventListener('click', () => renderVideo('vertical'));
+function renderSlots() {
+	document.querySelectorAll('.slot').forEach(box => {
+		const slot = box.dataset.slot;
+		const rel = hiddenOf(slot).value;
+		const media = box.querySelector('.slot-media');
+		const info = box.querySelector('.slot-info');
+		box.classList.toggle('slot-empty', !rel);
+		if (!rel) {
+			media.innerHTML = `<div class="slot-placeholder">${slot === 'horizontal' ? '16:9' : '9:16'} — not made</div>`;
+			info.textContent = '';
+		} else {
+			if (media.dataset.rel !== rel) {
+				media.innerHTML = `<video src="${mediaUrl(rel)}" controls playsinline preload="metadata"></video>`;
+				media.dataset.rel = rel;
+			}
+			info.textContent = rel === sourceRel ? 'source, unprocessed' : '…';
+			if (rel !== sourceRel) {
+				fetch('/api/video/probe?rel=' + encodeURIComponent(rel)).then(r => r.json()).then(j => {
+					if (hiddenOf(slot).value === rel) info.textContent = `✂ ${j.width}×${j.height} · ${mmss(j.duration)} · ${(+j.size_mb).toFixed(1)} MB`;
+				}).catch(() => {});
+			}
+		}
+		if (!rel) delete media.dataset.rel;
+	});
+	updatePlatformNotes();
+}
+
+function selectedPlatforms() {
+	return Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value);
+}
+
+document.querySelectorAll('.slot').forEach(box => {
+	const slot = box.dataset.slot;
+	box.querySelector('.slot-edit').addEventListener('click', () => {
+		if (!sourceRel) return;
+		const cur = hiddenOf(slot).value;
+		const pid = document.getElementById('project_id_hidden').value;
+		VideoEditor.open({
+			rel: cur && cur !== sourceRel ? cur : sourceRel,  // an edited output reopens with its settings
+			format: SLOT_DEFAULT[slot],
+			formats: SLOT_FORMATS[slot],
+			project: projectsById[pid] || null,
+			platforms: () => selectedPlatforms().filter(p => slot === 'vertical' ? true : p !== 'tiktok'),
+			applyLabel: slot === 'horizontal' ? 'Use for 16:9' : 'Use for 9:16',
+			applyShort: 'use in slot',
+			onApply: (res) => { hiddenOf(slot).value = res.out_rel; renderSlots(); },
+		});
+	});
+	box.querySelector('.slot-src').addEventListener('click', () => { if (sourceRel) { hiddenOf(slot).value = sourceRel; renderSlots(); } });
+	box.querySelector('.slot-clear').addEventListener('click', () => { hiddenOf(slot).value = ''; renderSlots(); });
+});
+
+// Which platform gets which file (mirrors submit_video)
+function updatePlatformNotes() {
+	const h = !!hiddenOf('horizontal').value, v = !!hiddenOf('vertical').value;
+	const note = { yt: h ? '16:9' : (v ? '9:16 → Shorts' : 'no video'), vk_video: h ? '16:9' : (v ? '9:16' : 'no video'), tiktok: v ? '9:16' : 'needs 9:16' };
+	document.querySelectorAll('input.pf[name="platforms"]').forEach(cb => {
+		const lab = cb.closest('label');
+		let s = lab.querySelector('.pf-note');
+		if (!s) { s = document.createElement('span'); s.className = 'pf-note muted'; lab.appendChild(s); }
+		s.textContent = sourceRel ? ` (${note[cb.value]})` : '';
+	});
+}
 
 // Title counter
 document.getElementById('video_title')?.addEventListener('input', (e) => {
@@ -683,12 +450,16 @@ document.getElementById('clear_btn')?.addEventListener('click', () => {
 	document.getElementById('text_en').value = '';
 	document.getElementById('tags_input').value = '';
 	document.getElementById('scheduled_at').value = '';
-	document.getElementById('rendered_previews').innerHTML = '';
 	document.getElementById('media_horizontal_hidden').value = '';
 	document.getElementById('media_vertical_hidden').value = '';
+	sourceRel = ''; sourceInfo = null;
+	uploadStatus.textContent = '';
+	document.getElementById('slots').hidden = true;
+	renderSlots();
 });
 
-// Project Presets
+// Project Presets (+ goal picker, see /static/goal_picker.js)
+IPGoals.load(document.getElementById('goal_select'), '');
 (async function loadProjectTiles() {
 	try {
 		const r = await fetch('/api/projects');
@@ -701,8 +472,10 @@ document.getElementById('clear_btn')?.addEventListener('click', () => {
 		}
 		container.innerHTML = '';
 		projects.forEach(p => {
+			projectsById[p.id] = p;
 			const tile = document.createElement('div');
 			tile.className = 'project-tile';
+			tile.dataset.projectId = p.id;
 			const iconHtml = p.icon_url
 				? `<img src="${p.icon_url}" alt="${p.name}" />`
 				: `<div class="tile-initial">${(p.name || '?')[0].toUpperCase()}</div>`;
@@ -710,6 +483,8 @@ document.getElementById('clear_btn')?.addEventListener('click', () => {
 			tile.addEventListener('click', () => {
 				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
 				tile.classList.add('selected');
+				document.getElementById('project_id_hidden').value = p.id;
+				IPGoals.load(document.getElementById('goal_select'), p.id);
 				const tagsInput = document.getElementById('tags_input');
 				if (tagsInput) {
 					tagsInput.value = p.tags_json || '';
@@ -718,13 +493,13 @@ document.getElementById('clear_btn')?.addEventListener('click', () => {
 			});
 			container.appendChild(tile);
 		});
+		IPGoals.preselectProject(container);
 	} catch (e) {
 		const container = document.getElementById('project_tiles');
 		if (container) container.innerHTML = '';
 	}
 })();
 
-// Load music on start
-document.getElementById('refresh_music')?.click();
+document.querySelectorAll('input.pf[name="platforms"]').forEach(cb => cb.addEventListener('change', updatePlatformNotes));
 </script>
 {% endblock %}

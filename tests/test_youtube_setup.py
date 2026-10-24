@@ -70,7 +70,7 @@ def test_checklist_with_a_dead_token(client, set_settings, monkeypatch):
     _route_httpx(monkeypatch, lambda req: httpx.Response(400, json=DEAD))
     html = client.get("/api/youtube/setup").text
 
-    assert "YouTube сейчас не работает" in html and "invalid_grant" in html
+    assert "YouTube isn’t working" in html and "invalid_grant" in html
     for page in ("auth/audience", "auth/clients", "apis/library/youtube.googleapis.com"):
         assert f"https://console.cloud.google.com/{page}?project=123456789012" in html
     assert "http://127.0.0.1:8000/api/accounts/callback/youtube" in html  # redirect URI to copy
@@ -86,7 +86,7 @@ def test_network_trouble_is_not_reported_as_a_dead_token(client, set_settings, m
         raise httpx.ConnectError("offline")
     _route_httpx(monkeypatch, offline)
     html = client.get("/api/youtube/setup").text
-    assert "проверить не удалось" in html
+    assert "Couldn’t check the token" in html
     assert load_settings()["yt_auth_error"] == ""
 
 
@@ -107,9 +107,9 @@ def test_token_that_died_after_a_week_asks_for_a_reconnect_not_publishing():
            "yt_connected_at": now - 8 * DAY, "yt_auth_error_at": now - DAY,
            "yt_auth_error": "yt_refresh_failed: invalid_grant Bad Request"}
     st = ys.setup_state(cfg, NO_VIDEOS, now=now)
-    assert st["overall"]["status"] == "error" and "шаг 4" in st["overall"]["note"]
+    assert st["overall"]["status"] == "error" and "step 4" in st["overall"]["note"]
     # staying in Testing is a supported setup: publishing is optional, not a failure
-    assert st["steps"]["publish"]["status"] == "optional" and "раз в неделю" in st["steps"]["publish"]["note"]
+    assert st["steps"]["publish"]["status"] == "optional" and "once a week" in st["steps"]["publish"]["note"]
     assert st["steps"]["connect"]["status"] == "error"
 
 
@@ -126,11 +126,11 @@ def test_weekly_countdown_from_connect_to_expiry():
     exp = cfg["yt_refresh_expires_at"]
 
     fresh = ys.setup_state(cfg, NO_VIDEOS, now=t0)  # just connected: all quiet
-    assert fresh["overall"]["status"] == "done" and "Токен до" in fresh["overall"]["note"]
-    assert fresh["steps"]["connect"]["status"] == "done" and "осталось 7 дн." in fresh["steps"]["connect"]["note"]
+    assert fresh["overall"]["status"] == "done" and "Token valid until" in fresh["overall"]["note"]
+    assert fresh["steps"]["connect"]["status"] == "done" and "(7 d 0 h left)" in fresh["steps"]["connect"]["note"]
     assert fresh["steps"]["publish"]["status"] == "optional"
     assert ys.alert(cfg, now=t0) is None and ys.tray_reminder(cfg, now=t0) is None
-    assert ys.tray_menu_label(cfg, now=t0).startswith("YouTube: переподключить (токен до ")
+    assert ys.tray_menu_label(cfg, now=t0).startswith("YouTube: reconnect (token expires ")
 
     day5 = exp - DAY - DAY // 2  # 1.5 days left: page banner, no tray balloon yet
     assert ys.setup_state(cfg, NO_VIDEOS, now=day5)["steps"]["connect"]["status"] == "warn"
@@ -139,13 +139,13 @@ def test_weekly_countdown_from_connect_to_expiry():
 
     last_day = exp - DAY // 2  # the tray balloon comes on the last day
     key, text = ys.tray_reminder(cfg, now=last_day)
-    assert key == f"soon:{exp}" and "переподключить" in text
+    assert key == f"soon:{exp}" and "reconnect" in text
 
     expired = exp + 3600  # before any refresh attempt has recorded an error
     assert ys.setup_state(cfg, NO_VIDEOS, now=expired)["overall"]["status"] == "error"
     assert ys.alert(cfg, now=expired)["level"] == "error"
     assert ys.tray_reminder(cfg, now=expired)[0] == f"off:{exp}"
-    assert ys.tray_menu_label(cfg, now=expired) == "⚠ YouTube отключён — переподключить"
+    assert ys.tray_menu_label(cfg, now=expired) == "⚠ YouTube disconnected — reconnect"
 
     next_week = _testing_cfg(expired)  # reconnected: a new key, so the tray reminds again
     assert ys.tray_reminder(next_week, now=next_week["yt_refresh_expires_at"] - 3600)[0] != key
@@ -155,7 +155,7 @@ def test_wrong_client_is_not_offered_a_reconnect():
     cfg = {**_testing_cfg(1_800_000_000), "yt_auth_error": "yt_refresh_failed: invalid_client Unauthorized"}
     a = ys.alert(cfg)
     assert a["level"] == "error" and a["reconnect"] is False
-    assert "шаг 2" in ys.setup_state(cfg, NO_VIDEOS)["overall"]["note"]
+    assert "step 2" in ys.setup_state(cfg, NO_VIDEOS)["overall"]["note"]
     assert "Client ID" in ys.tray_reminder(cfg)[1]
 
 
@@ -164,7 +164,7 @@ def test_status_badge_asks_for_a_reconnect(client, set_settings):
     set_settings(yt_client_id=CID, yt_access_token="a", yt_refresh_token="r",
                  yt_refresh_expires_at=int(time.time()) + DAY)
     badge = client.get("/api/settings/status").json()["youtube"]
-    assert badge["status"] == "partial" and badge["message"].startswith("Токен до")
+    assert badge["status"] == "partial" and badge["message"].startswith("Token valid until")
     set_settings(yt_auth_error="yt_refresh_failed: invalid_grant")
     assert client.get("/api/settings/status").json()["youtube"]["status"] == "not_configured"
 
@@ -176,7 +176,7 @@ def test_banner_only_while_youtube_is_broken(client, set_settings):
     assert client.get("/api/youtube/alert").text == ""
     set_settings(yt_auth_error="yt_refresh_failed: invalid_grant Bad Request", yt_auth_error_at=1_790_000_000)
     html = client.get("/api/youtube/alert").text
-    assert "YouTube отключён" in html and "/accounts#yt_setup" in html
+    assert "YouTube is disconnected" in html and "/accounts#yt_setup" in html
     assert "href='/api/accounts/connect/youtube/go'" in html  # one-click reconnect
 
 
@@ -186,7 +186,7 @@ def test_banner_warns_before_the_weekly_expiry(client, set_settings):
     assert client.get("/api/youtube/alert").text == ""  # plenty of time left
     set_settings(yt_refresh_expires_at=int(time.time()) + DAY)
     html = client.get("/api/youtube/alert").text
-    assert "Токен YouTube истекает через" in html and "Переподключить" in html
+    assert "YouTube token expires in" in html and "Reconnect" in html
 
 
 def test_every_page_loads_the_banner_and_accounts_the_checklist(client):
@@ -221,7 +221,7 @@ def test_reconnect_records_channel_and_token_expiry(client, set_settings, monkey
                                                                 "customUrl": "@sargoniusgames"}}]})
     _route_httpx(monkeypatch, google)
     page = client.get("/api/accounts/callback/youtube", params={"code": "c", "state": "st-2"}).text
-    assert "YouTube подключён" in page and "Sargonius Games (@sargoniusgames)" in page and "Testing" in page
+    assert "YouTube connected" in page and "Sargonius Games (@sargoniusgames)" in page and "Testing" in page
 
     cfg = load_settings()
     assert cfg["yt_auth_error"] == "" and cfg["yt_channel"] == "Sargonius Games (@sargoniusgames)"

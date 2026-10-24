@@ -1,44 +1,66 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>🎞️ Фабрика шортсов</h2>
-<p class="muted">Кинь пачку вертикальных клипов, задай настройки один раз — приложение отрендерит и расставит по расписанию.</p>
+{% include "partials/shorts_tabs.html" %}
+<p class="muted">Drop a batch of clips and set things up once — the app renders 9:16 and schedules them.</p>
+{% include "partials/shorts_tips.html" %}
 
 <form id="shorts_form">
 	<!-- Global "apply to all" panel -->
 	<div class="sf-panel">
-		<h3>Общие настройки <span class="muted" style="font-weight:400;">(применяются ко всем клипам)</span></h3>
+		<h3>Shared settings <span class="muted" style="font-weight:400;">— for the whole batch</span></h3>
 
 		<div class="form-group">
-			<label>Проект</label>
-			<div id="project_tiles" class="project-tiles-row"><span class="muted" style="font-size:12px;">Загрузка…</span></div>
+			<label>Project</label>
+			<div id="project_tiles" class="project-tiles-row"><span class="muted" style="font-size:12px;">Loading…</span></div>
+		</div>
+		<div class="form-group">
+			<label>Goal <span class="muted" style="font-weight:400;">(optional) — the videos show up in “What I did” on the goal page</span></label>
+			<select id="g_goal"><option value="">— no goal —</option></select>
+		</div>
+
+		<!-- What goes where: the three text fields of a clip, per network -->
+		<div class="sf-where">
+			<div class="sf-where-h">What goes where</div>
+			<div class="sf-where-grid">
+				<div><b>Title</b> <span class="muted">— on the clip card</span>
+					<p>The only text shown in the Shorts player: one line, ~40 Latin / ~20 Japanese characters. Hook + game name.</p></div>
+				<div><b>Description</b>
+					<p>YouTube — below the video: hidden in the player, opens via “…”, helps search. TikTok — the caption right after the title; Instagram — the whole caption.
+					So <b>don’t repeat the title</b>: what the game is and what’s in the clip, 1–2 sentences. <code>{steam}</code> becomes a Steam link with a UTM tag.</p></div>
+				<div><b>Hashtags</b>
+					<p>1–3 on topic, added to the end of the description and caption. The Shorts player doesn’t show them; only a hashtag in the title itself is visible.</p></div>
+			</div>
+		</div>
+
+		<p class="sf-inherit muted">Description, hashtags and music from here fill every clip where the field is empty or hasn’t been edited by hand. Text you wrote in a clip is never overwritten.</p>
+
+		<div class="form-group">
+			<label>Description <span class="muted" style="font-weight:400;">— default for clips</span></label>
+			<textarea id="g_desc" rows="2" placeholder="Wasteland Courier — a freelancer life sim in the wasteland. Wishlist on Steam: {steam}" style="width:100%; resize:vertical;"></textarea>
+			<div class="sf-field-note muted" id="g_desc_note"></div>
 		</div>
 
 		<div class="row">
 			<div class="form-group" style="flex:1;">
-				<label>Теги/хэштеги</label>
-				<input type="text" id="g_tags" placeholder="#Shorts #Gamedev #IndieDev #ゲーム制作" />
+				<label>Hashtags</label>
+				<input type="text" id="g_tags" placeholder="#indiegame #gamedev #ゲーム制作" />
 			</div>
 			<div class="form-group" style="flex:1;">
-				<label>🎵 Музыка (опц.)</label>
+				<label>🎵 Music <span class="muted" style="font-weight:400;">(optional, baked into the video)</span></label>
 				<div class="row">
-					<select id="g_music" style="flex:1;"><option value="">Без музыки</option></select>
-					<button type="button" class="btn" id="refresh_music">↻</button>
+					<select id="g_music" style="flex:1;"><option value="">No music</option></select>
+					<button type="button" class="btn" id="refresh_music" title="Rescan music folders">↻</button>
 				</div>
 			</div>
 		</div>
 
 		<div class="form-group">
-			<label>Описание <span class="muted" style="font-weight:400;">(общее для всех клипов; уходит в описание YouTube и в подпись TikTok)</span></label>
-			<textarea id="g_desc" rows="3" placeholder="Описание ролика — можно на японском: 夜のシンセウェイブ・ドライブ…" style="width:100%; resize:vertical;"></textarea>
-		</div>
-
-		<div class="form-group">
-			<label>Площадки</label>
+			<label>Networks</label>
 			<div class="platforms-grid" id="g_platforms">
 				<label class="platform-option"><input class="pf" type="checkbox" value="yt" checked /> YouTube Shorts</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="tiktok" checked /> TikTok <span class="muted" style="font-size:11px;">(черновик)</span></label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="tiktok" checked /> TikTok <span class="muted" style="font-size:11px;">(draft)</span></label>
 				<label class="platform-option"><input class="pf" type="checkbox" value="ig_reels" checked /> Instagram Reels</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="vk_video" /> VK Видео</label>
+				<label class="platform-option"><input class="pf" type="checkbox" value="vk_video" /> VK Video</label>
 				<label class="platform-option"><input class="pf" type="checkbox" value="tg" /> Telegram</label>
 				<label class="platform-option"><input class="pf" type="checkbox" value="x" /> X</label>
 				<label class="platform-option"><input class="pf" type="checkbox" value="reddit" /> Reddit</label>
@@ -47,144 +69,190 @@
 		</div>
 
 		<div class="form-group">
-			<label>Авто-расписание (спред)</label>
+			<label>Auto-schedule (spread)</label>
 			<div class="row" style="flex-wrap:wrap; align-items:flex-end; gap:10px;">
 				<div>
-					<div class="muted" style="font-size:12px;">Первый пост</div>
+					<div class="muted" style="font-size:12px;">First post</div>
 					<input type="datetime-local" id="sch_start" />
 				</div>
 				<div>
-					<div class="muted" style="font-size:12px;">Интервал</div>
+					<div class="muted" style="font-size:12px;">Interval</div>
 					<div class="row">
 						<input type="number" id="sch_every" value="1" min="1" style="width:70px;" />
 						<select id="sch_unit">
-							<option value="hours">часов</option>
-							<option value="days" selected>дней</option>
-							<option value="minutes">минут</option>
+							<option value="hours">hours</option>
+							<option value="days" selected>days</option>
+							<option value="minutes">minutes</option>
 						</select>
 					</div>
 				</div>
-				<button type="button" class="btn" id="apply_schedule">Разложить по времени</button>
-				<button type="button" class="btn" id="apply_meta">Применить теги/площадки ко всем</button>
+				<button type="button" class="btn" id="apply_schedule">Spread over time</button>
+				<button type="button" class="btn" id="schedule_after_queue" title="First post = the last Short already in the queue + the interval, then spread the clips">⏭ After the queue</button>
+				<button type="button" class="btn" id="apply_meta" title="Description, hashtags and music from here go into ALL clips, even where you wrote your own">↺ Overwrite in all clips</button>
 			</div>
+			<div class="sf-field-note muted" id="sch_note"></div>
 		</div>
 	</div>
 
 	<!-- Clip-type presets: one click fills a card's title + desc + tags + music -->
 	<div class="sf-panel" style="margin-top:16px;">
-		<h3>🎛️ Пресеты типа клипа <span class="muted" style="font-weight:400;">(заголовок + описание + теги + музыка — клик подставляет в клип)</span></h3>
-		<div id="preset_chips" class="preset-manager"><span class="muted" style="font-size:12px;">Загрузка…</span></div>
+		<h3>🎛️ Clip type presets <span class="muted" style="font-weight:400;">(title + description + tags + music — click to fill a clip)</span></h3>
+		<div id="preset_chips" class="preset-manager"><span class="muted" style="font-size:12px;">Loading…</span></div>
 		<div id="preset_form" class="preset-form" style="display:none;">
 			<input type="hidden" id="pf_id" />
 			<div class="row" style="flex-wrap:wrap; gap:10px;">
 				<div class="form-group" style="flex:1; min-width:160px;">
-					<label>Название пресета <span class="muted">(видно только тебе)</span></label>
+					<label>Preset name <span class="muted">(only you see it)</span></label>
 					<input type="text" id="pf_name" placeholder="レベルデザイン / UI作業 / カメラワーク" />
 				</div>
 				<div class="form-group" style="flex:2; min-width:220px;">
-					<label>🎵 Музыка (опц.)</label>
-					<select id="pf_music"><option value="">Без музыки</option></select>
+					<label>🎵 Music (optional)</label>
+					<select id="pf_music"><option value="">No music</option></select>
 				</div>
 			</div>
 			<div class="form-group">
-				<label>Заголовок</label>
+				<label>Title</label>
 				<input type="text" id="pf_title" placeholder="レベルデザイン作業中！新エリアを設計しています" />
 			</div>
 			<div class="form-group">
-				<label>Описание</label>
+				<label>Description</label>
 				<textarea id="pf_desc" rows="2" placeholder="新しいエリアのレイアウトを作っています。ネオンが映える街並みを目指して…" style="width:100%; resize:vertical;"></textarea>
 			</div>
 			<div class="form-group">
-				<label>Теги/хэштеги</label>
+				<label>Tags/hashtags</label>
 				<input type="text" id="pf_tags" placeholder="#Shorts #ゲーム制作 #レベルデザイン #インディーゲーム" />
 			</div>
 			<div class="btn-row">
-				<button type="button" class="btn btn-primary btn-sm" id="pf_save">Сохранить пресет</button>
-				<button type="button" class="btn btn-sm" id="pf_cancel">Отмена</button>
+				<button type="button" class="btn btn-primary btn-sm" id="pf_save">Save preset</button>
+				<button type="button" class="btn btn-sm" id="pf_cancel">Cancel</button>
 			</div>
 		</div>
 	</div>
 
 	<!-- Live platform preview: how the caption/description will look + limits -->
 	<div class="sf-panel" style="margin-top:16px;">
-		<h3>👁 Превью подписи <span class="muted" id="pv_source" style="font-weight:400; font-size:12px;"></span></h3>
+		<h3>👁 Caption preview <span class="muted" id="pv_source" style="font-weight:400; font-size:12px;"></span></h3>
 		<div class="pv-grid">
 			<!-- YouTube -->
 			<div class="pv-card">
-				<div class="pv-head pv-head-yt">▶ YouTube Shorts <span class="muted" style="font-weight:400;">(авто-публикация)</span></div>
-				<div class="pv-label">Заголовок</div>
+				<div class="pv-head pv-head-yt">▶ YouTube Shorts <span class="muted" style="font-weight:400;">(auto-publish)</span></div>
+				<div class="pv-label">Title</div>
 				<div class="pv-title" id="pv_yt_title"></div>
 				<div class="pv-meter"><div class="pv-bar" id="pv_yt_title_bar"></div></div>
 				<div class="pv-count" id="pv_yt_title_count"></div>
-				<div class="pv-label">Как видно в плеере</div>
+				<div class="pv-label">As shown in the player</div>
 				<div class="pv-player">
 					<div class="pv-player-handle">👤 @SargoniusGames</div>
 					<div class="pv-player-title" id="pv_yt_player"></div>
 				</div>
-				<div class="pv-count">в плеере видна <b>1 строка</b> (моб. ~2) — ключевое ставь в первые ~20 знаков</div>
+				<div class="pv-count">the player shows <b>1 line</b> (mobile ~2) — put the key part in the first ~20 characters</div>
 				<div class="pv-count" id="pv_yt_music"></div>
-				<div class="pv-label">Описание <span class="muted">(описание + теги)</span></div>
+				<div class="pv-label">Description <span class="muted">(description + tags)</span></div>
 				<div class="pv-body" id="pv_yt_desc"></div>
 				<div class="pv-meter"><div class="pv-bar" id="pv_yt_desc_bar"></div></div>
 				<div class="pv-count" id="pv_yt_desc_count"></div>
-				<div class="pv-note">Лимит описания — <b>5000 байт</b> (яп. знак = 3 байта, латиница = 1). Хэштеги из описания <b>в плеере Shorts не видны</b> — работают только на поиск/алгоритм; видимый хэштег — только в самом заголовке. Заголовок — 100 симв. (фабрика режет до 90).</div>
+				<div class="pv-note">Description limit — <b>5,000 bytes</b> (a Japanese character = 3 bytes, Latin = 1). Hashtags in the description <b>aren’t shown in the Shorts player</b> — they only help search and the algorithm; only a hashtag in the title itself is visible. Title — 100 chars (the factory cuts it to 90).</div>
 			</div>
 			<!-- TikTok -->
 			<div class="pv-card">
-				<div class="pv-head pv-head-tt">♪ TikTok <span class="muted" style="font-weight:400;">(черновик — подпись вставишь в приложении)</span></div>
-				<div class="pv-label">Подпись <span class="muted">(заголовок + описание + теги — кнопка «📋» на борде)</span></div>
+				<div class="pv-head pv-head-tt">♪ TikTok <span class="muted" style="font-weight:400;">(draft — you paste the caption in the app)</span></div>
+				<div class="pv-label">Caption <span class="muted">(title + description + tags — the “📋” button on the board)</span></div>
 				<div class="pv-body" id="pv_tt_caption"></div>
 				<div class="pv-meter"><div class="pv-bar" id="pv_tt_bar"></div></div>
 				<div class="pv-count" id="pv_tt_count"></div>
-				<div class="pv-note">Лимит подписи в приложении — <b>4000 символов</b>, хэштеги входят в лимит. Звук добавишь в приложении при публикации черновика.</div>
+				<div class="pv-note">In-app caption limit — <b>4,000 characters</b>, hashtags included. Add a sound in the app when you publish the draft.</div>
 			</div>
 		</div>
 	</div>
 
-	<!-- Drop zone -->
-	<div id="drop_zone" class="drop-zone" style="margin:16px 0;">
-		<span>🎥 Перетащи сюда клипы (можно много) или кликни</span>
+	<!-- Drop zone (files can be dropped anywhere on the page too) -->
+	<div id="drop_zone" class="sf-drop" role="button" tabindex="0">
+		<div class="sf-drop-icon">🎬</div>
+		<div class="sf-drop-main">Drag clips here</div>
+		<div class="sf-drop-sub">or click to pick files · mp4, mov, mkv, webm · a whole batch at once is fine</div>
+		<div class="sf-drop-msg" id="drop_msg"></div>
 	</div>
-	<input type="file" id="file_input" accept="video/*" multiple style="display:none;" />
+	<input type="file" id="file_input" accept="video/*,.mkv,.mov,.m4v,.webm,.avi" multiple style="display:none;" />
 
 	<div class="sf-toolbar">
-		<span id="card_count" class="muted">Клипов: 0</span>
-		<button type="button" class="btn btn-sm" id="select_all">Выделить все</button>
-		<button type="button" class="btn btn-sm" id="select_none" style="display:none;">Снять выделение</button>
-		<button type="button" class="btn btn-sm" id="clear_all">Очистить</button>
+		<span id="card_count" class="muted">Clips: 0</span>
+		<button type="button" class="btn btn-sm" id="select_all">Select all</button>
+		<button type="button" class="btn btn-sm" id="select_none" style="display:none;">Deselect</button>
+		<button type="button" class="btn btn-sm" id="clear_all">Clear</button>
 	</div>
 
 	<!-- Multi-select apply bar (shown only when ≥1 card is checked) -->
 	<div id="bulk_bar" class="bulk-bar" style="display:none;">
-		<span class="muted"><b id="bulk_count">0</b> выделено — применить пресет:</span>
+		<span class="muted"><b id="bulk_count">0</b> selected — apply preset:</span>
 		<div id="bulk_preset_chips" class="preset-manager" style="margin:0;"></div>
+		<span class="muted">· translate:</span>
+		<span class="sf-lang" id="bulk_lang"></span>
 	</div>
 
 	<!-- Cards -->
 	<div id="cards" class="sf-cards"></div>
 
 	<div class="actions-section" style="margin-top:20px;">
-		<button type="submit" class="btn btn-primary btn-lg" id="submit_btn" disabled>В очередь на фабрику →</button>
+		<button type="submit" class="btn btn-primary btn-lg" id="submit_btn" disabled>Add to factory queue →</button>
 		<span id="submit_status" class="muted"></span>
 	</div>
 </form>
 
+<div id="drop_overlay" class="sf-drop-overlay" hidden><div>Drop to add the clips</div></div>
+
 <style>
 .sf-panel { background:#f8fafc; border:1px solid var(--border); border-radius:12px; padding:18px; }
 .sf-panel h3 { margin:0 0 14px 0; }
+.sf-panel .form-group > label { display:block; margin-bottom:4px; }
+.sf-panel .form-group > input[type="text"] { width:100%; }
 .sf-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
-.sf-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:14px; }
+/* what goes where */
+.sf-where { background:#fff; border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-bottom:12px; }
+.sf-where-h { font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; font-weight:600; margin-bottom:6px; }
+.sf-where-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px 18px; font-size:13px; }
+.sf-where-grid p { margin:3px 0 0; color:#475569; line-height:1.45; }
+.sf-inherit { font-size:12px; margin:0 0 10px; }
+.sf-field-note { font-size:12px; margin-top:3px; min-height:0; }
+/* drop zone + whole-page drop */
+.sf-drop { margin:16px 0; border:2px dashed #94a3b8; border-radius:14px; background:#f8fafc; min-height:150px; padding:20px;
+	display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; cursor:pointer; text-align:center; transition:border-color .15s, background .15s; }
+.sf-drop:hover, .sf-drop:focus-visible { border-color:#2563eb; background:#eff6ff; outline:none; }
+.sf-drop.sf-drop-compact { min-height:80px; padding:12px; }
+.sf-drop.sf-drop-compact .sf-drop-icon { display:none; }
+.sf-drop-icon { font-size:34px; line-height:1.2; }
+.sf-drop-main { font-size:17px; font-weight:600; color:#1e293b; }
+.sf-drop-sub { font-size:13px; color:#64748b; }
+.sf-drop-msg { font-size:12px; color:#b45309; min-height:0; }
+.sf-drop-overlay { position:fixed; inset:0; z-index:900; background:rgba(37,99,235,.10); border:4px dashed #2563eb; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.sf-drop-overlay[hidden] { display:none; }
+.sf-drop-overlay div { background:#2563eb; color:#fff; font-size:20px; font-weight:600; padding:16px 28px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+/* cards */
+.sf-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:14px; }
 .sf-card { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:8px; }
-.sf-card video { width:100%; aspect-ratio:9/16; max-height:280px; object-fit:cover; background:#000; border-radius:8px; }
 .sf-card .sf-name { font-size:11px; color:#64748b; word-break:break-all; }
+.sf-card .sf-meta { color:#94a3b8; }
 .sf-card input[type="text"], .sf-card input[type="datetime-local"] { width:100%; }
-.sf-card .sf-remove { align-self:flex-end; }
 .sf-card textarea { width:100%; resize:vertical; font-family:inherit; font-size:13px; }
 .sf-card select { width:100%; }
 .sf-card.sf-selected { border-color:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,.25); }
 .sf-cardhead { display:flex; align-items:center; gap:6px; justify-content:space-between; }
 .sf-cardhead label { display:flex; align-items:center; gap:5px; font-size:11px; color:#64748b; cursor:pointer; }
-.sf-card .sf-applied { font-size:11px; color:#2563eb; min-height:14px; }
+.sf-card .sf-applied { font-size:11px; color:#2563eb; min-height:0; }
+.sf-card .sf-applied:empty { display:none; }
+/* the 9:16 frame as it will be rendered */
+.sf-stage { position:relative; height:320px; aspect-ratio:9/16; max-width:100%; margin:0 auto; overflow:hidden; background:#000; border-radius:8px; cursor:pointer; }
+.sf-stage video { position:absolute; left:0; top:0; width:100%; height:100%; max-width:none; pointer-events:none; }
+.sf-stage-tip { position:absolute; top:6px; left:6px; right:6px; text-align:center; font-size:11px; color:#fff; background:rgba(15,23,42,.6); border-radius:6px; padding:2px 6px; opacity:0; transition:opacity .15s; pointer-events:none; }
+.sf-stage:hover .sf-stage-tip { opacity:1; }
+.sf-uploading .sf-stage { cursor:default; }
+.sf-up { position:absolute; left:0; right:0; bottom:0; padding:10px 8px 8px; background:linear-gradient(transparent, rgba(0,0,0,.8)); color:#fff; font-size:12px; display:flex; flex-direction:column; gap:5px; }
+.sf-up[hidden] { display:none; }
+.sf-up.sf-up-err { background:rgba(127,29,29,.88); }
+.sf-up a { color:#fff; text-decoration:underline; }
+.sf-up-bar { height:5px; background:rgba(255,255,255,.25); border-radius:3px; overflow:hidden; }
+.sf-up-bar i { display:block; height:100%; width:0; background:#60a5fa; transition:width .2s; }
+.sf-fl { display:block; font-size:12px; font-weight:600; color:#334155; margin:2px 0 -5px; cursor:help; }
+.sf-fl span { font-weight:400; color:#94a3b8; }
 /* Clip-type preset chips */
 .preset-manager { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
 .preset-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:16px; font-size:13px; cursor:pointer; }
@@ -196,6 +264,14 @@
 .preset-form { background:#fff; border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:8px; }
 .bulk-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; margin-bottom:10px; }
 .sf-card-chips { display:flex; gap:6px; flex-wrap:wrap; }
+.sf-card-chips:empty { display:none; }
+.sf-lang { display:flex; align-items:center; gap:4px; font-size:12px; flex-wrap:wrap; }
+.sf-lang button { border:1px solid var(--border); background:#fff; border-radius:5px; padding:1px 8px; font-size:12px; cursor:pointer; color:#475569; }
+.sf-lang button.sf-lang-on { background:#2563eb; border-color:#2563eb; color:#fff; }
+.sf-lang button:disabled { opacity:.5; cursor:wait; }
+.sf-lang-st { color:#64748b; font-size:11px; }
+.sf-lang-st.err { color:#dc2626; }
+.sf-lang-st a { cursor:pointer; }
 .pv-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; }
 .pv-card { background:#fff; border:1px solid var(--border); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
 .pv-head { font-weight:600; padding-bottom:8px; border-bottom:1px solid var(--border); margin-bottom:4px; }
@@ -220,15 +296,39 @@
 .platform-option { display:flex; align-items:center; gap:6px; padding:6px 12px; background:#fff; border:1px solid var(--border); border-radius:6px; cursor:pointer; }
 .platform-option:has(input:checked) { background:#fef3c7; border-color:#f59e0b; }
 .platform-option:has(input:disabled) { opacity:.55; cursor:not-allowed; }
+/* Card: editor button + summary + checklist chip */
+.sf-edrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sf-summary { font-size:12px; color:#475569; }
+.sf-lint { font-size:12px; padding:2px 8px; border-radius:12px; background:#f1f5f9; border:1px solid var(--border); cursor:pointer; white-space:nowrap; }
+.sf-lint .ok { color:#16a34a; } .sf-lint .warn { color:#d97706; } .sf-lint .err { color:#dc2626; }
+/* The editor's right column on this page (shorts_editor.js → video_editor.js) */
+.ve-right .sfx-panel .btn { width:auto; margin:0; }
+.sfx-panel input[type="text"] { width:100%; }
+.sfx-nav { display:flex; align-items:center; justify-content:space-between; gap:6px; margin:4px 0 2px; font-size:12px; }
+.sfe-findings { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+.sfe-f { display:flex; gap:6px; align-items:flex-start; line-height:1.35; }
+.sfe-fi { width:16px; flex:none; text-align:center; font-weight:700; }
+.sfe-f-ok { color:#475569; } .sfe-f-ok .sfe-fi { color:#16a34a; }
+.sfe-f-info .sfe-fi { color:#2563eb; }
+.sfe-f-warn .sfe-fi { color:#d97706; }
+.sfe-f-error { font-weight:600; } .sfe-f-error .sfe-fi { color:#dc2626; }
+.sfe-why { display:inline-block; margin-top:8px; font-size:12px; }
+.sfe-manual { display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.sfe-manual label { display:flex; gap:6px; align-items:flex-start; cursor:pointer; }
 </style>
 
+<script src="/static/goal_picker.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/video_editor.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/shorts_editor.js?v={{ request.app.state.asset_version }}"></script>
 <script>
 const fileInput = document.getElementById('file_input');
 const dropZone = document.getElementById('drop_zone');
 const cardsEl = document.getElementById('cards');
 const submitBtn = document.getElementById('submit_btn');
-let cards = []; // {file, root, titleEl, tagsEl, descEl, musicEl, schedEl, selEl, chipsEl, appliedEl, selected}
+let cards = []; // {file, url, root, titleEl, tagsEl, descEl, musicEl, schedEl, selEl, …} + spec etc. (shorts_editor.js)
 let selectedPreset = null; // render preset from the picked project
+let selectedProjectId = null; // stored on each clip's Brief (home screen / goals)
+let selectedProjectName = ''; // prefills “＋ End title” in the editor
 let presets = [];          // clip-type presets (title+desc+tags+music) from /api/shorts/presets
 let musicTracks = [];      // cached track list from /api/music/list
 
@@ -237,8 +337,9 @@ function fmtLocal(dt) {
 	return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 function refreshCount() {
-	document.getElementById('card_count').textContent = `Клипов: ${cards.length}`;
+	document.getElementById('card_count').textContent = `Clips: ${cards.length}`;
 	submitBtn.disabled = cards.length === 0;
+	dropZone.classList.toggle('sf-drop-compact', cards.length > 0);
 }
 function globalTags() { return document.getElementById('g_tags').value || ''; }
 function globalDesc() { return document.getElementById('g_desc').value || ''; }
@@ -248,7 +349,7 @@ const escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').repl
 // Build <option> list for a music <select>, marking `selected` (adds it if the
 // path isn't in the scanned list — e.g. it came from a project/preset).
 function musicOptionsHtml(selected) {
-	let html = '<option value="">Без музыки</option>';
+	let html = '<option value="">No music</option>';
 	let found = false;
 	musicTracks.forEach(t => {
 		const sel = t.path === selected ? ' selected' : '';
@@ -266,13 +367,94 @@ function musicName(path) {
 	return t ? t.name : String(path).split(/[\\/]/).pop();
 }
 
+// ---- Global fields follow into the cards -------------------------------------------
+// A card's description / hashtags / music that is empty, or still the value the
+// global field had before, follows the global field; anything typed in the card stays.
+const GLOBAL_IDS = ['g_desc', 'g_tags', 'g_music'];
+const lastGlobal = {};
+GLOBAL_IDS.forEach(id => { lastGlobal[id] = document.getElementById(id).value || ''; });
+function cardFieldFor(c, id) { return id === 'g_desc' ? c.descEl : (id === 'g_tags' ? c.tagsEl : c.musicEl); }
+function propagateGlobal(id) {
+	const val = document.getElementById(id).value || '';
+	const prev = lastGlobal[id];
+	lastGlobal[id] = val;
+	if (val === prev) return;
+	cards.forEach(c => {
+		const cur = cardFieldFor(c, id).value || '';
+		if (cur.trim() && cur !== prev) return;  // written by hand
+		if (id === 'g_music') setCardMusic(c, val);
+		else cardFieldFor(c, id).value = val;
+	});
+	updatePreview();
+}
+
+// ---- Per-clip language: EN / JA / RU translate title + description + hashtags ----
+// card.langCache[lang] = {f: fields, from: source lang | null, sig: source fields when translated}.
+// Coming back to a language restores its version (with your edits); if its source
+// text changed since, it is translated again.
+const LANG_LABELS = { en: 'EN', ja: 'JA', ru: 'RU' };
+const LANG_BTNS = ['en', 'ja', 'ru'].map(l => `<button type="button" data-l="${l}">${LANG_LABELS[l]}</button>`).join('');
+function detectLang(s) {
+	if (/[぀-ヿ㐀-䶿一-鿿]/.test(s)) return 'ja';
+	const cyr = (s.match(/[Ѐ-ӿ]/g) || []).length, lat = (s.match(/[A-Za-z]/g) || []).length;
+	if (!cyr && !lat) return null;
+	return cyr >= lat ? 'ru' : 'en';
+}
+const fieldsSig = f => JSON.stringify([f.title, f.desc, f.tags]);
+function cardFields(c) { return { title: c.titleEl.value, desc: c.descEl.value, tags: c.tagsEl.value }; }
+function setCardFields(c, f) { c.titleEl.value = f.title || ''; c.descEl.value = f.desc || ''; c.tagsEl.value = f.tags || ''; }
+function markCardLang(c) {
+	c.root.querySelectorAll('.sf-lang button').forEach(b => b.classList.toggle('sf-lang-on', b.dataset.l === c.lang));
+}
+function cardLangStatus(c, text, err) { c.langStEl.className = 'sf-lang-st' + (err ? ' err' : ''); c.langStEl.textContent = text || ''; }
+function resetCardLang(c) { c.lang = null; c.origin = null; c.langCache = {}; cardLangStatus(c, ''); markCardLang(c); }
+
+async function translateCard(card, lang) {
+	const cur = card.lang || detectLang(`${card.titleEl.value}\n${card.descEl.value}`) || 'en';
+	if (!card.origin) card.origin = cur;
+	const prev = card.langCache[cur];
+	card.langCache[cur] = { f: cardFields(card), from: prev ? prev.from : null, sig: prev ? prev.sig : null };
+	if (lang === cur) { card.lang = cur; markCardLang(card); return; }
+	const hit = card.langCache[lang];
+	const srcOfHit = hit && hit.from ? card.langCache[hit.from] : null;
+	if (hit && (!hit.from || (srcOfHit && fieldsSig(srcOfHit.f) === hit.sig))) {
+		setCardFields(card, hit.f);
+		card.lang = lang; markCardLang(card); cardLangStatus(card, '');
+		updatePreview();
+		return;
+	}
+	const src = card.langCache[cur].f;
+	if (!(src.title + src.desc + src.tags).trim()) { cardLangStatus(card, 'nothing to translate', true); return; }
+	const locked = [...card.root.querySelectorAll('.sf-lang button'), card.titleEl, card.descEl, card.tagsEl];
+	locked.forEach(el => el.disabled = true);
+	cardLangStatus(card, `translating to ${LANG_LABELS[lang]}…`);
+	try {
+		const r = await fetch('/api/shorts/translate', {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ ...src, target: lang }),
+		});
+		const j = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+		const f = { title: j.title || '', desc: j.desc || '', tags: j.tags || '' };
+		card.langCache[lang] = { f, from: cur, sig: fieldsSig(src) };
+		setCardFields(card, f);
+		card.lang = lang; markCardLang(card);
+		cardLangStatus(card, (j.provider || '').startsWith('openai') ? '' : `via ${j.provider || '?'} — hashtags not translated`);
+	} catch (e) {
+		cardLangStatus(card, '⚠ ' + e.message, true);
+	} finally {
+		locked.forEach(el => el.disabled = false);
+		updatePreview();
+	}
+}
+
 // ---- Live platform preview (mirrors what tasks.py actually sends) ----
 const PV = {
-	ytTitleFactory: 90,   // tasks.py режет title[:90]
-	ytTitleMax: 100,      // жёсткий лимит YouTube
-	ytDescBytes: 5000,    // лимит YouTube API — БАЙТЫ utf-8 (клиент режет до 4900)
-	ytHashtagsMax: 60,    // >60 хэштегов — YouTube игнорирует все
-	ttCaptionMax: 4000,   // лимит подписи в приложении TikTok
+	ytTitleFactory: 90,   // tasks.py cuts title[:90]
+	ytTitleMax: 100,      // YouTube hard limit
+	ytDescBytes: 5000,    // YouTube API limit — utf-8 BYTES (the client cuts to 4900)
+	ytHashtagsMax: 60,    // >60 hashtags — YouTube ignores all of them
+	ttCaptionMax: 4000,   // TikTok in-app caption limit
 };
 const _enc = new TextEncoder();
 const chars = s => [...s].length;
@@ -298,69 +480,95 @@ function updatePreview() {
 	const desc = (first ? first.descEl.value : globalDesc()).trim();
 	const music = first ? first.musicEl.value : globalMusic();
 	document.getElementById('pv_source').textContent = cards.length
-		? '— по первому клипу' : '— пример (добавь клипы, превью оживёт)';
+		? '— from the first clip' : '— example (add clips to see yours)';
 	// Music is baked into the render → shown on the YouTube card only. TikTok
 	// gets its sound added in-app when the creator publishes the draft.
 	document.getElementById('pv_yt_music').innerHTML = music
-		? `🎵 <b>${escHtml(musicName(music))}</b> — вшивается при рендере`
-		: '🎵 <span class="pv-placeholder">без музыки</span>';
+		? `🎵 <b>${escHtml(musicName(music))}</b> — baked in at render`
+		: '🎵 <span class="pv-placeholder">no music</span>';
 
-	// YouTube: title = заголовок карточки (пусто → 'IndiePulse Short'), режется до 90
+	// YouTube: title = the card's title (empty → 'IndiePulse Short'), cut to 90
 	const ytTitleFull = title || 'IndiePulse Short';
 	const ytTitle = [...ytTitleFull].slice(0, PV.ytTitleFactory).join('');
 	const tEl = document.getElementById('pv_yt_title');
-	tEl.innerHTML = markTags(ytTitle) + (title ? '' : ' <span class="pv-placeholder">(заголовок пуст — уйдёт заглушка)</span>');
+	tEl.innerHTML = markTags(ytTitle) + (title ? '' : ' <span class="pv-placeholder">(title empty — a placeholder goes out)</span>');
 	const tLen = chars(ytTitleFull);
 	pvSetMeter(document.getElementById('pv_yt_title_bar'), tLen, PV.ytTitleFactory);
 	document.getElementById('pv_yt_title_count').innerHTML =
-		pvCountHtml(tLen, PV.ytTitleFactory, 'симв.') + (tLen > PV.ytTitleFactory ? ' — будет обрезан' : '');
-	// Плашка «как в плеере»: одна строка с CSS-ellipsis, как в реальном UI
+		pvCountHtml(tLen, PV.ytTitleFactory, 'chars') + (tLen > PV.ytTitleFactory ? ' — will be cut' : '');
+	// The “as in the player” strip: one line with a CSS ellipsis, like the real UI
 	document.getElementById('pv_yt_player').textContent = ytTitle;
 
-	// YouTube: описание = desc (пусто → 'Uploaded via IndiePulse') + перенос + теги
+	// YouTube: description = desc (empty → 'Uploaded via IndiePulse') + newline + tags
 	const ytDesc = ((desc || 'Uploaded via IndiePulse') + (tags ? '\n' + tags : '')).trim();
 	const dEl = document.getElementById('pv_yt_desc');
-	dEl.innerHTML = markTags(ytDesc) || '<span class="pv-placeholder">пусто</span>';
+	dEl.innerHTML = markTags(ytDesc) || '<span class="pv-placeholder">empty</span>';
 	const dBytes = bytes(ytDesc), dChars = chars(ytDesc), dTags = nHashtags(ytDesc);
 	pvSetMeter(document.getElementById('pv_yt_desc_bar'), dBytes, PV.ytDescBytes);
-	let dExtra = ` · ${dChars} симв. · ${dTags} хэштегов`;
-	if (dTags > PV.ytHashtagsMax) dExtra += ` <b class="over">— больше ${PV.ytHashtagsMax}, YouTube проигнорирует ВСЕ</b>`;
-	document.getElementById('pv_yt_desc_count').innerHTML = pvCountHtml(dBytes, PV.ytDescBytes, 'байт') + dExtra;
+	let dExtra = ` · ${dChars} chars · ${dTags} ${dTags === 1 ? 'hashtag' : 'hashtags'}`;
+	if (dTags > PV.ytHashtagsMax) dExtra += ` <b class="over">— over ${PV.ytHashtagsMax}, YouTube will ignore ALL of them</b>`;
+	document.getElementById('pv_yt_desc_count').innerHTML = pvCountHtml(dBytes, PV.ytDescBytes, 'bytes') + dExtra;
 
-	// TikTok: подпись = заголовок + описание + теги (копируется кнопкой на борде)
+	// TikTok: caption = title + description + tags (copied with the button on the board)
 	const ttCaption = [title, desc, tags].filter(Boolean).join('\n').trim();
 	const ttEl = document.getElementById('pv_tt_caption');
-	ttEl.innerHTML = markTags(ttCaption) || '<span class="pv-placeholder">пусто — заполни заголовок/описание/теги</span>';
+	ttEl.innerHTML = markTags(ttCaption) || '<span class="pv-placeholder">empty — fill in the title/description/tags</span>';
 	const ttLen = chars(ttCaption);
 	pvSetMeter(document.getElementById('pv_tt_bar'), ttLen, PV.ttCaptionMax);
 	document.getElementById('pv_tt_count').innerHTML =
-		pvCountHtml(ttLen, PV.ttCaptionMax, 'симв.') + ` · ${nHashtags(ttCaption)} хэштегов`;
+		pvCountHtml(ttLen, PV.ttCaptionMax, 'chars') + ` · ${nHashtags(ttCaption)} ${nHashtags(ttCaption) === 1 ? 'hashtag' : 'hashtags'}`;
+	SFEditor.scheduleLint();  // the checklist follows every edit
 }
 
+// ---- Adding clips ------------------------------------------------------------------
+const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi)$/i;
+const isVideo = f => (f.type || '').startsWith('video/') || VIDEO_EXT.test(f.name || '');
+const FL = (name, hint, tip) => `<label class="sf-fl" title="${escAttr(tip)}">${name} <span>${hint}</span></label>`;
+
 function addFiles(fileList) {
-	[...fileList].forEach(file => {
-		if (!file.type.startsWith('video/')) return;
+	const files = [...(fileList || [])];
+	const skipped = files.filter(f => !isVideo(f)).map(f => f.name);
+	document.getElementById('drop_msg').textContent = skipped.length ? `Skipped — not a video: ${skipped.join(', ')}` : '';
+	files.filter(isVideo).forEach(file => {
 		const root = document.createElement('div');
 		root.className = 'sf-card';
 		const url = URL.createObjectURL(file);
 		root.innerHTML = `
 			<div class="sf-cardhead">
-				<label><input type="checkbox" class="sf-sel" /> выбрать</label>
-				<button type="button" class="btn btn-sm sf-remove">Убрать</button>
+				<label><input type="checkbox" class="sf-sel" /> select</label>
+				<button type="button" class="btn btn-sm sf-remove" title="Remove the clip from the batch">Remove</button>
 			</div>
-			<video src="${url}" muted playsinline preload="metadata"></video>
-			<div class="sf-name">${escHtml(file.name)}</div>
+			<div class="sf-stage">
+				<video src="${url}" muted playsinline preload="metadata"></video>
+				<div class="sf-stage-tip">the 9:16 frame as rendered · click to edit</div>
+				<div class="sf-up"><div class="sf-up-bar"><i></i></div><span class="sf-up-text">waiting to upload…</span></div>
+			</div>
+			<div class="sf-name">${escHtml(file.name)}<br><span class="sf-meta"></span></div>
+			<div class="sf-edrow">
+				<button type="button" class="btn btn-sm btn-primary sf-edit" disabled title="Frame (drag the picture, wheel to zoom), trim on the timeline, sound, music, on-screen text">⏳ uploading…</button>
+				<span class="sf-lint" title="Checklist — open the editor" style="display:none;"></span>
+			</div>
+			<div class="sf-summary"></div>
 			<div class="sf-card-chips"></div>
 			<div class="sf-applied"></div>
-			<input type="text" class="sf-title" placeholder="Заголовок…" />
-			<textarea class="sf-desc" rows="2" placeholder="Описание…"></textarea>
-			<input type="text" class="sf-tags" placeholder="Теги…" />
+			<div class="sf-lang" title="Language of the title, description and hashtags: click to translate (OpenAI); earlier versions are kept">
+				<span>🌐</span>${LANG_BTNS}<span class="sf-lang-st"></span>
+			</div>
+			${FL('Title', '— shown in the player', 'The only text shown in the Shorts player: one line, ~40 Latin / ~20 Japanese characters. Hook + game name.')}
+			<input type="text" class="sf-title" placeholder="Hook + game name" />
+			${FL('Description', '— below the video, not the title again', 'YouTube: below the video, hidden in the player, helps search. TikTok: goes into the caption right after the title. What the game is and what’s in the clip, 1–2 sentences; {steam} → Steam link.')}
+			<textarea class="sf-desc" rows="3" placeholder="What the game is and what’s in the clip, 1–2 sentences"></textarea>
+			${FL('Hashtags', '— 1–3 on topic', 'Added to the end of the description and caption. The Shorts player doesn’t show them.')}
+			<input type="text" class="sf-tags" placeholder="#indiegame #gamedev" />
+			${FL('🎵 Music', '— baked into the video', 'The track is baked in at render (YouTube and every network). Volume, start point and fades — in the editor.')}
 			<select class="sf-music"></select>
+			${FL('When', '— empty = right after render', 'Publish time for this clip. “Spread over time” in the shared settings fills it for every clip.')}
 			<input type="datetime-local" class="sf-sched" />
 		`;
 		cardsEl.appendChild(root);
 		const card = {
 			file,
+			url,
 			root,
 			titleEl: root.querySelector('.sf-title'),
 			tagsEl: root.querySelector('.sf-tags'),
@@ -370,13 +578,18 @@ function addFiles(fileList) {
 			selEl: root.querySelector('.sf-sel'),
 			chipsEl: root.querySelector('.sf-card-chips'),
 			appliedEl: root.querySelector('.sf-applied'),
+			langStEl: root.querySelector('.sf-lang-st'),
 			selected: false,
+			lang: null, origin: null, langCache: {},  // see translateCard
 		};
-		// Seed the card from the global "apply to all" defaults.
+		root.querySelectorAll('.sf-lang button').forEach(b =>
+			b.addEventListener('click', () => translateCard(card, b.dataset.l)));
+		// Seed the card from the global defaults (they keep following until edited here).
 		card.tagsEl.value = globalTags();
 		card.descEl.value = globalDesc();
 		card.musicEl.innerHTML = musicOptionsHtml(globalMusic());
 		root.querySelector('.sf-remove').addEventListener('click', () => {
+			SFEditor.forget(card);
 			cards = cards.filter(c => c !== card);
 			root.remove();
 			refreshCount();
@@ -390,6 +603,7 @@ function addFiles(fileList) {
 		});
 		cards.push(card);
 		renderCardChips(card);
+		SFEditor.initCard(card);  // uploads the clip, keeps its editor settings
 	});
 	refreshCount();
 	updateBulkBar();
@@ -397,27 +611,60 @@ function addFiles(fileList) {
 }
 
 dropZone.addEventListener('click', () => fileInput.click());
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; });
-dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = ''; });
-dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor=''; addFiles(e.dataTransfer.files); });
-fileInput.addEventListener('change', () => addFiles(fileInput.files));
+dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+// Files can be dropped anywhere on the page (the browser would otherwise open the
+// video in the tab). The overlay hides when the drag stops passing over the page.
+(function () {
+	const overlay = document.getElementById('drop_overlay');
+	let hideT = 0;
+	const hasFiles = e => !!e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+	window.addEventListener('dragover', e => {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		e.dataTransfer.dropEffect = 'copy';
+		overlay.hidden = false;
+		clearTimeout(hideT);
+		hideT = setTimeout(() => { overlay.hidden = true; }, 300);
+	});
+	window.addEventListener('drop', e => {
+		if (!hasFiles(e)) return;
+		e.preventDefault();
+		clearTimeout(hideT);
+		overlay.hidden = true;
+		addFiles(e.dataTransfer.files);
+	});
+})();
 
 document.getElementById('clear_all').addEventListener('click', () => {
-	cards.forEach(c => c.root.remove());
+	if (cards.length > 1 && !confirm(`Remove all ${cards.length} clips from the batch?`)) return;
+	cards.forEach(c => { SFEditor.forget(c); c.root.remove(); });
 	cards = [];
 	refreshCount();
+	updateBulkBar();
 	updatePreview();
 });
 
-// Copy the global "apply to all" fields (tags + description + music) into every card
+// Force the global description + hashtags + music into every card
 document.getElementById('apply_meta').addEventListener('click', () => {
 	cards.forEach(c => {
 		c.tagsEl.value = globalTags();
 		c.descEl.value = globalDesc();
 		setCardMusic(c, globalMusic());
+		resetCardLang(c);
 	});
 	updatePreview();
 });
+
+// Bulk: translate every selected card (3 at a time)
+document.getElementById('bulk_lang').innerHTML = LANG_BTNS;
+document.querySelectorAll('#bulk_lang button').forEach(b => b.addEventListener('click', async () => {
+	const sel = cards.filter(c => c.selected);
+	for (let i = 0; i < sel.length; i += 3) {
+		await Promise.all(sel.slice(i, i + 3).map(c => translateCard(c, b.dataset.l)));
+	}
+}));
 
 // Multi-select controls
 function setAllSelected(v) {
@@ -436,24 +683,58 @@ function updateBulkBar() {
 	document.getElementById('select_all').style.display = (cards.length && n < cards.length) ? '' : 'none';
 }
 
-// Preview reacts to typing: global fields + per-card title/desc/tags/music edits
-document.getElementById('g_tags').addEventListener('input', updatePreview);
-document.getElementById('g_desc').addEventListener('input', updatePreview);
-document.getElementById('g_music').addEventListener('change', updatePreview);
+// Global fields → cards, and the preview follows every edit
+document.getElementById('g_tags').addEventListener('input', () => propagateGlobal('g_tags'));
+document.getElementById('g_desc').addEventListener('input', () => {
+	document.getElementById('g_desc_note').textContent = '';
+	propagateGlobal('g_desc');
+});
+document.getElementById('g_music').addEventListener('change', () => propagateGlobal('g_music'));
 cardsEl.addEventListener('input', updatePreview);
 cardsEl.addEventListener('change', updatePreview);
 
 // Spread schedule across cards
-document.getElementById('apply_schedule').addEventListener('click', () => {
-	const startVal = document.getElementById('sch_start').value;
-	const start = startVal ? new Date(startVal) : new Date();
+function scheduleStepMs() {
 	const every = Math.max(1, parseInt(document.getElementById('sch_every').value || '1', 10));
 	const unit = document.getElementById('sch_unit').value;
-	const stepMs = every * (unit === 'minutes' ? 60000 : unit === 'hours' ? 3600000 : 86400000);
+	return every * (unit === 'minutes' ? 60000 : unit === 'hours' ? 3600000 : 86400000);
+}
+function spreadSchedule() {
+	const startVal = document.getElementById('sch_start').value;
+	const start = startVal ? new Date(startVal) : new Date();
+	const stepMs = scheduleStepMs();
 	cards.forEach((c, i) => {
 		const t = new Date(start.getTime() + i * stepMs);
 		c.schedEl.value = fmtLocal(t);
 	});
+}
+document.getElementById('apply_schedule').addEventListener('click', () => {
+	document.getElementById('sch_note').textContent = '';
+	spreadSchedule();
+});
+
+// Continue the queue: first post = the last Short already scheduled + the interval
+const fmtWhen = dt => dt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+document.getElementById('schedule_after_queue').addEventListener('click', async () => {
+	const note = document.getElementById('sch_note');
+	note.textContent = 'Checking the queue…';
+	try {
+		const r = await fetch('/api/shorts/queue_end');
+		const j = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+		if (j.last) {
+			const last = new Date(j.last);
+			const start = new Date(last.getTime() + scheduleStepMs());
+			document.getElementById('sch_start').value = fmtLocal(start);
+			const title = j.title ? ` “${j.title.length > 40 ? j.title.slice(0, 40) + '…' : j.title}”` : '';
+			note.textContent = `${j.queued} ${j.queued === 1 ? 'Short' : 'Shorts'} scheduled ahead, the last one${title} on ${fmtWhen(last)} → this batch starts ${fmtWhen(start)}.`;
+		} else {
+			note.textContent = 'Nothing scheduled ahead in the queue — the batch starts at First post.';
+		}
+		spreadSchedule();
+	} catch (e) {
+		note.textContent = '⚠ Couldn’t read the queue: ' + e.message;
+	}
 });
 
 function selectedPlatforms() {
@@ -467,8 +748,9 @@ function applyPreset(p) {
 		crop_y: (p.crop_y != null ? p.crop_y : 50),
 		zoom: (p.crop_scale != null ? p.crop_scale : 1.0),
 		music_offset: (p.music_offset_sec != null ? p.music_offset_sec : 0),
-		fade_in: (p.fade_in_ms != null ? p.fade_in_ms / 1000 : 0),
-		fade_out: (p.fade_out_ms != null ? p.fade_out_ms / 1000 : 0),
+		fade_in: (p.fade_in_ms != null ? p.fade_in_ms / 1000 : null),
+		fade_out: (p.fade_out_ms != null ? p.fade_out_ms / 1000 : null),
+		music_path: p.music_path || '',
 	};
 	if (p.platforms_csv) {
 		const want = p.platforms_csv.split(',').map(s => s.trim()).filter(Boolean);
@@ -481,13 +763,33 @@ function applyPreset(p) {
 		let opt = [...sel.options].find(o => o.value === p.music_path);
 		if (!opt) { sel.add(new Option(p.music_path.split(/[\\/]/).pop(), p.music_path)); }
 		sel.value = p.music_path;
+		propagateGlobal('g_music');
 	}
+	SFEditor.applyProject();
 }
 
-// Set a card's music select to `path`, keeping the option list in sync.
+// A starting description for the project's clips, so the field is never a riddle.
+let lastDescTemplate = '';
+function descTemplate(p) {
+	const name = (p.name || '').trim();
+	if (!name) return '';
+	return p.steam_app_id ? `${name} — wishlist on Steam: {steam}` : `${name} — indie game in development`;
+}
+function applyDescTemplate(p) {
+	const g = document.getElementById('g_desc');
+	if (g.value.trim() && g.value !== lastDescTemplate) return;  // your own text stays
+	lastDescTemplate = descTemplate(p);
+	g.value = lastDescTemplate;
+	document.getElementById('g_desc_note').textContent = lastDescTemplate
+		? 'Project template — adjust it for the batch or add what happens in each clip.' : '';
+	propagateGlobal('g_desc');
+}
+
+// Set a card's music select to `path`, keeping the option list and its editor settings in sync.
 function setCardMusic(card, path) {
 	card.musicEl.innerHTML = musicOptionsHtml(path || '');
 	card.musicEl.value = path || '';
+	if (card.spec) SFEditor.setMusic(card, path || '');
 }
 
 // Music list — caches tracks, then rebuilds every select (global, preset form, cards)
@@ -504,29 +806,37 @@ async function loadMusic() {
 }
 document.getElementById('refresh_music').addEventListener('click', loadMusic);
 
-// Project tiles → fill global tags
+// Project tiles → tags, description template, render preset
 (async function loadProjects() {
 	try {
 		const r = await fetch('/api/projects');
 		const projects = await r.json();
 		const c = document.getElementById('project_tiles');
-		if (!projects.length) { c.innerHTML = '<span class="muted" style="font-size:12px;">Нет проектов — <a href="/projects">создать</a></span>'; return; }
+		if (!projects.length) { c.innerHTML = '<span class="muted" style="font-size:12px;">No projects — <a href="/projects">create one</a></span>'; return; }
 		c.innerHTML = '';
 		projects.forEach(p => {
 			const tile = document.createElement('div');
 			tile.className = 'project-tile';
+			tile.dataset.projectId = p.id;
 			tile.innerHTML = (p.icon_url ? `<img src="${p.icon_url}" alt="${p.name}" />` : `<div class="tile-initial">${(p.name||'?')[0].toUpperCase()}</div>`) + `<span>${p.name}</span>`;
 			tile.addEventListener('click', () => {
 				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
 				tile.classList.add('selected');
+				selectedProjectId = p.id;
+				selectedProjectName = p.name || '';
+				IPGoals.load(document.getElementById('g_goal'), p.id);
 				document.getElementById('g_tags').value = p.tags_json || '';
+				propagateGlobal('g_tags');
+				applyDescTemplate(p);
 				applyPreset(p);
 				updatePreview();
 			});
 			c.appendChild(tile);
 		});
+		IPGoals.preselectProject(c);
 	} catch (e) {}
 })();
+IPGoals.load(document.getElementById('g_goal'), '');
 
 // ---- Clip-type presets: apply / manage --------------------------------------
 // Apply a preset to one card. Only non-empty preset fields overwrite the card,
@@ -537,6 +847,7 @@ function applyPresetToCard(card, p) {
 	if (p.tags) card.tagsEl.value = p.tags;
 	if (p.music_path) setCardMusic(card, p.music_path);
 	card.appliedEl.textContent = '✓ ' + p.name;
+	if (p.title || p.text_en || p.tags) resetCardLang(card);  // new text: old translations are stale
 	updatePreview();
 }
 
@@ -547,7 +858,7 @@ function renderCardChips(card) {
 		const b = document.createElement('span');
 		b.className = 'preset-chip preset-chip-mini';
 		b.textContent = p.name;
-		b.title = 'Применить пресет к этому клипу';
+		b.title = 'Apply the preset to this clip';
 		b.addEventListener('click', () => applyPresetToCard(card, p));
 		card.chipsEl.appendChild(b);
 	});
@@ -560,22 +871,22 @@ function renderPresetManager() {
 	presets.forEach(p => {
 		const chip = document.createElement('span');
 		chip.className = 'preset-chip';
-		chip.innerHTML = '<span class="pc-name"></span><span class="pc-edit" title="Редактировать">✎</span><span class="pc-del" title="Удалить">✕</span>';
+		chip.innerHTML = '<span class="pc-name"></span><span class="pc-edit" title="Edit">✎</span><span class="pc-del" title="Delete">✕</span>';
 		chip.querySelector('.pc-name').textContent = p.name;
-		chip.title = [p.title, p.text_en, p.tags].filter(Boolean).join('\n') || 'пустой пресет';
+		chip.title = [p.title, p.text_en, p.tags].filter(Boolean).join('\n') || 'empty preset';
 		chip.querySelector('.pc-edit').addEventListener('click', (e) => { e.stopPropagation(); openPresetForm(p); });
 		chip.querySelector('.pc-del').addEventListener('click', (e) => { e.stopPropagation(); deletePreset(p); });
 		host.appendChild(chip);
 	});
 	const add = document.createElement('span');
 	add.className = 'preset-chip preset-add';
-	add.textContent = '＋ Новый пресет';
+	add.textContent = '＋ New preset';
 	add.addEventListener('click', () => openPresetForm(null));
 	host.appendChild(add);
 	if (!presets.length) {
 		const hint = document.createElement('span');
 		hint.className = 'muted'; hint.style.fontSize = '12px';
-		hint.textContent = 'создай типы клипов (レベルデザイン / UI作業 / カメラワーク) один раз — дальше подставляй в клипы одной кнопкой';
+		hint.textContent = 'create clip types (レベルデザイン / UI作業 / カメラワーク) once — then fill clips with one click';
 		host.appendChild(hint);
 	}
 	const bulk = document.getElementById('bulk_preset_chips');
@@ -616,13 +927,13 @@ document.getElementById('pf_save').addEventListener('click', async () => {
 	fd.append('music_path', document.getElementById('pf_music').value || '');
 	try {
 		const r = await fetch('/api/shorts/presets', { method: 'POST', body: fd });
-		if (!r.ok) { alert('Не удалось сохранить пресет'); return; }
+		if (!r.ok) { alert('Couldn’t save the preset'); return; }
 		document.getElementById('preset_form').style.display = 'none';
 		await loadPresets();
-	} catch (e) { alert('Ошибка: ' + e.message); }
+	} catch (e) { alert('Error: ' + e.message); }
 });
 async function deletePreset(p) {
-	if (!confirm(`Удалить пресет «${p.name}»?`)) return;
+	if (!confirm(`Delete preset “${p.name}”?`)) return;
 	try { await fetch('/api/shorts/presets/' + p.id, { method: 'DELETE' }); } catch (e) {}
 	await loadPresets();
 }
@@ -635,41 +946,67 @@ async function loadPresets() {
 	renderPresetManager();
 }
 
-// Submit
+// Submit: the clips are already on the server, this sends their settings
 document.getElementById('shorts_form').addEventListener('submit', async (e) => {
 	e.preventDefault();
 	if (!cards.length) return;
 	const platforms = selectedPlatforms();
-	if (!platforms.length) { alert('Выбери хотя бы одну площадку'); return; }
-	const fd = new FormData();
-	const meta = [];
-	const pr = selectedPreset || { crop_x: 50, crop_y: 50, zoom: 1.0, music_offset: 0, fade_in: 0, fade_out: 0 };
-	cards.forEach(c => {
-		fd.append('files', c.file, c.file.name);
-		meta.push({
+	if (!platforms.length) { alert('Pick at least one network'); return; }
+	const status = document.getElementById('submit_status');
+	submitBtn.disabled = true;
+	if (SFEditor.pendingUploads()) status.textContent = 'Finishing uploads…';
+	const failed = await SFEditor.waitUploads();
+	status.textContent = '';
+	if (failed.length) {
+		submitBtn.disabled = false;
+		alert(`Failed to upload: ${failed.map(c => c.file.name).join(', ')}.\nClick “retry” on the card or remove the clip.`);
+		return;
+	}
+	await SFEditor.lintNow();
+	submitBtn.disabled = false;
+	if (!SFEditor.confirmSubmit()) return;
+	const goalId = document.getElementById('g_goal').value || null;
+	const meta = cards.map(c => {
+		const m = SFEditor.metaFor(c);  // src_rel + spec (crop, trim, sound, music, text)
+		return {
 			title: c.titleEl.value || '',
 			tags: c.tagsEl.value || '',
 			text_en: c.descEl.value || '',
 			platforms: platforms,
 			scheduled_at: c.schedEl.value || null,
-			music_path: c.musicEl.value || '',
-			crop_x: pr.crop_x, crop_y: pr.crop_y, zoom: pr.zoom,
-			music_offset: pr.music_offset, fade_in: pr.fade_in, fade_out: pr.fade_out,
-		});
+			music_path: (m.spec.music && m.spec.music.path) || '',
+			project_id: selectedProjectId, goal_id: goalId,
+			...m,
+		};
 	});
+	const fd = new FormData();
 	fd.append('meta', JSON.stringify(meta));
 	submitBtn.disabled = true;
-	document.getElementById('submit_status').textContent = 'Загрузка…';
+	status.textContent = 'Queuing…';
 	try {
 		const r = await fetch('/shorts', { method: 'POST', body: fd });
-		if (r.redirected) { window.location = r.url; return; }
-		if (r.ok) { window.location = '/shorts/board'; return; }
-		document.getElementById('submit_status').textContent = 'Ошибка отправки';
+		if (r.ok) {
+			submitBtn.dataset.sent = '1';  // queued: leaving the page is fine now
+			window.location = r.redirected ? r.url : '/shorts/board';
+			return;
+		}
+		status.textContent = 'Send failed';
 		submitBtn.disabled = false;
 	} catch (err) {
-		document.getElementById('submit_status').textContent = 'Ошибка: ' + err.message;
+		status.textContent = 'Error: ' + err.message;
 		submitBtn.disabled = false;
 	}
+});
+
+// Leaving with clips on the page: they are uploaded but not queued — ask first, and
+// once the page is really gone (not just kept in the back/forward cache) delete them.
+window.addEventListener('beforeunload', e => {
+	if (cards.length && !submitBtn.dataset.sent) { e.preventDefault(); e.returnValue = ''; }
+});
+window.addEventListener('pagehide', e => {
+	if (e.persisted || submitBtn.dataset.sent) return;
+	const rels = cards.map(c => c.rel).filter(Boolean);
+	if (rels.length) navigator.sendBeacon('/api/shorts/upload/discard', new Blob([JSON.stringify({ rels })], { type: 'application/json' }));
 });
 
 // init

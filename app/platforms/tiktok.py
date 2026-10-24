@@ -3,6 +3,33 @@ from __future__ import annotations
 
 from typing import Optional
 
+VIDEO_FIELDS = ["id", "create_time", "share_url", "view_count", "like_count", "comment_count", "share_count"]
+
+
+def metrics_of(video: dict) -> dict:
+    """A /video/query/ video → metrics_json keys (shares count as reposts, like X's)."""
+    def num(key):
+        v = video.get(key)
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    return {"views": num("view_count"), "likes": num("like_count"),
+            "comments": num("comment_count"), "reposts": num("share_count")}
+
+
+def fetch_metrics(post) -> dict:
+    """Counters of a live TikTok post. Needs a real video id (an inbox draft only has a
+    publish id) and the video.list scope; without them there is nothing to read."""
+    from app.services.settings import load_settings
+    from app.services.tiktok_client import TikTokClient, get_valid_access_token
+    vid = str(post.platform_post_id or "").strip()
+    cfg = load_settings()
+    if not vid.isdigit() or "video.list" not in str(cfg.get("tiktok_scope") or ""):
+        return {}
+    token = get_valid_access_token(cfg)
+    if not token:
+        return {"error": "tiktok_not_connected"}
+    videos = TikTokClient(token).query_videos([vid], VIDEO_FIELDS)
+    return metrics_of(videos[0]) if videos else {"error": "tiktok_video_not_found"}
+
 
 def publish(session, post, job) -> Optional[str]:
     """Publish one post. Return None on success (the caller marks it done),
@@ -14,10 +41,19 @@ def publish(session, post, job) -> Optional[str]:
     cfg = load_settings()
     # Auto-refreshes the 24h TikTok access token via the refresh token
     access_token = get_valid_access_token(cfg)
-    brief = session.get(__import__('app.models.models', fromlist=['Brief']).Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
 
-    # Use vertical video
-    media_rel = getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
+    # The job's file first: the /tiktok pipeline sends its own version (no baked music);
+    # the factory and cross-posts pass the brief's vertical render.
+    override = None
+    if job is not None and job.payload_json:
+        try:
+            import json as _json
+            override = (_json.loads(job.payload_json) or {}).get('media_rel')
+        except Exception:
+            override = None
+    media_rel = override or getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
 
     if not media_rel:
         post.status = PostStatusEnum.error

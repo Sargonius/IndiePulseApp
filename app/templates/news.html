@@ -102,6 +102,7 @@
 	<div style="margin-top:12px;">
     <button type="submit" class="btn btn-primary">Save and queue</button>
     <button type="button" id="clear_draft_btn" class="btn" style="margin-left:8px;">Clear draft</button>
+    <label class="muted" title="Same text and files already went to these networks in the last 7 days? Without this box, no repeat is created."><input type="checkbox" name="allow_duplicate" value="1"> Publish again</label>
 	</div>
 </form>
 
@@ -465,7 +466,7 @@ function renderGallery(items) {
     ctrls.className = 'row';
     const up = document.createElement('button'); up.type = 'button'; up.className = 'btn'; up.textContent = '↑';
     const down = document.createElement('button'); down.type = 'button'; down.className = 'btn'; down.textContent = '↓';
-    const del = document.createElement('button'); del.type = 'button'; del.className = 'btn btn-danger'; del.textContent = 'Удалить';
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'btn btn-danger'; del.textContent = 'Delete';
     up.addEventListener('click', () => {
       if (idx <= 0) return; const tmp = items[idx-1]; items[idx-1] = items[idx]; items[idx] = tmp; syncGallery(items);
     });

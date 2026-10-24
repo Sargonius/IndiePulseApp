@@ -18,7 +18,7 @@ def save_discord_webhook(url: str = Form(...)):
         raise HTTPException(status_code=400, detail="Empty webhook URL")
     save_settings({"discord_webhook_url": url})
     # Return small HTML snippet for htmx
-    return HTMLResponse("<span style='color:green'>Discord webhook сохранён</span>")
+    return HTMLResponse("<span style='color:green'>Discord webhook saved</span>")
 
 
 @router.post("/discord/webhooks/save")
@@ -37,11 +37,11 @@ def save_discord_webhooks(url_ru: str = Form(""), url_en: str = Form("")):
 def discord_send_test():
     url = load_settings().get("discord_webhook_url")
     if not url:
-        return HTMLResponse("<span style='color:orange'>Discord webhook не настроен</span>", status_code=400)
+        return HTMLResponse("<span style='color:orange'>Discord webhook not configured</span>", status_code=400)
     client = DiscordClient(url)
     try:
         mid, murl = client.send_message("Test from IndiePulse")
-        link = f"<a href='{_e(murl)}' target='_blank'>сообщение</a>" if murl else ""
-        return HTMLResponse(f"<span style='color:green'>Отправлено {link}</span>")
+        link = f"<a href='{_e(murl)}' target='_blank'>message</a>" if murl else ""
+        return HTMLResponse(f"<span style='color:green'>Sent {link}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Error: {_e(str(exc))}</span>", status_code=500)

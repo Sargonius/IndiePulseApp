@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row" style="justify-content:space-between; align-items:center;">
+	<h2>📣 Cross-post Short</h2>
+	<a href="/shorts/board" class="btn">← Shorts board</a>
+</div>
+<p class="muted" style="margin-top:0;">The Short took off? Send it further. Each network gets its own caption and language; translations fill in on their own, and you can edit them right in the card.</p>
+
+<div class="rp-layout">
+	<aside class="rp-side">
+		<div class="rp-video">
+			{% if ctx.video_url %}
+			<video src="{{ ctx.video_url }}" {% if ctx.poster_url %}poster="{{ ctx.poster_url }}"{% endif %} controls playsinline preload="metadata"></video>
+			{% else %}
+			<span class="muted">video not rendered yet</span>
+			{% endif %}
+		</div>
+		<div class="rp-src">
+			<div class="rp-src-head">
+				<span class="platform-badge platform-yt">yt</span>
+				<span class="rp-lang-badge" id="src_lang"></span>
+				{% if ctx.yt_url %}<a href="{{ ctx.yt_url }}" target="_blank" rel="noopener">open ↗</a>{% else %}<span class="muted" style="font-size:12px;">not on YouTube yet</span>{% endif %}
+			</div>
+			<div class="rp-src-title" id="src_title"></div>
+			<div class="rp-src-desc" id="src_desc"></div>
+			<div class="rp-src-tags" id="src_tags"></div>
+		</div>
+		{% if ctx.video_url %}
+		<a class="btn btn-sm" href="{{ ctx.video_url }}" download>⬇ Download mp4</a>
+		<div class="muted" style="font-size:12px;">for manual upload: VK Clips, TikTok</div>
+		{% endif %}
+	</aside>
+
+	<section>
+		<div class="rp-toolbar">
+			<button type="button" class="btn btn-sm" id="pick_all">Select all connected</button>
+			<button type="button" class="btn btn-sm" id="pick_none">Clear all</button>
+			<span class="muted" id="tr_status" style="font-size:12px;"></span>
+		</div>
+		<div id="rp_cards" class="rp-cards"></div>
+
+		<div class="rp-submit">
+			<label class="rp-dup"><input type="checkbox" id="allow_dup" /> even where this Short is already live</label>
+			<button type="button" class="btn btn-primary btn-lg" id="rp_go" disabled>Cross-post →</button>
+			<span id="rp_result" class="muted"></span>
+		</div>
+		<div id="rp_report" class="rp-report" hidden></div>
+		<p class="muted" style="font-size:12px;"><code>{steam}</code> in a caption becomes a UTM link to the game’s Steam page, unique per network. The video is the same as on YouTube; where it’s over a network’s limit, it’s compressed automatically.</p>
+	</section>
+</div>
+
+<style>
+.rp-layout { display:grid; grid-template-columns:280px minmax(0, 1fr); gap:20px; align-items:start; }
+@media (max-width: 860px) { .rp-layout { grid-template-columns:minmax(0, 1fr); } }
+.rp-side { position:sticky; top:12px; display:flex; flex-direction:column; gap:10px; }
+@media (max-width: 860px) { .rp-side { position:static; } }
+.rp-video { width:100%; aspect-ratio:9/16; max-height:62vh; background:#0b1220; border-radius:10px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+.rp-video video { width:100%; height:100%; object-fit:contain; background:#000; }
+.rp-src { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.rp-src-head { display:flex; align-items:center; gap:8px; font-size:12px; }
+.rp-src-title { font-weight:600; word-break:break-word; }
+.rp-src-desc { color:#334155; white-space:pre-wrap; word-break:break-word; max-height:160px; overflow-y:auto; }
+.rp-src-tags { color:#2563eb; word-break:break-word; }
+.rp-lang-badge { font-size:11px; font-weight:600; padding:1px 6px; border-radius:4px; background:#f1f5f9; border:1px solid var(--border); }
+.rp-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.rp-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:14px; }
+.rp-card { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px 12px; display:flex; flex-direction:column; gap:7px; min-width:0; }
+.rp-card.rp-on { border-color:#f59e0b; box-shadow:0 0 0 2px rgba(245,158,11,.18); }
+.rp-card.rp-off { opacity:.6; }
+.rp-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.rp-head label { display:flex; align-items:center; gap:6px; font-weight:600; cursor:pointer; }
+.rp-head .rp-sp { flex:1; }
+.rp-langs { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+.rp-langs button { border:0; background:#fff; padding:2px 8px; font-size:12px; cursor:pointer; color:#475569; }
+.rp-langs button + button { border-left:1px solid var(--border); }
+.rp-langs button.rp-active { background:#2563eb; color:#fff; }
+.rp-card textarea { width:100%; resize:vertical; font-family:inherit; font-size:13px; min-height:84px; }
+.rp-card input[type="text"] { width:100%; font-size:13px; }
+.rp-card textarea:disabled, .rp-card input:disabled { background:#f8fafc; }
+.rp-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; }
+.rp-meter { height:4px; background:#e2e8f0; border-radius:2px; overflow:hidden; }
+.rp-bar { height:100%; width:0%; background:#22c55e; transition:width .15s ease; }
+.rp-foot { display:flex; align-items:center; gap:8px; font-size:12px; color:#64748b; }
+.rp-foot .rp-count { flex:1; }
+.rp-count b.over { color:#dc2626; } .rp-count b.warn { color:#d97706; } .rp-count b.ok { color:#16a34a; }
+.rp-note { font-size:11px; color:#94a3b8; }
+.rp-msg { font-size:12px; }
+.rp-msg.err { color:#dc2626; }
+.rp-msg.busy { color:#2563eb; }
+.rp-state { font-size:11px; }
+.badge.sf-await { background:#ede9fe; color:#5b21b6; }
+.rp-submit { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:18px; }
+.rp-dup { display:flex; align-items:center; gap:6px; font-size:13px; color:#475569; cursor:pointer; }
+.rp-report { margin-top:12px; border:1px solid var(--border); border-radius:10px; background:#f8fafc; padding:10px 14px; font-size:13px; display:flex; flex-direction:column; gap:4px; }
+</style>
+
+<script>
+const CTX = {{ ctx|tojson }};
+const SRC = CTX.source;
+const LANG_LABEL = { en: 'EN', ja: 'JA', ru: 'RU' };
+const tr = { [SRC.lang]: { title: SRC.title, desc: SRC.desc, tags: SRC.tags } };  // lang → texts
+const trPending = {};    // lang → Promise
+const trError = {};      // lang → message
+const cards = [];
+
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const graphemes = s => [...s].length;
+// X counts CJK, emoji and most non-Latin text as 2, every link as 23
+function xLength(s) {
+	const t = s.replace(/\{steam\}|https?:\/\/\S+/g, 'x'.repeat(23));
+	let n = 0;
+	for (const ch of t) {
+		const c = ch.codePointAt(0);
+		const light = c <= 0x10FF || (c >= 0x2000 && c <= 0x200D) || (c >= 0x2010 && c <= 0x201F) || (c >= 0x2032 && c <= 0x2037);
+		n += light ? 1 : 2;
+	}
+	return n;
+}
+const YT_ONLY = /^#(shorts|short|youtubeshorts|ytshorts)$/i;
+function cleanTags(tags, max) {
+	if (!max) return '';
+	const out = [];
+	(String(tags || '').match(/#[^\s#,]+/g) || []).forEach(t => {
+		if (!YT_ONLY.test(t) && !out.some(o => o.toLowerCase() === t.toLowerCase())) out.push(t);
+	});
+	return out.slice(0, max).join(' ');
+}
+function compose(t) {
+	const title = (t.title || '').trim(), desc = (t.desc || '').trim();
+	if (!title) return desc;
+	if (!desc || desc.startsWith(title)) return desc || title;
+	return title + '\n\n' + desc;
+}
+function redditTitle(t) {
+	const title = (t.title || '').trim();
+	if (title) return title.slice(0, 300);
+	const first = ((t.desc || '').match(/^[^.!?\n。！？]+[.!?。！？]?/) || [''])[0];
+	return first.trim().slice(0, 300);
+}
+
+function ensureLang(lang) {
+	if (tr[lang]) return Promise.resolve(tr[lang]);
+	if (trPending[lang]) return trPending[lang];
+	delete trError[lang];
+	showTrStatus();
+	trPending[lang] = fetch('/api/shorts/translate', {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ title: SRC.title, desc: SRC.desc, tags: SRC.tags, target: lang }),
+	}).then(async r => {
+		const j = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+		tr[lang] = { title: j.title || '', desc: j.desc || '', tags: j.tags || '' };
+		return tr[lang];
+	}).catch(e => { trError[lang] = e.message; throw e; })
+	  .finally(() => { delete trPending[lang]; showTrStatus(); });
+	return trPending[lang];
+}
+function showTrStatus() {
+	const busy = Object.keys(trPending).map(l => LANG_LABEL[l]);
+	const bad = Object.keys(trError).map(l => LANG_LABEL[l]);
+	let s = busy.length ? `🌐 translating: ${busy.join(', ')}…` : '';
+	if (bad.length) s += (s ? ' · ' : '') + `⚠ not translated: ${bad.join(', ')}`;
+	document.getElementById('tr_status').textContent = s;
+}
+
+// ---- one card per network -------------------------------------------------
+function cardLang(p) { return p.lang === 'src' ? SRC.lang : p.lang; }
+
+function buildCard(p) {
+	const root = document.createElement('div');
+	root.className = 'rp-card';
+	const ex = p.existing;
+	const live = ex && ex.state !== 'failed';
+	let state = '';
+	if (!p.configured) state = '<a class="rp-state" href="/accounts">not connected →</a>';
+	else if (ex && ex.status === 'awaiting_finish') state = '<span class="badge sf-await rp-state" title="Draft or export — may have gone out manually">📲 draft</span>';
+	else if (ex && ex.state === 'live') state = ex.url ? `<a class="badge success rp-state" href="${esc(ex.url)}" target="_blank" rel="noopener">already live ↗</a>` : '<span class="badge success rp-state">already live</span>';
+	else if (ex && ex.state === 'pending') state = '<span class="badge running rp-state">queued</span>';
+	else if (ex) state = `<span class="badge error rp-state" title="${esc(ex.error)}">✗ failed before</span>`;
+	const dual = p.lang === 'dual';
+	const langSwitch = dual ? '' : `<span class="rp-langs">${['en','ja','ru'].map(l => `<button type="button" data-l="${l}">${LANG_LABEL[l]}</button>`).join('')}</span>`;
+	let fields = '';
+	if (p.title_only) {
+		fields = `<div class="rp-lbl">Post title</div><input type="text" class="rp-title" maxlength="300" />`;
+	} else if (dual) {
+		fields = p.dual_langs.map(l => `<div class="rp-lbl">${l === 'ru' ? 'RU channel' : 'EN channel'}</div><textarea class="rp-dual" data-l="${l}" rows="4"></textarea>`).join('');
+	} else {
+		fields = `<div class="rp-lbl">Caption</div><textarea class="rp-text" rows="5"></textarea>`;
+		if (p.tags) fields += `<div class="rp-lbl">Hashtags</div><input type="text" class="rp-tags" />`;
+	}
+	root.innerHTML = `
+		<div class="rp-head">
+			<label><input type="checkbox" class="rp-pick" ${p.configured ? '' : 'disabled'} />
+				<span class="platform-badge platform-${esc(p.key)}">${esc(p.key)}</span> ${esc(p.label)}</label>
+			<span class="rp-sp"></span>${state}${langSwitch}
+		</div>
+		<div class="rp-msg"></div>
+		${fields}
+		<div class="rp-meter"><div class="rp-bar"></div></div>
+		<div class="rp-foot"><span class="rp-count"></span><button type="button" class="btn btn-sm rp-copy" title="Copy the caption — for manual upload">📋</button></div>
+		<div class="rp-note">${esc(p.note || '')}</div>`;
+	const card = {
+		p, root, lang: cardLang(p), edits: {},
+		pick: root.querySelector('.rp-pick'),
+		msg: root.querySelector('.rp-msg'),
+		title: root.querySelector('.rp-title'),
+		text: root.querySelector('.rp-text'),
+		tags: root.querySelector('.rp-tags'),
+		duals: [...root.querySelectorAll('.rp-dual')],
+		bar: root.querySelector('.rp-bar'),
+		count: root.querySelector('.rp-count'),
+	};
+	card.pick.checked = p.configured && !live;
+	card.pick.addEventListener('change', () => { syncPicked(card); updateGo(); });
+	root.querySelectorAll('.rp-langs button').forEach(b => b.addEventListener('click', () => switchLang(card, b.dataset.l)));
+	root.addEventListener('input', () => updateCount(card));
+	root.querySelector('.rp-copy').addEventListener('click', (e) => {
+		navigator.clipboard.writeText(captionOf(card)).then(() => { e.target.textContent = '✓'; setTimeout(() => e.target.textContent = '📋', 1200); });
+	});
+	syncPicked(card);
+	return card;
+}
+
+function syncPicked(card) {
+	card.root.classList.toggle('rp-on', card.pick.checked);
+	card.root.classList.toggle('rp-off', !card.p.configured);
+}
+function markLang(card) {
+	card.root.querySelectorAll('.rp-langs button').forEach(b => b.classList.toggle('rp-active', b.dataset.l === card.lang));
+}
+function inputs(card) {
+	return [card.title, card.text, card.tags, ...card.duals].filter(Boolean);
+}
+function setBusy(card, busy, msg) {
+	inputs(card).forEach(el => el.disabled = busy);
+	card.msg.className = 'rp-msg' + (busy ? ' busy' : '');
+	card.msg.textContent = msg || '';
+}
+function snapshot(card) {
+	return { title: card.title ? card.title.value : null, text: card.text ? card.text.value : null, tags: card.tags ? card.tags.value : null };
+}
+function restore(card, s) {
+	if (card.title && s.title != null) card.title.value = s.title;
+	if (card.text && s.text != null) card.text.value = s.text;
+	if (card.tags && s.tags != null) card.tags.value = s.tags;
+}
+function fillFrom(card, t) {
+	if (card.title) card.title.value = redditTitle(t);
+	if (card.text) card.text.value = compose(t);
+	if (card.tags) card.tags.value = cleanTags(t.tags, card.p.tags);
+}
+
+async function fillCard(card) {
+	if (card.p.lang === 'dual') {
+		for (const ta of card.duals) {
+			const l = ta.dataset.l;
+			try {
+				setBusy(card, true, '🌐 translating…');
+				ta.value = compose(await ensureLang(l));
+				setBusy(card, false);
+			} catch (e) {
+				setBusy(card, false);
+				card.msg.className = 'rp-msg err';
+				card.msg.textContent = `⚠ ${LANG_LABEL[l]}: ${e.message} — type the text yourself or untick it`;
+			}
+		}
+		updateCount(card);
+		return;
+	}
+	const lang = card.lang;
+	markLang(card);
+	if (card.edits[lang]) { restore(card, card.edits[lang]); updateCount(card); return; }
+	try {
+		setBusy(card, !tr[lang], tr[lang] ? '' : `🌐 translating to ${LANG_LABEL[lang]}…`);
+		const t = await ensureLang(lang);
+		if (card.lang !== lang) return;  // switched again while waiting
+		fillFrom(card, t);
+		setBusy(card, false);
+	} catch (e) {
+		if (card.lang !== lang) return;
+		setBusy(card, false);
+		card.pick.checked = false; syncPicked(card); updateGo();
+		card.msg.className = 'rp-msg err';
+		card.msg.innerHTML = `⚠ translation to ${LANG_LABEL[lang]} failed: ${esc(e.message)} — type the text yourself or <a href="#" class="rp-retry">retry</a>`;
+		card.msg.querySelector('.rp-retry').addEventListener('click', ev => { ev.preventDefault(); fillCard(card); });
+	}
+	updateCount(card);
+}
+
+function switchLang(card, lang) {
+	if (lang === card.lang) return;
+	card.edits[card.lang] = snapshot(card);
+	card.lang = lang;
+	fillCard(card);
+}
+
+function captionOf(card) {
+	if (card.title) return card.title.value.trim();
+	if (card.duals.length) return card.duals.map(t => t.value.trim()).filter(Boolean).join('\n\n');
+	const text = card.text.value.trim(), tags = card.tags ? card.tags.value.trim() : '';
+	return [text, tags].filter(Boolean).join('\n');
+}
+function updateCount(card) {
+	const limit = card.p.limit;
+	const pieces = card.duals.length ? card.duals.map(t => t.value.trim()) : [captionOf(card)];
+	const len = Math.max(0, ...pieces.map(s => card.p.count === 'x' ? xLength(s) : graphemes(s)));
+	const nTags = (captionOf(card).match(/#[^\s#]+/g) || []).length;
+	const tagNote = card.tags ? ` · ${nTags} ${nTags === 1 ? 'tag' : 'tags'}` : '';
+	if (!limit) {
+		card.bar.parentElement.style.visibility = 'hidden';
+		card.count.innerHTML = `${len} chars${tagNote}`;
+		return;
+	}
+	card.bar.parentElement.style.visibility = '';
+	const pct = Math.min(100, len / limit * 100);
+	card.bar.style.width = pct + '%';
+	card.bar.style.background = len > limit ? '#dc2626' : (pct > 85 ? '#d97706' : '#22c55e');
+	const cls = len > limit ? 'over' : (pct > 85 ? 'warn' : 'ok');
+	card.count.innerHTML = `<b class="${cls}">${len}</b> / ${limit}${card.p.count === 'x' ? ' (X weight)' : ''}${tagNote}`;
+}
+
+function updateGo() {
+	const n = cards.filter(c => c.pick.checked).length;
+	const go = document.getElementById('rp_go');
+	go.disabled = n === 0;
+	go.textContent = n ? `Cross-post to ${n} ${n === 1 ? 'network' : 'networks'} →` : 'Cross-post →';
+}
+
+document.getElementById('pick_all').addEventListener('click', () => {
+	cards.forEach(c => { if (c.p.configured && !(c.p.existing && c.p.existing.state !== 'failed')) c.pick.checked = true; syncPicked(c); });
+	updateGo();
+});
+document.getElementById('pick_none').addEventListener('click', () => {
+	cards.forEach(c => { c.pick.checked = false; syncPicked(c); });
+	updateGo();
+});
+
+const REASONS = {
+	already: 'already live or queued (tick “even where this Short is already live”)',
+	not_configured: 'network not connected',
+	empty_text: 'empty caption',
+	unknown_platform: 'unknown network', twice: 'listed twice',
+};
+document.getElementById('rp_go').addEventListener('click', async () => {
+	const picked = cards.filter(c => c.pick.checked);
+	if (!picked.length) return;
+	if (picked.some(c => inputs(c).some(el => el.disabled))) { alert('Wait — a translation is still running'); return; }
+	const items = picked.map(c => {
+		const it = { platform: c.p.key, lang: c.lang };
+		if (c.title) it.title = c.title.value;
+		if (c.text) it.text = c.text.value;
+		if (c.tags) it.tags = c.tags.value;
+		c.duals.forEach(t => {
+			if (t.dataset.l === 'default') it.text = t.value; else it['text_' + t.dataset.l] = t.value;
+		});
+		return it;
+	});
+	const go = document.getElementById('rp_go');
+	go.disabled = true;
+	document.getElementById('rp_result').textContent = 'Queuing…';
+	try {
+		const r = await fetch(`/api/shorts/${CTX.brief_id}/repost`, {
+			method: 'POST', headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ items, allow_duplicate: document.getElementById('allow_dup').checked }),
+		});
+		const j = await r.json().catch(() => ({}));
+		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+		const rep = document.getElementById('rp_report');
+		const label = k => (CTX.platforms.find(p => p.key === k) || { label: k }).label;
+		rep.innerHTML = (j.created || []).map(c => `<div>✓ ${esc(label(c.platform))} — queued</div>`).join('')
+			+ (j.skipped || []).map(s => `<div>— ${esc(label(s.platform))}: ${esc(REASONS[s.reason] || s.reason)}</div>`).join('')
+			+ '<div style="margin-top:6px;"><a href="/shorts/board">See statuses on the board →</a></div>';
+		rep.hidden = false;
+		document.getElementById('rp_result').textContent = (j.created || []).length ? 'Done ✓' : 'Nothing sent';
+		(j.created || []).forEach(c => {
+			const card = cards.find(x => x.p.key === c.platform);
+			if (card) { card.pick.checked = false; card.pick.disabled = true; syncPicked(card); }
+		});
+	} catch (e) {
+		document.getElementById('rp_result').textContent = 'Error: ' + e.message;
+	}
+	updateGo();
+});
+
+// ---- init -------------------------------------------------------------------
+document.getElementById('src_lang').textContent = LANG_LABEL[SRC.lang] || SRC.lang;
+document.getElementById('src_title').textContent = SRC.title || '(no title)';
+document.getElementById('src_desc').textContent = SRC.desc;
+document.getElementById('src_tags').textContent = SRC.tags;
+const host = document.getElementById('rp_cards');
+CTX.platforms.forEach(p => { const c = buildCard(p); cards.push(c); host.appendChild(c.root); });
+// configured networks first, so the cards to post sit on top
+cards.slice().sort((a, b) => (b.p.configured - a.p.configured)).forEach(c => host.appendChild(c.root));
+cards.forEach(c => fillCard(c));
+updateGo();
+</script>
+{% endblock %}

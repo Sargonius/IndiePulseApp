@@ -1,0 +1,77 @@
+{# Shorts cheat sheet. Positions match guide.html (#anatomy, #checklist) and the
+   factory checklist (shorts_lint.py) — change them together. #}
+<details class="sf-tips" id="sf_tips">
+	<summary>💡 Shorts cheat sheet <span class="muted">— title, first second, visuals, experiment</span></summary>
+	<div class="sf-tips-grid">
+		<section>
+			<h4>Title</h4>
+			<ul>
+				<li>Not about the process: <s>Prototyping</s> · <s>Layout changes</s> · <s>WIP</s> · <s>Devlog #12</s>. Make it about a feeling or a moment in the game.</li>
+				<li>Hook and game name up front: the player shows ~40 Latin / ~20 Japanese characters.</li>
+				<li>Formulas:
+					<div class="sf-tips-f"><b>Question</b> Would you drive this through a warzone?</div>
+					<div class="sf-tips-f"><b>Situation</b> Hovercar vs. the entire city</div>
+					<div class="sf-tips-f"><b>Conflict</b> This hovercar was a terrible idea</div>
+					<div class="sf-tips-f"><b>Comparison</b> Day 1 vs Day 30 of my hovercar game</div>
+				</li>
+				<li>Hashtags: 1–3 on topic, no wall of tags.</li>
+			</ul>
+		</section>
+		<section>
+			<h4>First second</h4>
+			<ul>
+				<li>Open mid-action: no intro, logo or fades.</li>
+				<li>Best moment first: the result, then the process.</li>
+				<li>Big hook text in the upper half, 1–2 s (✂ Editor → “＋ Hook”).</li>
+				<li>Sound from the first frame: a shot, an engine, music. Project fade-in — 0.</li>
+			</ul>
+			<h4>Length and ending</h4>
+			<ul>
+				<li>12–25 s: hook → gameplay → peak → loop back to the start or a call to action.</li>
+				<li>Last 2–4 s: game name and “Wishlist on Steam” as text; UTM link in the description (<code>{steam}</code>) or a pinned comment.</li>
+			</ul>
+		</section>
+		<section>
+			<h4>Visuals (UE5)</h4>
+			<ul>
+				<li>No editor UI: Standalone or PIE in a new window. In the viewport <kbd>G</kbd> — game view, <kbd>F11</kbd> — fullscreen.</li>
+				<li>Console: <code>DisableAllScreenMessages</code> hides warnings and debug text.</li>
+				<li>Native vertical beats a crop: 9:16 game window (720×1280 or 1080×1920). Shooting horizontal? Crop and zoom in on the action.</li>
+				<li>Main subject large and readable on a phone. Motion or an event every 1–2 s.</li>
+			</ul>
+		</section>
+		<section>
+			<h4>Experiment</h4>
+			<ul>
+				<li>One clip → 2–3 versions with different hooks and titles: drop the same file into the factory 2–3 times.</li>
+				<li>After 3–7 days, compare “Swiped away” in YouTube Studio (aim for under 50–60%) and average % viewed.</li>
+				<li>Note which hook won and build the next batch on it. Send the winner out with <b>📣 Cross-post</b> on the board.</li>
+			</ul>
+		</section>
+	</div>
+	<div class="muted sf-tips-more">More in the <a href="/guide">📖 Playbook</a>. The checklist on each clip card checks half of these.</div>
+</details>
+<style>
+.sf-tips { border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:10px 16px; margin:10px 0 16px; }
+.sf-tips summary { cursor:pointer; font-weight:600; }
+.sf-tips summary .muted { font-weight:400; font-size:13px; }
+.sf-tips-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:6px 22px; margin-top:8px; }
+.sf-tips h4 { margin:10px 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#92400e; }
+.sf-tips ul { margin:0; padding-left:18px; font-size:13px; line-height:1.45; }
+.sf-tips li { margin:2px 0; }
+.sf-tips s { color:#b91c1c; }
+.sf-tips-f { font-size:12px; color:#334155; display:grid; grid-template-columns:78px 1fr; }
+.sf-tips-f b { color:#92400e; font-weight:600; }
+.sf-tips kbd { border:1px solid #d6d3d1; border-bottom-width:2px; border-radius:4px; padding:0 4px; font-size:11px; background:#fff; }
+.sf-tips-more { font-size:12px; margin-top:8px; }
+</style>
+<script>
+(function () {
+	// remember open/closed per browser; open by default until the first close
+	const el = document.getElementById('sf_tips');
+	let open = true;
+	try { open = localStorage.getItem('sf_tips_open') !== '0'; } catch (e) {}
+	el.open = open;
+	el.addEventListener('toggle', () => { try { localStorage.setItem('sf_tips_open', el.open ? '1' : '0'); } catch (e) {} });
+})();
+</script>

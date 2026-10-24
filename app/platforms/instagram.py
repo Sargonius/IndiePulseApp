@@ -15,7 +15,8 @@ def publish(session, post, job) -> Optional[str]:
     cfg = load_settings()
     ig_user_id = (cfg.get('ig_user_id') or '').strip()
     ig_token = (cfg.get('ig_access_token') or '').strip()
-    brief = session.get(Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     media_rel = getattr(brief, 'media_vertical_path', None) or getattr(brief, 'media_path', None)
     if not media_rel:
         post.status = PostStatusEnum.error

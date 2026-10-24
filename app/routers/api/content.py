@@ -205,14 +205,14 @@ def save_news_draft(
         payload["yt_title"] = yt_title
     if payload:
         save_draft(payload)
-    return HTMLResponse("<span style='color:green'>Черновик сохранён</span>")
+    return HTMLResponse("<span style='color:green'>Draft saved</span>")
 
 
 @router.post("/draft/clear")
 def clear_news_draft():
     from app.services.draft_store import clear_draft
     clear_draft()
-    return HTMLResponse("<span style='color:green'>Черновик очищен</span>")
+    return HTMLResponse("<span style='color:green'>Draft cleared</span>")
 
 
 @router.post("/uploads/draft_media")
@@ -249,7 +249,7 @@ def gallery_reorder(order: str = Form("")):
     # order: comma-separated list of rel paths
     items = [x.strip() for x in (order or '').split(',') if x.strip()]
     save_draft({"gallery_normal": items})
-    return HTMLResponse("<span style='color:green'>Галерея обновлена</span>")
+    return HTMLResponse("<span style='color:green'>Gallery updated</span>")
 
 
 @router.post("/gallery/remove")

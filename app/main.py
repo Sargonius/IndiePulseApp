@@ -16,7 +16,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.core import config
 from app.core.logging import setup_logging, request_logger
 from app.db.session import create_db_and_tables, migrate_db
-from app.routers import pages, api
+from app.routers import home, pages, api
 
 setup_logging()
 
@@ -31,8 +31,8 @@ async def lifespan(app: FastAPI):
     # simple cache-busting version for static assets
     app.state.asset_version = str(int(time.time()))
     # App versioning for footer
-    app.state.app_version = "1.2.0"
-    app.state.app_last_change = "Version 1.2.0 - API status page, publish reliability & security fixes"
+    app.state.app_version = "1.3.1"
+    app.state.app_last_change = "Version 1.3.1 - Steam traffic bookmarklet, Steamworks links, faster wishlist history"
     yield
 
 
@@ -73,6 +73,7 @@ app.middleware("http")(request_logger())
 # added last = runs first
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts())
 
+app.include_router(home.router)
 app.include_router(pages.router)
 app.include_router(api.router)
 

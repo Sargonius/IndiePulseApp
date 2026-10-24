@@ -9,7 +9,7 @@ from loguru import logger
 
 
 # VK's upload servers and api.vk.com are frequently slow to connect; a short
-# 20-30s total timeout was the main cause of "почти 100%" publish failures that
+# 20-30s total timeout was the main cause of "almost 100%" publish failures that
 # succeed on a manual re-run. Use a generous per-phase timeout instead.
 _VK_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=60.0)
 

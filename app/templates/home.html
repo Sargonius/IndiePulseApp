@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% from "partials/mk_macros.html" import stat_tile, goal_row, steam_menu, change, pub_table %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>Marketing</h2>
+    <div class="muted mk-sub">{{ today|day }} · 7-day totals vs. the previous week</div>
+  </div>
+  <div class="row">
+    <a class="btn btn-primary" href="/create/post">📷 Post</a>
+    <a class="btn" href="/shorts">🎞️ Shorts</a>
+    <a class="btn" href="/calendar">📅 Calendar</a>
+    <a class="btn" href="/goals">🎯 Goals</a>
+  </div>
+</div>
+
+{% if kpis %}
+<section class="kpi-row">{% for t in kpis %}{{ stat_tile(t) }}{% endfor %}</section>
+{% endif %}
+
+{% if inbox %}
+<section class="card mk-inbox">
+  <h3>Waiting for you</h3>
+  <ul class="inbox-list">
+  {% for it in inbox %}
+    <li>
+      <span class="inbox-icon" aria-hidden="true">{{ it.icon }}</span>
+      {% if it.kind == 'traffic' %}
+      <span>{{ it.text }}: <a href="{{ it.url }}" target="_blank" rel="noopener">open Steamworks ↗</a>
+        and click the “IndiePulse ← Steam” bookmarklet <a class="muted" href="/steam/traffic">(how it works)</a></span>
+      {% elif it.href %}<a href="{{ it.href }}">{{ it.text }}</a>
+      {% else %}<span>{{ it.text }}</span>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="mk-projects">
+{% for c in cards %}
+  <article class="card mk-project">
+    <div class="mk-project-head">
+      {% if c.p.icon_path %}<img class="project-icon" src="/media/{{ c.p.icon_path }}" alt="">{% else %}<div class="project-icon-placeholder">{{ c.p.name[0]|upper }}</div>{% endif %}
+      <div class="mk-project-title">
+        <h3>{{ c.p.name }}</h3>
+        <div class="row mk-project-meta">
+          {% if c.stage %}<span class="stage-badge">{{ c.stage }}</span>{% endif %}
+          {% if c.links %}{{ steam_menu(c.links) }}
+          {% else %}<a class="muted" href="/projects">+ Steam App ID</a>{% endif %}
+        </div>
+      </div>
+      <div class="row mk-project-actions">
+        <a class="btn btn-sm" href="/create/post?project={{ c.p.id }}">+ post</a>
+        <a class="btn btn-sm" href="/shorts?project={{ c.p.id }}">+ Shorts</a>
+        <a class="btn btn-sm" href="/goals?project_id={{ c.p.id }}#new">+ goal</a>
+        <a class="btn btn-sm" href="/utm?project={{ c.p.id }}" title="Steam links with UTM tags">UTM</a>
+      </div>
+    </div>
+    {% if c.tiles %}
+    <div class="tile-row">{% for t in c.tiles %}{{ stat_tile(t, small=True) }}{% endfor %}</div>
+    {% endif %}
+    {% if c.goals %}
+    <div class="goal-list">{% for r in c.goals %}{{ goal_row(r, show_project=False) }}{% endfor %}</div>
+    {% endif %}
+    <div class="mk-project-foot muted">
+      {% if c.planned %}Scheduled: {{ c.planned }}, next {{ c.next_post|day }}, {{ c.next_post.strftime('%H:%M') }}{% else %}Nothing scheduled{% endif %}
+      · <a href="/publications?project={{ c.p.id }}&days=7">published in 7 days: {{ c.published7 }}</a>
+      {% if c.published7 %}<span title="Views and reactions of this project’s posts published in the last 7 days"> · {{ c.views7|num }} views · {{ c.reactions7|num }} reactions</span>{% endif %}
+    </div>
+  </article>
+{% else %}
+  <div class="card muted">No projects yet — <a href="/projects">create the first one</a>.</div>
+{% endfor %}
+</section>
+
+{% if paused %}
+<p class="mk-paused muted">Paused: {% for p in paused %}<a href="/projects">{{ p.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+{% endif %}
+
+<section class="mk-social">
+  <article class="card mk-audience" id="audience">
+    <div class="mk-card-head">
+      <h3>Followers</h3>
+      {% if followers_total %}<span class="muted">total <b>{{ followers_total.value|num }}</b></span>{% endif %}
+    </div>
+    {% if audience %}
+    <div class="table-scroll">
+    <table class="aud-table">
+      <thead><tr><th>Network</th><th class="num">Now</th><th class="num">7 days</th><th class="num">30 days</th><th class="aud-spark-col">30 days</th></tr></thead>
+      <tbody>
+      {% for r in audience %}
+      <tr>
+        <td>{{ r.label }}{% if r.error %} <span class="aud-err" title="{{ r.error }}">⚠</span>{% endif %}</td>
+        <td class="num"><b>{{ r.value|num }}</b></td>
+        <td class="num">{% if r.d7 %}{{ change(r.d7) }}{% endif %}</td>
+        <td class="num">{% if r.d30 %}{{ change(r.d30) }}{% endif %}</td>
+        <td class="aud-spark-col">{% if r.spark %}<div class="spark spark--row" data-spark='{{ r.spark|tojson }}' data-days='{{ r.days|tojson }}' data-kind="level" data-label="{{ r.label }}"></div>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="muted">Followers haven’t been counted yet — the first read comes with the next metrics run (every 15 min) or via “Refresh now”.</p>
+    {% endif %}
+    <p class="muted mk-card-note">Read every 2 h and right before each post{% if audience_ok_at %}, last one {{ audience_ok_at[:10]|day }}, {{ audience_ok_at[11:16] }}{% endif %}.
+      {% if audience_missing %}Not connected: <a href="/accounts">{{ audience_missing|join(', ') }}</a>.{% endif %}</p>
+  </article>
+
+  <article class="card mk-pubs">
+    <div class="mk-card-head">
+      <h3>Publications</h3>
+      <a href="/publications">all publications →</a>
+    </div>
+    {% if publications %}
+    {{ pub_table(publications, projects_by_id) }}
+    {% if publications_more %}<p class="muted mk-card-note"><a href="/publications?days=30">more posts from the last 2 weeks →</a></p>{% endif %}
+    {% else %}
+    <p class="muted">Nothing published in the last 2 weeks.</p>
+    {% endif %}
+    <p class="muted mk-card-note">“+ Followers” — growth over the first 3 days on the networks the post went to. Click a post for a “before → after” breakdown per network.</p>
+  </article>
+</section>
+
+{% if global_goals %}
+<section class="card mk-global">
+  <h3>Global goals</h3>
+  <div class="goal-list">{% for r in global_goals %}{{ goal_row(r) }}{% endfor %}</div>
+</section>
+{% endif %}
+
+<section class="mk-sources muted">
+  {% if statuses or audience_statuses %}
+    Metrics updated:
+    {% for s in statuses %}<span class="src {{ 'ok' if s.ok else 'err' }}" title="{{ s.info or s.error }}">{{ '✓' if s.ok else '✗' }} {{ s.label }}{% if s.at %} {{ s.at[:10]|day }}, {{ s.at[11:16] }}{% endif %}</span>{% if not loop.last or audience_statuses %} · {% endif %}{% endfor %}
+    {% if audience_statuses %}{% set bad = audience_statuses|rejectattr('ok')|list %}
+    <span class="src {{ 'err' if bad else 'ok' }}" title="{% for s in audience_statuses %}{{ '✓' if s.ok else '✗' }} {{ s.label }}: {{ s.info or s.error }}{% if s.at %} ({{ s.at[:10]|day }}, {{ s.at[11:16] }}){% endif %}&#10;{% endfor %}">{{ '✗' if bad else '✓' }} Followers: {{ audience_statuses|length - bad|length }} of {{ audience_statuses|length }} networks</span>
+    {% endif %}
+  {% else %}
+    Metrics haven’t been collected yet (every 15 min once Steam or a social network is set up).
+  {% endif %}
+  <button class="btn btn-sm" hx-post="/api/metrics/collect" hx-target="#collect_status" hx-swap="innerHTML">Refresh now</button>
+  <span id="collect_status"></span>
+</section>
+
+<script src="/static/charts.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/steam_menu.js?v={{ request.app.state.asset_version }}"></script>
+{% endblock %}

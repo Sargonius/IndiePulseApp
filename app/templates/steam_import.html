@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>📈 Steam traffic import</h2>
+    <div class="muted mk-sub">This tab was opened by the “IndiePulse ← Steam” bookmarklet.</div>
+  </div>
+  <div class="row">
+    <a class="btn btn-primary" href="/">Go home</a>
+    <a class="btn" href="/steam/traffic">Steam traffic</a>
+  </div>
+</div>
+<section class="card st-import" id="imp_result"><p class="muted">Saving…</p></section>
+<script>
+(async function () {
+  var box = document.getElementById('imp_result');
+  var blob = location.hash.slice(1);
+  if (blob) history.replaceState(null, '', location.pathname);  // the fragment carries the bookmarklet's key
+  if (!blob) {
+    box.innerHTML = '<p class="muted">No data. This page opens by itself after you click the '
+      + '“IndiePulse ← Steam” bookmarklet on a Steamworks page — see <a href="/steam/traffic">Steam traffic</a>.</p>';
+    return;
+  }
+  try {
+    var r = await fetch('/api/steam/traffic/import', {method: 'POST', headers: {'Content-Type': 'text/plain'}, body: blob});
+    box.innerHTML = await r.text();
+  } catch (e) {
+    box.textContent = 'Couldn’t send the data to IndiePulse: ' + e;
+  }
+})();
+</script>
+{% endblock %}

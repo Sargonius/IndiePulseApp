@@ -15,7 +15,7 @@ def telegram_test(message: str = Form("Test from IndiePulse")):
         token = (cfg.get("tg_bot_token") or "").strip()
         chat_id = (cfg.get("tg_chat_id_ru") or "").strip()
         if not token or not chat_id:
-            return HTMLResponse("<span style='color:orange'>Telegram не настроен</span>")
+            return HTMLResponse("<span style='color:orange'>Telegram not configured</span>")
         import httpx
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         data = {"chat_id": chat_id, "text": message}
@@ -23,11 +23,11 @@ def telegram_test(message: str = Form("Test from IndiePulse")):
             r = client.post(url, data=data)
             jd = r.json()
         if r.status_code >= 400 or not jd.get("ok"):
-            return HTMLResponse(f"<span style='color:red'>Ошибка Telegram: {_e(jd)}</span>")
+            return HTMLResponse(f"<span style='color:red'>Telegram error: {_e(jd)}</span>")
         mid = ((jd.get("result") or {}).get("message_id"))
-        return HTMLResponse(f"<span style='color:green'>Отправлено (message_id={_e(mid)})</span>")
+        return HTMLResponse(f"<span style='color:green'>Sent (message_id={_e(mid)})</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>", status_code=500)
+        return HTMLResponse(f"<span style='color:red'>Error: {_e(str(exc))}</span>", status_code=500)
 
 
 @router.post("/telegram/check")
@@ -37,7 +37,7 @@ def telegram_check():
         token = (cfg.get("tg_bot_token") or "").strip()
         chat_id = (cfg.get("tg_chat_id_ru") or "").strip()
         if not token:
-            return HTMLResponse("<span style='color:orange'>Нет Bot Token</span>")
+            return HTMLResponse("<span style='color:orange'>No Bot Token</span>")
         import httpx
         with httpx.Client(timeout=10) as client:
             me = client.get(f"https://api.telegram.org/bot{token}/getMe")
@@ -51,4 +51,4 @@ def telegram_check():
                 chat_status = " ok" if cjs.get("ok") else f" error: {cjs}"
         return HTMLResponse(f"<span style='color:green'>Bot OK.{_e(chat_status)}</span>")
     except Exception as exc:
-        return HTMLResponse(f"<span style='color:red'>Ошибка: {_e(str(exc))}</span>")
+        return HTMLResponse(f"<span style='color:red'>Error: {_e(str(exc))}</span>")

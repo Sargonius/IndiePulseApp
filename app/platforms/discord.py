@@ -14,12 +14,12 @@ def publish(session, post, job) -> Optional[str]:
     settings = load_settings()
     # Compose per-language messages and target webhooks
     from app.models.models import Brief
-    brief = session.get(Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     text_ru = (brief.text_ru or '').strip() if brief else ''
     text_en = (brief.text_en or '').strip() if brief else ''
     # Build gallery list for Discord; prefer payload.gallery, else single media (use normal/horizontal)
     gallery_files: list[str] = []
-    primary_media: Optional[str] = None
     try:
         import json as _json
         override = None
@@ -34,43 +34,38 @@ def publish(session, post, job) -> Optional[str]:
             media_rel = override or (getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None) if brief else None)
             if media_rel:
                 gallery_files = [media_rel]
-        # Track first item as primary for video handling
-        try:
-            primary_media = (gallery_files[0] if gallery_files else None)
-        except Exception:
-            primary_media = None
     except Exception:
         media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
         if media_rel:
             gallery_files = [media_rel]
-    # Normalize to absolute paths and compress videos if needed
-    if gallery_files:
-        import os as _os, mimetypes as _m
-        from app.services.video_editor import ensure_video_size_limit
-        _abs_files = []
-        for rel in gallery_files:
-            p = (rel or '').replace('\\', '/')
-            if not p.startswith('media/'):
-                p = f"media/{p}"
-            abs_path = _os.path.abspath(p)
-            # Compress videos if needed
-            ctype = _m.guess_type(abs_path)[0] or ''
-            if ctype.startswith('video/'):
-                abs_path = ensure_video_size_limit(abs_path, 'discord', settings)
-            _abs_files.append(abs_path)
-        gallery_files = _abs_files
+    import os as _os
+    import mimetypes as _m
+    abs_files = []
+    for rel in gallery_files:
+        p = (rel or '').replace('\\', '/')
+        if not p.startswith('media/'):
+            p = f"media/{p}"
+        abs_files.append(_os.path.abspath(p))
+    # A video goes alone (the main shot if it is one, else the first in the gallery);
+    # otherwise up to 10 images (Discord's per-message cap). A post with media is
+    # never sent without it: a video over the limit is compressed once for all
+    # webhooks, and if that can't fit it the post fails instead of going out as text.
+    chosen_video = next((fp for fp in abs_files if (_m.guess_type(fp)[0] or '').startswith('video/')), None)
+    if chosen_video:
         try:
-            if primary_media:
-                pm = primary_media.replace('\\','/')
-                if not pm.startswith('media/'):
-                    pm = f"media/{pm}"
-                primary_media = _os.path.abspath(pm)
-                # Compress primary if video
-                ctype = _m.guess_type(primary_media)[0] or ''
-                if ctype.startswith('video/'):
-                    primary_media = ensure_video_size_limit(primary_media, 'discord', settings)
-        except Exception:
-            primary_media = None
+            from app.services.video_editor import ensure_video_size_limit
+            chosen_video = ensure_video_size_limit(chosen_video, 'discord', settings)
+        except Exception as exc:
+            post.status = PostStatusEnum.error
+            post.error_text = f"discord: {exc}"
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
+                session.add(job)
+            session.add(post)
+            session.commit()
+            return 'error'
+    attachments = [chosen_video] if chosen_video else abs_files[:10]
 
     targets = []
     if text_ru and settings.get('discord_webhook_ru'):
@@ -85,7 +80,6 @@ def publish(session, post, job) -> Optional[str]:
     # Per-target progress lives in the job payload, so a retry (auto or manual)
     # only sends to webhooks that haven't received the post yet.
     import json as _json
-    import mimetypes as _m
     from app.services.discord_client import DiscordSendError
     payload = {}
     if job is not None and job.payload_json:
@@ -102,32 +96,13 @@ def publish(session, post, job) -> Optional[str]:
             session.add(job)
             session.commit()
 
-    chosen_video = None
-    if primary_media and (_m.guess_type(primary_media)[0] or '').startswith('video/'):
-        chosen_video = primary_media
-    else:
-        chosen_video = next((fp for fp in gallery_files if (_m.guess_type(fp)[0] or '').startswith('video/')), None)
-
     last_url = None
     for key, wh_url, content in targets:
         if key in sent:
             continue
         client = DiscordClient(wh_url)
         try:
-            try:
-                if chosen_video:
-                    _, sent_url = client.send_message(content, file_path=chosen_video)
-                elif gallery_files:
-                    _, sent_url = client.send_message(content, file_paths=gallery_files)
-                else:
-                    _, sent_url = client.send_message(content)
-            except DiscordSendError as exc:
-                # Fall back to text-only ONLY if Discord definitely rejected the upload
-                # (e.g. file too large). After a timeout it may have landed already.
-                if exc.delivered is False and (chosen_video or gallery_files):
-                    _, sent_url = client.send_message(content + "\n[Attachment upload failed]")
-                else:
-                    raise
+            _, sent_url = client.send_message(content, file_paths=attachments)
         except DiscordSendError as exc:
             if exc.delivered is not False:
                 # possibly/partly posted: never resend to this webhook automatically

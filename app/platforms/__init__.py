@@ -57,6 +57,9 @@ METRICS: dict[str, Callable] = {
     "bluesky": _needs_id(bluesky.fetch_metrics),
     "tg": _needs_id(telegram.fetch_metrics),
     "discord": discord.fetch_metrics,    # can fall back to the stored message URL
+    # manual refreshes only: the /tiktok pipeline tick reads TikTok in batches and keeps
+    # a history (refresh_recent_metrics skips TikTok)
+    "tiktok": _needs_id(tiktok.fetch_metrics),
 }
 
 __all__ = ["PUBLISHERS", "METRICS", "platform_key"]

@@ -26,14 +26,18 @@
 				<form hx-post="/api/settings/save" hx-target="#discord_status" hx-swap="innerHTML" style="margin-top:12px;">
 					<div class="form-group">
 						<label>
-							Bot Token <span style="opacity:.6">(для сбора реакций в аналитику)</span>
-							{% if discord_bot_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ discord_bot_token_hint }}</span>{% endif %}
+							Bot Token <span style="opacity:.6">(collects reactions for analytics)</span>
+							{% if discord_bot_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ discord_bot_token_hint }}</span>{% endif %}
 						</label>
 						<input type="password" name="discord_bot_token" value="" autocomplete="off"
-							placeholder="{% if discord_bot_token_hint %}Токен сохранён — вставь новый, чтобы заменить{% else %}Bot token из Discord Developer Portal{% endif %}" />
+							placeholder="{% if discord_bot_token_hint %}Token saved — paste a new one to replace it{% else %}Bot token from the Discord Developer Portal{% endif %}" />
+					</div>
+					<div class="form-group">
+						<label>Server ID <span style="opacity:.6">(for the member count on Home; leave empty if the bot is in one server)</span></label>
+						<input type="text" name="discord_guild_id" value="{{ discord_guild_id }}" placeholder="Server ID (right-click the server → Copy Server ID)" />
 					</div>
 					<div class="btn-row">
-						<button type="submit" class="btn btn-primary">Save bot token</button>
+						<button type="submit" class="btn btn-primary">Save bot token / server</button>
 					</div>
 				</form>
 				<div id="discord_status" class="status-msg"></div>
@@ -55,6 +59,44 @@
 						<li>Open the generated link, add the bot to your server</li>
 						<li>Paste the <b>Bot Token</b> above and click "Save bot token"</li>
 					</ol>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Steam (Financial API: wishlists + sales for the home screen) -->
+	<div class="settings-section" id="section_steam">
+		<div class="settings-row">
+			<div class="settings-left">
+				<div class="settings-header">
+					<h3>Steam — reports</h3>
+					{% if steam_key_hint %}<span class="status-badge" style="color:#3ba55d;">✓ key {{ steam_key_hint }}</span>{% endif %}
+				</div>
+				<form hx-post="/api/settings/save" hx-target="#steam_status" hx-swap="innerHTML">
+					<div class="form-group">
+						<label>Financial API key <span style="opacity:.6">(daily wishlists and sales, broken down by country)</span></label>
+						<input type="password" name="steam_financial_api_key" value="" autocomplete="off"
+							placeholder="{% if steam_key_hint %}Key saved — paste a new one to replace it{% else %}Web API key of the Financial API group{% endif %}" />
+					</div>
+					<div class="btn-row">
+						<button type="submit" class="btn btn-primary">Save</button>
+						<button type="button" class="btn" hx-post="/api/steam/financial/test" hx-target="#steam_status" hx-swap="innerHTML">Check</button>
+					</div>
+				</form>
+				<div id="steam_status" class="status-msg"></div>
+			</div>
+			<div class="settings-right">
+				<div class="instructions">
+					<h4>How to get the key</h4>
+					<ol>
+						<li>Steamworks → <b>Users &amp; Permissions</b> → <a href="https://partner.steamgames.com/pub/groups/" target="_blank" rel="noopener"><b>Manage Groups</b> ↗</a> → create a group, e.g. “Financial API”</li>
+						<li>Give the group the <b>General</b> and <b>Financial</b> permissions (no users or apps)</li>
+						<li>In the group → <b>Create WebAPI Key</b>, optionally restrict it by IP</li>
+						<li>Paste the key here and click “Check”</li>
+						<li>In <a href="/projects">Projects</a>, set the Steam App ID for each game</li>
+					</ol>
+					<p style="opacity:.75">Steam publishes each day’s data the next day. IndiePulse loads the wishlist history in the background (one request per day since the page went live) — for a 2019 game that’s about 10–20 min; progress shows on Home.</p>
+					<p style="opacity:.75">This key doesn’t give page visits and impressions — the “IndiePulse ← Steam” bookmarklet collects them: <a href="/steam/traffic">Steam traffic</a>.</p>
 				</div>
 			</div>
 		</div>
@@ -205,7 +247,7 @@
 					<div class="btn-row">
 						<button type="submit" class="btn btn-primary">Save</button>
 						<button type="button" class="btn" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Authorize</button>
-						<button type="button" class="btn" hx-post="/api/x/test_tweet" hx-target="#x_status" hx-swap="innerHTML">Test Tweet</button>
+						<button type="button" class="btn" hx-post="/api/x/test_tweet" hx-target="#x_status" hx-swap="innerHTML" title="Posts a real tweet — costs ~$0.015 in X API credits">Test Tweet</button>
 					</div>
 				</form>
 				<div id="x_auth" class="status-msg"></div>
@@ -215,16 +257,18 @@
 				<div class="instructions">
 					<h4>Setup Instructions</h4>
 					<ol>
-						<li>Open <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank">Twitter Developer Portal</a></li>
+						<li>Open <a href="https://console.x.com" target="_blank" rel="noopener">X Developer Console</a></li>
 						<li>Create app, enable <b>OAuth 2.0</b> with PKCE</li>
 						<li>Set Redirect URI to your callback URL</li>
 						<li>Copy Client ID and Secret</li>
 						<li>For media uploads: also get OAuth 1.0a keys</li>
+						<li>Buy API credits (Billing) — without them X answers 402</li>
 					</ol>
 					<div class="info-box">
 						<b>Scopes needed:</b> tweet.read, tweet.write, users.read, offline.access
 					</div>
 				</div>
+				<div id="x_billing" hx-get="/api/x/billing" hx-trigger="load" hx-swap="innerHTML"></div>
 			</div>
 		</div>
 	</div>
@@ -262,7 +306,7 @@
 				<div id="yt_status" class="status-msg"></div>
 				<form hx-post="/api/settings/save" hx-target="#yt_metrics_status" hx-swap="innerHTML">
 					<div class="form-group">
-						<label>Статистика видео, дней после публикации <span style="opacity:.6">(первая неделя — каждые 30 мин, дальше раз в день; 0 — только неделя)</span></label>
+						<label>Video stats, days after publishing <span style="opacity:.6">(first week every 30 min, then daily; 0 = first week only)</span></label>
 						<input type="number" name="yt_metrics_days" value="{{ yt_metrics_days }}" min="0" max="3650" />
 					</div>
 					<div class="btn-row">
@@ -274,7 +318,7 @@
 			<div class="settings-right">
 				<!-- Live checklist: links into your Google Cloud project + ✓/✗ per step (api/youtube.py) -->
 				<div id="yt_setup" hx-get="/api/youtube/setup" hx-trigger="load" hx-swap="innerHTML">
-					<div class="instructions">Проверяю подключение YouTube…</div>
+					<div class="instructions">Checking the YouTube connection…</div>
 				</div>
 			</div>
 		</div>
@@ -413,11 +457,11 @@
 					</div>
 					<div class="form-group">
 						<label>
-							Access Token (Page-токен страницы, к которой привязан IG)
-							{% if ig_access_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ ig_access_token_hint }}</span>{% endif %}
+							Access Token (Page token of the page linked to IG)
+							{% if ig_access_token_hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ ig_access_token_hint }}</span>{% endif %}
 						</label>
 						<input type="password" name="ig_access_token" value="" autocomplete="off"
-							placeholder="{% if ig_access_token_hint %}Токен сохранён — вставь новый, чтобы заменить{% else %}EAAB...{% endif %}" />
+							placeholder="{% if ig_access_token_hint %}Token saved — paste a new one to replace it{% else %}EAAB...{% endif %}" />
 					</div>
 					<div class="btn-row">
 						<button type="submit" class="btn btn-primary">Save</button>
@@ -427,15 +471,15 @@
 			</div>
 			<div class="settings-right">
 				<div class="instructions">
-					<h4>Setup (требует App Review Meta)</h4>
+					<h4>Setup (needs Meta App Review)</h4>
 					<ol>
-						<li>IG-аккаунт должен быть <b>Business/Creator</b> и привязан к Facebook-странице (секция Facebook выше).</li>
-						<li>Разрешение <b>instagram_business_content_publish</b> проходит App Review Meta (~2–4 недели).</li>
-						<li>Возьми <b>IG Business Account ID</b>: Graph API Explorer → <code>GET /{page-id}?fields=instagram_business_account</code>.</li>
-						<li>В качестве токена используй <b>Page Access Token</b> привязанной страницы.</li>
+						<li>The IG account must be <b>Business/Creator</b> and linked to a Facebook Page (Facebook section above).</li>
+						<li>The <b>instagram_business_content_publish</b> permission goes through Meta App Review (~2–4 weeks).</li>
+						<li>Get the <b>IG Business Account ID</b>: Graph API Explorer → <code>GET /{page-id}?fields=instagram_business_account</code>.</li>
+						<li>Use the linked page’s <b>Page Access Token</b> as the token.</li>
 					</ol>
 					<div class="info-box">
-						До прохождения review Reels выгружаются в папку экспорта (ручная заливка с телефона). После аппрува — полный авто-постинг.
+						Until the review passes, Reels go to the export folder (upload them manually from your phone). Once approved — full auto-posting.
 					</div>
 				</div>
 			</div>
@@ -501,8 +545,9 @@
 					<span class="status-badge" id="status_tiktok">Loading...</span>
 				</div>
 				<div class="info-box" style="margin-bottom:12px;">
-					Работает в режиме <b>черновиков (inbox)</b>: фабрика заливает видео прямо в инбокс TikTok,
-					дальше в приложении добавляешь звук/подпись и публикуешь. Аудит TikTok для этого не нужен.
+					Works in <b>draft (inbox)</b> mode: videos go straight to your TikTok inbox,
+					then you add sound/caption in the app and publish. No TikTok audit needed for this.
+					Connect and post from <a href="/tiktok">🎵 TikTok</a>: it also shows whether a draft went live and its numbers.
 				</div>
 				<form hx-post="/api/settings/save" hx-target="#tiktok_status" hx-swap="innerHTML">
 					<div class="form-group">
@@ -512,13 +557,13 @@
 					<div class="form-group">
 						<label>
 							Client Secret
-							{% if tiktok_secret_hint %}<span class="status-badge" style="color:#3ba55d;">✓ сохранён {{ tiktok_secret_hint }}</span>{% endif %}
+							{% if tiktok_secret_hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ tiktok_secret_hint }}</span>{% endif %}
 						</label>
 						<input type="password" name="tiktok_client_secret" value="" autocomplete="off"
-							placeholder="{% if tiktok_secret_hint %}Секрет сохранён — вставь новый, чтобы заменить{% else %}...{% endif %}" />
+							placeholder="{% if tiktok_secret_hint %}Secret saved — paste a new one to replace it{% else %}...{% endif %}" />
 					</div>
 					<div class="form-group">
-						<label>Redirect URI (должен 1-в-1 совпадать с настройкой приложения TikTok)</label>
+						<label>Redirect URI (must match the TikTok app setting exactly)</label>
 						<input type="text" name="tiktok_redirect_uri" value="{{ tiktok_redirect_uri or '' }}" />
 					</div>
 					<div class="btn-row">
@@ -528,25 +573,26 @@
 					</div>
 				</form>
 				<div id="tiktok_status" class="status-msg"></div>
-				{% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (обновляется автоматически)</div>{% endif %}
+				{% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (refreshes automatically)</div>{% endif %}
 			</div>
 			<div class="settings-right">
 				<div class="instructions">
 					<h4>Setup</h4>
 					<ol>
-						<li>Создай приложение на <a href="https://developers.tiktok.com/" target="_blank">developers.tiktok.com</a></li>
-						<li>Подключи продукты <b>Login Kit</b> и <b>Content Posting API</b></li>
-						<li>Включи скоупы <b>user.info.basic</b> и <b>video.upload</b> (inbox-режим, аудит не нужен)</li>
-						<li>В Login Kit пропиши Redirect URI — тот же, что в поле слева</li>
-						<li>Скопируй Client Key + Secret сюда → Save → <b>Connect TikTok</b></li>
+						<li>Create an app at <a href="https://developers.tiktok.com/" target="_blank">developers.tiktok.com</a></li>
+						<li>Add the <b>Login Kit</b> and <b>Content Posting API</b> products</li>
+						<li>Enable the <b>user.info.basic</b> and <b>video.upload</b> scopes (inbox mode, no audit needed).
+							For views and followers on <a href="/tiktok">🎵 TikTok</a> also <b>video.list</b>, <b>user.info.stats</b>, <b>user.info.profile</b>.</li>
+						<li>In Login Kit, set the Redirect URI — the same one as in the field on the left</li>
+						<li>Copy the Client Key + Secret here → Save → <b>Connect TikTok</b></li>
 					</ol>
 					<div class="info-box">
-						TikTok требует <b>HTTPS</b> redirect для прод-приложений — для локалки включи
-						<b>Sandbox</b>-режим приложения и добавь свой TikTok-аккаунт в target users,
-						либо подними https-туннель (ngrok/cloudflared) и укажи его URI.
+						TikTok requires an <b>HTTPS</b> redirect for production apps — for local use, switch the app
+						to <b>Sandbox</b> mode and add your TikTok account to target users,
+						or run an https tunnel (ngrok/cloudflared) and use its URI.
 					</div>
 					<div class="info-box">
-						Без ключей фабрика продолжит складывать видео в <code>render/</code> для ручной заливки.
+						Without keys the factory keeps saving videos to <code>render/</code> for manual upload.
 					</div>
 				</div>
 			</div>
@@ -594,31 +640,36 @@
 		</div>
 	</div>
 
-	<!-- Interface Language -->
-	<div class="settings-section" id="section_ui">
+	<!-- Video editor: music folders + upload limits -->
+	<div class="settings-section" id="section_video">
 		<div class="settings-row">
 			<div class="settings-left">
 				<div class="settings-header">
-					<h3>Interface</h3>
+					<h3>Video &amp; music</h3>
 				</div>
-				<form hx-post="/api/settings/save" hx-target="#lang_status" hx-swap="innerHTML">
+				<form hx-post="/api/settings/save" hx-target="#video_status" hx-swap="innerHTML">
 					<div class="form-group">
-						<label>Language</label>
-						<select name="ui_language">
-							<option value="en" {% if (ui_language or 'en') == 'en' %}selected{% endif %}>English</option>
-							<option value="ru" {% if (ui_language or 'en') == 'ru' %}selected{% endif %}>Русский</option>
-						</select>
+						<label>Music folders <span style="opacity:.6">(one per line; subfolders are read too)</span></label>
+						<textarea name="music_dir" rows="3" placeholder="E:\Music\Shorts&#10;D:\Assets\Music">{{ music_dir }}</textarea>
+						{% for f in music_folders %}
+						<div class="muted" style="font-size:12px;">{% if f.exists %}✓{% else %}✕ folder not found:{% endif %} {{ f.path }}{% if f.exists %} — {{ f.tracks }} {{ 'track' if f.tracks == 1 else 'tracks' }}{% endif %}</div>
+						{% endfor %}
+					</div>
+					<div class="form-group">
+						<label>Discord file limit, MB <span style="opacity:.6">(10 = no boosts; 50 = boost level 2; 100 = level 3)</span></label>
+						<input type="number" name="discord_upload_limit_mb" min="1" max="500" step="1" value="{{ discord_upload_limit_mb }}" style="width:120px;" />
 					</div>
 					<div class="btn-row">
 						<button type="submit" class="btn btn-primary">Save</button>
 					</div>
 				</form>
-				<div id="lang_status" class="status-msg"></div>
+				<div id="video_status" class="status-msg"></div>
 			</div>
 			<div class="settings-right">
 				<div class="instructions">
-					<h4>UI Settings</h4>
-					<p>Change the interface language for the application.</p>
+					<h4>Video editor</h4>
+					<p>Opens from the video tile in “📷 Post” and on “🎬 Video”: format (original / 16:9 / 9:16 / 1:1), crop, trim, music from these folders, on-screen text.</p>
+					<p>A video over a network’s limit is re-compressed to fit when publishing (Discord, Telegram 50 MB, Bluesky 100 MB…). If even that doesn’t help, the post fails with an error instead of going out without the video. The editor shows in advance what will happen on each network.</p>
 				</div>
 			</div>
 		</div>

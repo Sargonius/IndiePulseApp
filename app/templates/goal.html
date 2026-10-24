@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% from "partials/mk_macros.html" import meter %}
+{% block content %}
+{% set g = goal %}
+<div class="mk-head">
+  <div>
+    <div class="muted mk-sub"><a href="/goals">Goals</a> · {{ project.name if project else 'global goal' }} · {{ spec.label }}</div>
+    <h2>{{ g.title }}</h2>
+  </div>
+  <div class="row">
+    {% if g.status == 'achieved' %}<span class="goal-badge done">✓ Reached {{ g.achieved_day|day }}</span>
+    {% elif g.status == 'archived' %}<span class="goal-badge">Archived</span>{% endif %}
+    {% if steam_link %}<a class="btn btn-sm" href="{{ steam_link.url }}" target="_blank" rel="noopener">{{ steam_link.label }} in Steamworks ↗</a>{% endif %}
+  </div>
+</div>
+
+<section class="card goal-summary">
+  <div class="goal-hero">
+    <div class="hero-value">{{ gp.current|num }}<span class="hero-of"> of {{ gp.target|num }}</span></div>
+    <div class="muted">
+      {% if g.mode == 'total' %}goal: reach {{ g.target|num }}{% if gp.baseline is not none %}, {{ gp.baseline|num }} at the start{% endif %}
+      {% elif spec.kind == 'level' %}growth since {{ g.start_day|day }}{% if gp.baseline is not none %} (was {{ gp.baseline|num }}){% endif %}
+      {% else %}total since {{ g.start_day|day }}{% endif %}
+    </div>
+  </div>
+  {{ meter(pct100, g.status == 'achieved') }}
+  <ul class="goal-facts">
+    <li><b>{{ pct100 }}%</b> done</li>
+    <li>day {{ gp.days_elapsed }}</li>
+    {% if gp.rate_now is not none %}<li>pace <b>{{ gp.rate_now|num }}</b>/day{% if gp.rate_before is not none %} · {{ gp.rate_before|num }} before the start{% endif %}</li>{% endif %}
+    {% if gp.eta_day and g.status == 'active' %}<li>forecast: {{ gp.eta_day|day }}</li>{% endif %}
+    {% if g.deadline %}<li>deadline {{ g.deadline|day }}{% if gp.days_left is not none and g.status == 'active' %} · {% if gp.days_left >= 0 %}{{ gp.days_left }} d left{% else %}passed{% endif %}{% endif %}</li>{% endif %}
+  </ul>
+  {% if not gp.has_data %}
+  <p class="muted">No data for this metric yet.
+    {% if traffic_metric %}Visits and impressions come via the “IndiePulse ← Steam” bookmarklet — see <a href="/steam/traffic">Steam traffic</a>.
+    {% elif manual %}Enter the numbers from Steamworks in the form below.
+    {% elif spec.scope == 'project' and not steam_ready %}Check the project’s Steam App ID (Projects) and the Financial API key (⚙️ Settings → Steam).
+    {% else %}Metrics are collected every 15 min; the “Refresh now” button is on the home page.{% endif %}
+  </p>
+  {% endif %}
+  {% if g.notes %}<p class="goal-notes">{{ g.notes }}</p>{% endif %}
+</section>
+
+<section class="card">
+  <h3>{{ 'Progress to goal' if chart.kind == 'flow' else spec.label }}</h3>
+  <div class="chart" id="goal_chart"></div>
+  {% if chart.kind == 'flow' %}
+  <h3 class="chart-title-2">By day <span class="muted">— in gray: 14 days before the start</span></h3>
+  <div class="chart" id="goal_daily"></div>
+  {% endif %}
+  <p class="muted chart-legend-note">Dots under the chart are posts and actions; hover to see what they were.</p>
+  <script type="application/json" id="goal_chart_data">{{ chart|tojson }}</script>
+  <details class="chart-table">
+    <summary>Daily table</summary>
+    <table>
+      <thead><tr><th>Day</th><th class="num">That day</th>{% if chart.kind == 'flow' %}<th class="num">Total so far</th>{% endif %}<th>What happened</th></tr></thead>
+      <tbody>
+      {% for row in table|reverse %}
+        <tr><td>{{ row.day|day }}</td><td class="num">{{ row.value|num }}</td>{% if chart.kind == 'flow' %}<td class="num">{{ row.cum|num }}</td>{% endif %}<td>{{ row.events|join(' · ') }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+</section>
+
+<section class="card" id="actions">
+  <h3>What I did for this goal</h3>
+  {% if events %}
+  <ul class="event-list">
+    {% for e in events|reverse %}
+    <li class="{{ 'linked' if e.linked else '' }}">
+      <span class="ev-day">{{ e.day|day }}</span>
+      <span>{{ '📣' if e.kind == 'post' else '✍️' }}</span>
+      {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a>{% else %}<span>{{ e.title }}</span>{% endif %}
+      {% if e.platforms %}<span class="muted">· {{ e.platforms|join(', ') }}</span>{% endif %}
+      {% if e.kind == 'post' and not e.linked %}<span class="muted" title="{{ 'Project post published during the goal' if g.project_id else 'Published during the goal' }}">· {{ 'by project' if g.project_id else 'during the goal' }}</span>{% endif %}
+      {% if e.kind == 'post' %}<a class="muted" href="/publications/{{ e.brief_id }}" title="Views, reactions and followers before/after">report</a>{% endif %}
+      {% if e.kind == 'post' and e.linked %}
+      <form method="post" action="/api/goals/{{ g.id }}/links" class="inline-form">
+        <input type="hidden" name="brief_id" value="{{ e.brief_id }}"><input type="hidden" name="action" value="unlink">
+        <button class="btn-link" title="Unlink from goal">unlink</button>
+      </form>
+      {% elif e.kind == 'activity' %}
+      <form method="post" action="/api/activities/{{ e.activity_id }}/delete" class="inline-form">
+        <input type="hidden" name="next" value="/goals/{{ g.id }}#actions">
+        <button class="btn-link" title="Delete">delete</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Nothing yet. Posts created with this goal (or the goal’s project) show up here automatically.</p>
+  {% endif %}
+
+  <div class="grid cols-2 goal-forms">
+    <form method="post" action="/api/activities" class="stack">
+      <b>Add an action</b>
+      <input type="hidden" name="goal_id" value="{{ g.id }}">
+      <input type="hidden" name="next" value="/goals/{{ g.id }}#actions">
+      <div class="row">
+        <input type="date" name="day" value="{{ today }}" aria-label="Day">
+        <input type="text" name="title" required maxlength="300" placeholder="emailed 15 streamers" style="flex:1; min-width:0;">
+      </div>
+      <button class="btn btn-sm">Add</button>
+    </form>
+    <form method="post" action="/api/goals/{{ g.id }}/links" class="stack">
+      <b>Link a post</b>
+      <select name="brief_id" required>
+        {% for b in link_options if not b.linked %}
+        <option value="{{ b.id }}">{{ b.created|day }} · {{ b.title }}{% if b.project %} ({{ b.project }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-sm">Link</button>
+    </form>
+  </div>
+
+  {% if manual and project %}
+  <form method="post" action="/api/metrics/manual" class="row manual-form">
+    <b>{% if traffic_metric %}Or manually:{% else %}Enter from Steamworks:{% endif %}</b>
+    <input type="hidden" name="project_id" value="{{ project.id }}">
+    <input type="hidden" name="metric" value="{{ g.metric }}">
+    <input type="hidden" name="next" value="/goals/{{ g.id }}">
+    <input type="date" name="start_day" value="{{ default_start }}" aria-label="Period start">
+    <span class="muted">—</span>
+    <input type="date" name="end_day" value="{{ default_end }}" aria-label="Period end">
+    <input type="number" name="value" min="0" step="1" required placeholder="{{ spec.label }}" aria-label="{{ spec.label }}">
+    <button class="btn btn-sm">Save</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <details>
+    <summary><b>Edit goal</b></summary>
+    <form method="post" action="/api/goals/{{ g.id }}/edit" class="goal-form-grid" style="margin-top:10px;">
+      <label>Title <input type="text" name="title" value="{{ g.title }}" maxlength="200"></label>
+      <label>N <input type="number" name="target" value="{{ g.target|round(2) }}" min="1" step="any"></label>
+      <label>Deadline <input type="date" name="deadline" value="{{ g.deadline or '' }}"></label>
+      <label>Note <input type="text" name="notes" value="{{ g.notes or '' }}" maxlength="500"></label>
+      <div><button class="btn btn-primary btn-sm">Save</button></div>
+    </form>
+  </details>
+  <div class="row" style="margin-top:12px;">
+    {% if g.status == 'archived' %}
+    <form method="post" action="/api/goals/{{ g.id }}/status"><input type="hidden" name="status" value="active"><button class="btn btn-sm">Restore from archive</button></form>
+    {% else %}
+    <form method="post" action="/api/goals/{{ g.id }}/status"><input type="hidden" name="status" value="archived"><button class="btn btn-sm">Archive</button></form>
+    {% endif %}
+    <form method="post" action="/api/goals/{{ g.id }}/delete" onsubmit='return confirm({{ ("Delete goal “" ~ g.title ~ "”? Posts and actions will stay.")|tojson }});'>
+      <button class="btn btn-sm btn-danger-outline">Delete</button>
+    </form>
+  </div>
+</section>
+
+<script src="/static/charts.js?v={{ request.app.state.asset_version }}"></script>
+<script>IPChart.goal(document.getElementById('goal_chart_data'));</script>
+{% endblock %}

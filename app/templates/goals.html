@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "partials/mk_macros.html" import goal_row %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>🎯 Goals</h2>
+    <div class="muted mk-sub">Goal = metric + how much + from which day. Tag posts with a goal when you create them; progress is tracked automatically.</div>
+  </div>
+  <a class="btn" href="/">← Home</a>
+</div>
+
+<section class="card" id="new">
+  <h3>New goal</h3>
+  <form method="post" action="/api/goals" class="goal-form">
+    <div class="goal-form-grid">
+      <label>Project
+        <select name="project_id" id="gf_project">
+          <option value="0">Global — not tied to one project</option>
+          {% for p in projects %}<option value="{{ p.id }}" {% if p.id == preselect_project %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Metric
+        <select name="metric" id="gf_metric" required>
+          {% for key, m in metrics.items() %}
+          <option value="{{ key }}" data-scope="{{ m.scope }}" data-kind="{{ m.kind }}" data-hint="{{ m.hint or '' }}"
+                  {% if key == 'steam_wishlist_adds' %}selected{% endif %}>{{ m.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Goal type
+        <select name="mode" id="gf_mode">
+          <option value="delta">Growth: +N from start</option>
+          <option value="total">Reach N</option>
+        </select>
+      </label>
+      <label>N <input type="number" name="target" min="1" step="any" required placeholder="50"></label>
+      <label>Start <input type="date" name="start_day" value="{{ today }}"></label>
+      <label>Deadline (opt.) <input type="date" name="deadline"></label>
+      <label class="span-2">Title (opt.) <input type="text" name="title" maxlength="200" placeholder="+50 wishlists by the patch"></label>
+      <label class="span-2">Note (opt.) <input type="text" name="notes" maxlength="500" placeholder="what I’m doing for it"></label>
+    </div>
+    <p class="muted" id="gf_hint"></p>
+    <button class="btn btn-primary">Create goal</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3>Active</h3>
+  {% if active %}<div class="goal-list">{% for r in active %}{{ goal_row(r) }}{% endfor %}</div>
+  {% else %}<p class="muted">None yet. Start with a patch campaign: “Sales, units” or “Wishlist adds”, starting on release day.</p>{% endif %}
+</section>
+
+{% if achieved %}
+<section class="card">
+  <h3>Achieved</h3>
+  <div class="goal-list">{% for r in achieved %}{{ goal_row(r) }}{% endfor %}</div>
+</section>
+{% endif %}
+
+{% if archived %}
+<details class="card">
+  <summary><b>Archived</b> <span class="muted">({{ archived|length }})</span></summary>
+  <div class="goal-list" style="margin-top:10px;">{% for r in archived %}{{ goal_row(r) }}{% endfor %}</div>
+</details>
+{% endif %}
+
+<script>
+(function () {
+  const project = document.getElementById('gf_project');
+  const metric = document.getElementById('gf_metric');
+  const mode = document.getElementById('gf_mode');
+  const hint = document.getElementById('gf_hint');
+  function sync() {
+    const isProject = project.value !== '0';
+    let firstOk = null;
+    [...metric.options].forEach(o => {
+      const ok = o.dataset.scope === 'any' || (o.dataset.scope === 'project') === isProject;
+      o.disabled = !ok;
+      o.hidden = !ok;
+      if (ok && !firstOk) firstOk = o;
+    });
+    if (metric.selectedOptions[0] && metric.selectedOptions[0].disabled && firstOk) metric.value = firstOk.value;
+    const opt = metric.selectedOptions[0];
+    const level = opt && opt.dataset.kind === 'level';
+    mode.querySelector('[value="total"]').disabled = !level;
+    if (!level) mode.value = 'delta';
+    const parts = [];
+    if (opt && opt.dataset.hint) parts.push(opt.dataset.hint);
+    parts.push(level ? 'Counter: progress = current value − value on the start day.'
+                     : 'Flow: progress = sum over the days since the start date.');
+    if (!isProject) parts.push('Pick a project to use Steam metrics.');
+    hint.textContent = parts.join(' ');
+  }
+  project.addEventListener('change', sync);
+  metric.addEventListener('change', sync);
+  sync();
+})();
+</script>
+{% endblock %}

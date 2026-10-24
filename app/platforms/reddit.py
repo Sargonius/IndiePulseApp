@@ -30,7 +30,8 @@ def publish(session, post, job) -> Optional[str]:
             session.add(job)
         session.commit()
         return 'error'
-    brief = session.get(Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     full_body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
     # Use job payload value for number of sentences in main post
     sent_count = 2

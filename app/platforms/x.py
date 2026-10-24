@@ -4,6 +4,22 @@ from __future__ import annotations
 from typing import Optional
 
 
+def compose(brief) -> tuple[str, str]:
+    """(body, hashtags) of the tweet for a brief."""
+    if not brief:
+        return '', ''
+    return (brief.text_en or brief.text_ru or ''), (getattr(brief, 'tags_json', None) or '').strip()
+
+
+def thread_parts(body: str, tags: str) -> list[str]:
+    """280-safe thread: the first tweet keeps the hashtags, the rest go as replies."""
+    from app.services.bluesky_client import _sentence_chunks
+    fixed = ('\n' + tags) if tags else ''
+    chunks = _sentence_chunks((body or '').strip(), max(40, 280 - len(fixed)))
+    first = ((chunks[0] if chunks else '') + fixed).strip() or tags
+    return [first] + chunks[1:]
+
+
 def publish(session, post, job) -> Optional[str]:
     """Publish one post. Return None on success (the caller marks it done),
     or a result string ('error', 'ok', ...) after setting the final state itself."""
@@ -30,122 +46,62 @@ def publish(session, post, job) -> Optional[str]:
         return 'error'
     # Compose text from brief if available
     from app.models.models import Brief
-    brief = session.get(Brief, post.brief_id)
-    base_text = (brief.text_en or brief.text_ru or '') if brief else ''
-    hashtags = ''
-    if brief and getattr(brief, 'tags_json', None):
-        try:
-            hashtags = (brief.tags_json or '').strip()
-        except Exception:
-            hashtags = ''
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
+    base_text, hashtags = compose(brief)
     media_ids: list[str] = []
-    # Use normal/horizontal video/image for X (Twitter)
-    media_rel: Optional[str] = None
+    # Media from the job payload (gallery, else media_rel), else the brief's own file
+    files: list[str] = []
     try:
-        # Helper to build first tweet that always includes hashtags, trimming base text first
-        def _compose_main_and_remaining(text_body: str, tag_str: str) -> tuple[str, str]:
-            body = (text_body or '').strip()
-            tags = (tag_str or '').strip()
-            if not tags:
-                if len(body) <= 280:
-                    return body, ''
-                # trim body to 280 on word boundary
-                head = body[:280]
-                cut = head.rfind(' ')
-                if cut > 40:
-                    head = head[:cut]
-                tail = body[len(head):].lstrip()
-                return head, tail
-            # ensure hashtags stay in the first tweet; trim body if needed
-            fixed_suffix = ('\n' + tags)
-            budget = 280 - len(fixed_suffix)
-            if budget <= 0:
-                # Keep full hashtags (if they exceed 280, API will reject and caller will handle)
-                return fixed_suffix, body  # push entire body to replies
-            if len(body) <= budget:
-                return (body + fixed_suffix), ''
-            # need to trim body to fit
-            head = body[:budget]
-            cut = head.rfind(' ')
-            if cut > 40:
-                head = head[:cut]
-            remaining = body[len(head):].lstrip()
-            return (head + fixed_suffix), remaining
         import json as _json
-        override = None
-        if job and job.payload_json:
-            try:
-                parsed = (_json.loads(job.payload_json) or {})
-                override = parsed.get('media_rel')
-                gallery_list = parsed.get('gallery') or []
-            except Exception:
-                override = None
-                gallery_list = []
-        # Prefer normal/horizontal media
-        media_rel = override or getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+        parsed = (_json.loads(job.payload_json) or {}) if (job and job.payload_json) else {}
+        gallery = parsed.get('gallery')
+        if isinstance(gallery, list):
+            files = [str(x) for x in gallery if isinstance(x, str)]
+        if not files and parsed.get('media_rel'):
+            files = [str(parsed['media_rel'])]
     except Exception:
-        media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
-    # If gallery present, upload up to 4 images (X limit); else single media if present
-    gallery_media: list[str] = []
-    try:
-        if job and job.payload_json:
-            import json as _json2
-            parsed = (_json2.loads(job.payload_json) or {})
-            if isinstance(parsed.get('gallery'), list):
-                gallery_media = [str(x) for x in parsed.get('gallery') if isinstance(x, str)]
-    except Exception:
-        gallery_media = []
-    if gallery_media:
+        files = []
+    if not files:
+        brief_media = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
+        files = [brief_media] if brief_media else []
+    abs_files = []
+    for rel in files:
+        path = rel.replace('\\', '/')
+        if not path.startswith('media/'):
+            path = f"media/{path}"
+        abs_files.append(os.path.abspath(path))
+    # X takes one video or up to 4 images. A post with media never goes out as a
+    # bare text tweet: any upload problem fails the post (auto-retried once).
+    import mimetypes as _m
+    video = next((p for p in abs_files if (_m.guess_type(p)[0] or '').startswith('video/')), None)
+    uploads = [video] if video else abs_files[:4]
+    if uploads:
         api_key = (cfg.get('x_api_key') or '').strip()
         api_secret = (cfg.get('x_api_secret') or '').strip()
         oauth_token = (cfg.get('x_oauth_token') or '').strip()
         oauth_secret = (cfg.get('x_oauth_token_secret') or '').strip()
-        if api_key and api_secret and oauth_token and oauth_secret:
-            try:
-                uploader = XMediaUploader(oauth_token, oauth_secret, api_key, api_secret)
-                for rel in gallery_media[:4]:
-                    path = rel.replace('\\', '/')
-                    if not path.startswith('media/'):
-                        path = f"media/{path}"
-                    import os as _os
-                    mid = uploader.upload(_os.path.abspath(path))
-                    media_ids.append(mid)
-            except Exception as exc:
-                if job is not None:
-                    job.last_error = f"x_gallery_upload_failed: {exc}"
-                    session.add(job)
-                    session.commit()
-    elif media_rel:
-        # Use OAuth1 for media upload (requires keys/tokens)
-        api_key = (cfg.get('x_api_key') or '').strip()
-        api_secret = (cfg.get('x_api_secret') or '').strip()
-        oauth_token = (cfg.get('x_oauth_token') or '').strip()
-        oauth_secret = (cfg.get('x_oauth_token_secret') or '').strip()
-        if api_key and api_secret and oauth_token and oauth_secret:
-            try:
-                uploader = XMediaUploader(oauth_token, oauth_secret, api_key, api_secret)
-                path = media_rel
-                if path:
-                    path = path.replace('\\', '/')
-                    if not path.startswith('media/'):
-                        path = f"media/{path}"
-                    import os as _os
-                    path = _os.path.abspath(path)
+        try:
+            if not (api_key and api_secret and oauth_token and oauth_secret):
+                raise RuntimeError("OAuth1 keys for media upload are missing (Accounts → X)")
+            if video:
+                from app.services.video_editor import ensure_video_size_limit
+                uploads = [ensure_video_size_limit(video, 'x', cfg)]
+            uploader = XMediaUploader(oauth_token, oauth_secret, api_key, api_secret)
+            for path in uploads:
                 media_ids.append(uploader.upload(path))
-            except Exception as exc:
-                # if media upload fails, fallback to text-only
-                if job is not None:
-                    job.last_error = f"x_media_upload_failed: {exc}"
-                    session.add(job)
-                    session.commit()
-        else:
-            # OAuth1 not configured
+        except Exception as exc:
+            post.status = PostStatusEnum.error
+            post.error_text = f"x_media_upload_failed: {exc} — not posting the text without its media"
             if job is not None:
-                job.last_error = "x_media_upload_skipped: oauth1_missing"
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
                 session.add(job)
-                session.commit()
+            session.add(post)
+            session.commit()
+            return 'error'
     import httpx as _httpx
-    from app.services.bluesky_client import _sentence_chunks as _x_chunks
+    from app.services import x_billing
     _x_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     def _x_post_v2(text_val: str, media: Optional[list] = None, reply_to: Optional[str] = None) -> Optional[str]:
@@ -157,6 +113,8 @@ def publish(session, post, job) -> Optional[str]:
         with _httpx.Client(timeout=20) as _h:
             r = _h.post("https://api.twitter.com/2/tweets", json=payload, headers=_x_headers)
             d = r.json()
+        if x_billing.remember(r.status_code, d):
+            raise RuntimeError(x_billing.ERROR_TEXT)
         if r.status_code >= 400:
             raise RuntimeError(f"x_tweet_error status={r.status_code} body={d}")
         tid_ = (d.get('data') or {}).get('id')
@@ -170,15 +128,11 @@ def publish(session, post, job) -> Optional[str]:
         return tid_
 
     def _x_thread(media: Optional[list] = None) -> Optional[str]:
-        """280-safe thread: first tweet keeps hashtags (+media), the rest go as replies."""
-        tags = (hashtags or '').strip()
-        fixed = ('\n' + tags) if tags else ''
-        budget = max(40, 280 - len(fixed))
-        chunks = _x_chunks((base_text or '').strip(), budget)
-        first_text = ((chunks[0] if chunks else '') + fixed).strip() or tags
-        first_id = _x_post_v2(first_text, media=media)
+        """First tweet keeps hashtags (+media), the rest go as replies."""
+        parts = thread_parts(base_text, hashtags)
+        first_id = _x_post_v2(parts[0], media=media)
         parent = first_id
-        for seg in chunks[1:]:
+        for seg in parts[1:]:
             if not parent:
                 break
             parent = _x_post_v2(seg, reply_to=parent)
@@ -248,6 +202,9 @@ def fetch_metrics(post) -> dict:
         with httpx.Client(timeout=15) as client:
             r = client.get(url, params=params, headers=headers)
             data = r.json()
+        from app.services import x_billing
+        if x_billing.remember(r.status_code, data):
+            raise RuntimeError(x_billing.ERROR_TEXT)
         if r.status_code >= 400:
             raise RuntimeError(f"x_metrics status={r.status_code} body={str(data)[:200]}")
         pm = ((data.get("data") or [{}])[0]).get("public_metrics") or {}

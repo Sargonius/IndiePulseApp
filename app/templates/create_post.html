@@ -7,16 +7,19 @@
 	<div class="post-layout">
 		<!-- Left: Media -->
 		<div class="post-media">
-			<label>Скриншоты <span class="muted" style="font-weight:400;">(первый = основной, идёт во все соцсети; остальные — галереей, где API позволяет)</span></label>
+			<label>Screenshots <span class="muted" style="font-weight:400;">(first = main, goes to every network; the rest as a gallery where the API allows)</span></label>
 			<div id="drop_zone_shots" class="drop-zone">
-				<span>📸 Перетащи скриншоты (можно несколько) или кликни</span>
+				<span>📸 Drop screenshots (several OK) or click</span>
 			</div>
 			<input type="file" id="media_input_shots" accept="image/*,video/*" multiple style="display:none;" />
 			<div id="shots_wrap" class="gallery-grid"></div>
+			<!-- shown while the post has a video: open the editor + per-platform size check -->
+			<div id="video_hint" class="video-hint" hidden></div>
+			<div id="video_fit" class="video-fit"></div>
 			<div id="no_shot_warning" class="warnings-panel danger" style="display:none;"></div>
 			<input type="hidden" name="media_normal" id="media_normal_hidden" value="" />
 
-			<!-- gallery merged into the unified Скриншоты field above; this hidden
+			<!-- gallery merged into the unified Screenshots field above; this hidden
 			     field still carries the full ordered list to /create/post -->
 			<input type="hidden" name="gallery_order" id="gallery_order_hidden" value="{{ (draft.gallery_normal | join(',')) if draft and draft.gallery_normal else '' }}" />
 		</div>
@@ -44,6 +47,11 @@
 				<div id="project_tiles" class="project-tiles-row">
 					<span class="muted" style="font-size:12px;">Loading...</span>
 				</div>
+				<input type="hidden" name="project_id" id="project_id_hidden" value="" />
+			</div>
+			<div class="form-group">
+				<label>Goal <span class="muted" style="font-weight:400;">(optional) — the post shows up in “What I did” on the goal page</span></label>
+				<select name="goal_id" id="goal_select"><option value="">— no goal —</option></select>
 			</div>
 
 			<div class="form-group">
@@ -70,6 +78,13 @@
 			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="bluesky" checked /> Bluesky</label>
 			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="reddit" checked /> Reddit</label>
 			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="tg" checked /> Telegram</label>
+			<!-- video-only targets: shown while the main media is a video -->
+			<label class="platform-option pf-video-opt" hidden><input class="pf pf-video" type="checkbox" name="platforms" value="yt" /> YouTube</label>
+			<label class="platform-option pf-video-opt" hidden title="Draft in the TikTok app — finish it there"><input class="pf pf-video" type="checkbox" name="platforms" value="tiktok" /> TikTok (draft)</label>
+		</div>
+		<div id="yt_title_row" class="form-group" style="margin-top:10px;" hidden>
+			<label>Video title <span class="muted" style="font-weight:400;">(YouTube; empty — start of the EN text, up to 90 chars)</span></label>
+			<input type="text" name="yt_title" id="yt_title" maxlength="100" style="width:100%;" placeholder="Hook + game name…" />
 		</div>
 	</div>
 
@@ -98,6 +113,7 @@
 	<div class="actions-section">
 		<button type="submit" class="btn btn-primary btn-lg">Save and Queue</button>
 		<button type="button" id="clear_draft_btn" class="btn">Clear Draft</button>
+		<label class="muted" title="Same text and files already went to these networks in the last 7 days? Without this box, no repeat is created."><input type="checkbox" name="allow_duplicate" value="1"> Publish again</label>
 	</div>
 </form>
 
@@ -359,6 +375,8 @@
 }
 </style>
 
+<script src="/static/goal_picker.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/video_editor.js?v={{ request.app.state.asset_version }}"></script>
 <script>
 const form = document.getElementById('post_form');
 const hiddenN = document.getElementById('media_normal_hidden');
@@ -402,6 +420,77 @@ function syncShotsFields() {
 	galleryOrderHidden.value = shots.join(',');
 }
 
+// ---- Videos: the editor (/static/video_editor.js) + size/length info per tile ----
+const videoInfo = {};  // rel → /api/video/probe result
+async function probeVideo(rel) {
+	if (!videoInfo[rel]) {
+		videoInfo[rel] = fetch('/api/video/probe?rel=' + encodeURIComponent(rel)).then(r => r.ok ? r.json() : null).catch(() => null);
+	}
+	return videoInfo[rel];
+}
+const mmss = s => { s = Math.round(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function selectedPlatforms() {
+	return Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value);
+}
+function openVideoEditor(rel) {
+	const pid = document.getElementById('project_id_hidden').value;
+	VideoEditor.open({
+		rel,
+		project: projectsById[pid] || null,
+		platforms: selectedPlatforms,
+		applyLabel: 'Use in post',
+		onApply: (res) => {
+			const i = shots.indexOf(rel);
+			if (i < 0 || res.noop) return;
+			shots[i] = res.out_rel;
+			afterShotsChange();
+		},
+	});
+}
+function mainVideo() { return shots.find(isVideoRel) || null; }
+
+let fitTimer = null;
+function updateVideoPanel() {
+	const rel = mainVideo();
+	const hint = document.getElementById('video_hint');
+	const fit = document.getElementById('video_fit');
+	// YouTube / TikTok take only a video, and only as the main media
+	const videoMain = !!shots.length && isVideoRel(shots[0]);
+	document.querySelectorAll('.pf-video-opt').forEach(l => {
+		l.hidden = !videoMain;
+		if (!videoMain) l.querySelector('input').checked = false;
+	});
+	updateYtTitle();
+	clearTimeout(fitTimer);
+	if (!rel) { hint.hidden = true; fit.innerHTML = ''; return; }
+	fitTimer = setTimeout(async () => {
+		const info = await probeVideo(rel);
+		if (mainVideo() !== rel) return;
+		const edited = info && info.edit;
+		hint.hidden = false;
+		hint.innerHTML = `<span>🎬 Video${info ? `: ${mmss(info.duration)} · ${(+info.size_mb).toFixed(1)} MB · ${info.width}×${info.height}` : ''}${edited ? ' · ✂ edited' : ''}.</span>`
+			+ `<span class="muted">Trim, music from your folders, on-screen text, format 16:9 / 9:16 / 1:1 —</span>`
+			+ `<button type="button" class="btn btn-sm btn-primary" id="open_editor_btn">Open editor</button>`;
+		document.getElementById('open_editor_btn').onclick = () => openVideoEditor(rel);
+		const plats = selectedPlatforms();
+		if (!plats.length) { fit.innerHTML = ''; return; }
+		try {
+			const r = await fetch(`/api/video/fit?rel=${encodeURIComponent(rel)}&platforms=${encodeURIComponent(plats.join(','))}`);
+			const j = await r.json();
+			if (mainVideo() !== rel) return;
+			const icon = { ok: '✓', info: '↓', warn: '⚠', error: '✕' };
+			const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+			const rows = (j.rows || []).filter(x => x.level !== 'ok');
+			fit.innerHTML = rows.map(x => `<div class="ve-fit-row ve-fit-${x.level}"><span class="ve-fi">${icon[x.level]}</span><span><b>${esc(x.label)}</b>: ${esc(x.text)}</span></div>`).join('')
+				|| `<div class="ve-fit-row ve-fit-ok"><span class="ve-fi">✓</span><span>The video fits the limits of all selected networks (Discord ${(j.rows.find(x => x.platform === 'discord') || {}).limit_mb || 10} MB etc.)</span></div>`;
+		} catch (e) { fit.innerHTML = ''; }
+	}, 250);
+}
+function updateYtTitle() {
+	const yt = document.querySelector('input.pf-video[value="yt"]');
+	document.getElementById('yt_title_row').hidden = !(yt && yt.checked);
+}
+
 function renderShots() {
 	shotsWrap.innerHTML = '';
 	shots.forEach((rel, idx) => {
@@ -411,26 +500,38 @@ function renderShots() {
 		let media;
 		if (isVideoRel(rel)) {
 			media = document.createElement('video');
-			media.src = url; media.muted = true;
+			media.src = url; media.muted = true; media.preload = 'metadata';
+			media.style.cursor = 'pointer';
+			media.title = 'Open video editor';
+			media.onclick = () => openVideoEditor(rel);
+			const ed = document.createElement('button');
+			ed.type = 'button'; ed.className = 'vt-edit'; ed.textContent = '✂ Editor';
+			ed.onclick = () => openVideoEditor(rel);
+			div.appendChild(ed);
+			const badge = document.createElement('span');
+			badge.className = 'vt-info';
+			div.appendChild(badge);
+			probeVideo(rel).then(info => { if (info) badge.textContent = `${mmss(info.duration)} · ${(+info.size_mb).toFixed(0)} MB`; });
 		} else {
 			media = document.createElement('img');
-			media.src = url; media.className = 'thumbnail-clickable'; media.dataset.lightbox = 'true';
+			media.src = url; media.className = 'thumbnail-clickable'; media.dataset.lightboxGallery = 'shots';
+			media.title = 'Click to zoom';
 		}
 		div.appendChild(media);
 		if (idx === 0) {
 			const badge = document.createElement('span');
 			badge.className = 'main-badge';
-			badge.textContent = 'Основной';
+			badge.textContent = 'Main';
 			div.appendChild(badge);
 		} else {
 			const star = document.createElement('button');
-			star.type = 'button'; star.className = 'star-btn'; star.title = 'Сделать основным';
+			star.type = 'button'; star.className = 'star-btn'; star.title = 'Make main';
 			star.textContent = '★';
 			star.onclick = () => { const it = shots.splice(idx, 1)[0]; shots.unshift(it); afterShotsChange(); };
 			div.appendChild(star);
 		}
 		const rm = document.createElement('button');
-		rm.type = 'button'; rm.className = 'remove-btn'; rm.title = 'Убрать';
+		rm.type = 'button'; rm.className = 'remove-btn'; rm.title = 'Remove';
 		rm.textContent = '×';
 		rm.onclick = () => { shots.splice(idx, 1); afterShotsChange(); };
 		div.appendChild(rm);
@@ -454,6 +555,7 @@ function afterShotsChange() {
 	fd.append('order', shots.join(','));
 	fetch('/api/gallery/reorder', { method: 'POST', body: fd });
 	updatePreviews();
+	updateVideoPanel();
 }
 
 function addShots(files) {
@@ -482,8 +584,8 @@ form.addEventListener('submit', (e) => {
 		e.preventDefault();
 		allowNoShot = true;
 		noShotWarn.style.display = 'block';
-		noShotWarn.innerHTML = '⚠️ <b>Пост без скриншота.</b> Соцсети заметно лучше заходят с картинкой — добавь хотя бы один скрин. Чтобы всё равно опубликовать без картинки, нажми кнопку ещё раз.';
-		if (submitBtn) submitBtn.textContent = 'Опубликовать без скриншота →';
+		noShotWarn.innerHTML = '⚠️ <b>Post without a screenshot.</b> Posts do much better with an image — add at least one screenshot. To publish without an image anyway, click the button again.';
+		if (submitBtn) submitBtn.textContent = 'Publish without screenshot →';
 		noShotWarn.scrollIntoView({ block: 'center', behavior: 'smooth' });
 	}
 }, true);
@@ -515,6 +617,14 @@ function updatePreviews() {
 		const el = document.getElementById(id);
 		el.innerHTML = '';
 		gallery.slice(0, 4).forEach(rel => {
+			if (isVideoRel(rel)) {
+				const v = document.createElement('video');
+				v.src = '/media/' + rel.split('/').pop();
+				v.muted = true; v.preload = 'metadata';
+				v.style.cssText = 'max-width:72px;max-height:72px;border-radius:6px;';
+				el.appendChild(v);
+				return;
+			}
 			const img = document.createElement('img');
 			img.src = '/media/' + rel.split('/').pop();
 			img.className = 'thumbnail-clickable';
@@ -584,13 +694,16 @@ function updateWarnings() {
 document.getElementById('x_split')?.addEventListener('change', updatePreviews);
 document.querySelectorAll('input.pf[name="platforms"]').forEach(el => {
 	el.addEventListener('change', updateWarnings);
+	el.addEventListener('change', updateVideoPanel);  // size check depends on the platforms
 });
 
-// Toggle all platforms
+// Toggle all platforms (the hidden video-only ones stay off)
 document.getElementById('toggle_all_btn').addEventListener('click', () => {
-	const boxes = Array.from(document.querySelectorAll('input.pf'));
+	const boxes = Array.from(document.querySelectorAll('input.pf')).filter(b => !b.closest('[hidden]'));
 	const allChecked = boxes.every(b => b.checked);
 	boxes.forEach(b => b.checked = !allChecked);
+	updateWarnings();
+	updateVideoPanel();
 });
 
 // Clear draft
@@ -603,6 +716,7 @@ document.getElementById('clear_draft_btn').addEventListener('click', async () =>
 	renderShots();
 	resetNoShotWarning();
 	updatePreviews();
+	updateVideoPanel();
 	await fetch('/api/draft/clear', { method: 'POST' });
 });
 
@@ -628,7 +742,8 @@ document.getElementById('pick_morning')?.addEventListener('click', () => {
 	setSchedule(t);
 });
 
-// Project Presets
+// Project Presets (also the crop/music preset the video editor offers)
+const projectsById = {};
 async function loadProjectTiles() {
 	try {
 		const r = await fetch('/api/projects');
@@ -641,6 +756,7 @@ async function loadProjectTiles() {
 		}
 		container.innerHTML = '';
 		projects.forEach(p => {
+			projectsById[p.id] = p;
 			const tile = document.createElement('div');
 			tile.className = 'project-tile';
 			tile.dataset.projectId = p.id;
@@ -651,6 +767,8 @@ async function loadProjectTiles() {
 			tile.addEventListener('click', () => {
 				document.querySelectorAll('.project-tile').forEach(t => t.classList.remove('selected'));
 				tile.classList.add('selected');
+				document.getElementById('project_id_hidden').value = p.id;
+				IPGoals.load(document.getElementById('goal_select'), p.id);
 				const tagsInput = document.getElementById('tags_input');
 				if (tagsInput) {
 					tagsInput.value = p.tags_json || '';
@@ -660,6 +778,7 @@ async function loadProjectTiles() {
 			});
 			container.appendChild(tile);
 		});
+		IPGoals.preselectProject(container);
 	} catch (e) {
 		const container = document.getElementById('project_tiles');
 		if (container) container.innerHTML = '';
@@ -668,11 +787,14 @@ async function loadProjectTiles() {
 
 // Hydrate on load
 document.addEventListener('DOMContentLoaded', () => {
+	IPGoals.load(document.getElementById('goal_select'), '');
 	loadProjectTiles();
 	// Hydrate screenshots from the saved draft (full ordered list; first = main)
 	shots = galleryOrderHidden.value ? galleryOrderHidden.value.split(',').filter(Boolean) : [];
 	renderShots();
 	updatePreviews();
+	updateVideoPanel();
+	document.querySelector('input.pf-video[value="yt"]').addEventListener('change', updateYtTitle);
 });
 
 // HTMX handlers

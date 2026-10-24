@@ -44,6 +44,46 @@ class FacebookClient:
                 logger.info(f"fb.create_photo ok id={(js.get('id') or js.get('post_id'))}")
                 return js
 
+    def create_video(self, page_id: str, video_path: str, description: str = "") -> dict:
+        """Upload a video to the Page (non-resumable `source` upload) and publish it.
+        Returns {"id": <video id>}; the Page post appears once Facebook processes it."""
+        import mimetypes
+        import os
+        url = f"{self.base_url}/{page_id}/videos"
+        data = {"description": description, "access_token": self.access_token}
+        name = os.path.basename(video_path)
+        size_mb = os.path.getsize(video_path) / (1024 * 1024)
+        with open(video_path, 'rb') as fh:
+            files = {"source": (name, fh, mimetypes.guess_type(name)[0] or "video/mp4")}
+            # the upload itself can take minutes on a slow uplink
+            timeout = httpx.Timeout(connect=15, read=300, write=600, pool=30)
+            with httpx.Client(timeout=timeout) as client:
+                logger.info(f"fb.create_video start page_id={page_id} file={name} size={size_mb:.1f}MB "
+                            f"desc_len={len(description or '')}")
+                r = client.post(url, data=data, files=files, headers={"Accept": "application/json"})
+                logger.info(f"fb.create_video http status={r.status_code} body={r.text[:400]}")
+                if r.status_code >= 400:
+                    try:
+                        err = (r.json().get("error") or {}).get("message") or r.text[:300]
+                    except Exception:
+                        err = r.text[:300]
+                    raise RuntimeError(f"fb video upload HTTP {r.status_code}: {err}")
+                return r.json()
+
+    def video_post_id(self, page_id: str, video_id: str) -> str:
+        """Id of the Page post that carries the video (reactions/shares live there);
+        the video id itself when Facebook doesn't expose it."""
+        try:
+            with httpx.Client(timeout=15) as client:
+                r = client.get(f"{self.base_url}/{video_id}",
+                               params={"fields": "post_id", "access_token": self.access_token})
+            pid = str((r.json() or {}).get("post_id") or "") if r.status_code < 400 else ""
+        except Exception:
+            pid = ""
+        if not pid:
+            return video_id
+        return pid if "_" in pid else f"{page_id}_{pid}"
+
     def post_to_page(self, page_id: str, message: str, media_path: Optional[str] = None) -> Tuple[str, str]:
         """
         Post text and optional media to a Facebook page.
@@ -102,7 +142,9 @@ class FacebookClient:
             permalink = result.get("permalink_url")
             if not permalink:
                 raise RuntimeError(f"Facebook API didn't return permalink: {result}")
-            
+            if permalink.startswith("/"):
+                permalink = "https://www.facebook.com" + permalink  # videos get a relative one
+
             return permalink
 
 

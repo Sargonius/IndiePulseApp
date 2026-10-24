@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Projects</h2>
-<p class="muted">Define project presets to quickly apply tags when creating posts.</p>
+<p class="muted">Projects hold tag and Shorts presets, plus the Steam App ID, stage and status — the Home page is built from them (metrics, goals, posts per project).</p>
 
 <!-- Create New Project -->
 <div class="settings-section" style="margin-bottom:20px;">
   <div style="padding:16px 20px;">
-    <h3 style="margin:0 0 14px 0; font-size:15px;">New Project</h3>
+    <h3 style="margin:0 0 14px 0; font-size:15px;">New project</h3>
     <form id="create_project_form"
           enctype="multipart/form-data"
           hx-post="/api/projects"
@@ -18,40 +18,59 @@
         <input type="text" name="name" required placeholder="My Game" style="max-width:320px;" />
       </div>
       <div class="form-group" style="margin-bottom:10px;">
-        <label>Default Tags</label>
+        <label>Default tags</label>
         <input type="text" name="tags_json" placeholder="#Gamedev #Indie #UnrealEngine" style="max-width:480px;" />
       </div>
+      <div class="row" style="margin-bottom:10px; gap:12px; align-items:flex-end;">
+        <div class="form-group">
+          <label>Steam App ID <span class="muted" style="font-weight:400;">(or the store page link)</span></label>
+          <input type="text" name="steam_app_id" placeholder="1156500" style="width:220px;" />
+        </div>
+        <div class="form-group">
+          <label>Stage</label>
+          <select name="stage">
+            <option value="">—</option>
+            {% for key, label in stages.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status">
+            {% for key, label in statuses.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
       <div class="form-group" style="margin-bottom:10px;">
-        <label>Icon / Logo</label>
+        <label>Icon / logo</label>
         <input type="file" name="icon" accept="image/*" />
       </div>
       <div class="form-group" style="margin-bottom:10px;">
-        <label>Sort Order</label>
+        <label>Sort order</label>
         <input type="number" name="sort_order" value="0" style="width:80px;" />
       </div>
       <div class="form-group" style="margin-bottom:14px;">
-        <label>Platform Overrides (JSON)</label>
+        <label>Platform overrides (JSON)</label>
         <textarea name="platforms_json" rows="3"
                   style="max-width:480px; font-family:monospace; font-size:12px;"
                   placeholder='{}'>{}</textarea>
         <div class="muted" style="font-size:11px; margin-top:3px;">Advanced: overrides per-platform settings for this project. Leave as {} if unsure.</div>
       </div>
       <details style="margin-bottom:14px;">
-        <summary style="cursor:pointer; font-weight:600;">🎞️ Пресет рендера шортсов (опц.)</summary>
+        <summary style="cursor:pointer; font-weight:600;">🎞️ Shorts render preset (optional)</summary>
         <div style="padding-top:10px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; max-width:520px;">
-          <div class="form-group"><label>Площадки по умолчанию</label>
+          <div class="form-group"><label>Default networks</label>
             <input type="text" name="platforms_csv" placeholder="yt,tiktok,ig_reels" /></div>
-          <div class="form-group"><label>Музыка</label>
-            <select class="preset-music" name="music_path" data-current=""><option value="">Без музыки</option></select></div>
-          <div class="form-group"><label>Кроп X %</label><input type="number" name="crop_x" value="50" min="0" max="100" /></div>
-          <div class="form-group"><label>Кроп Y %</label><input type="number" name="crop_y" value="50" min="0" max="100" /></div>
-          <div class="form-group"><label>Зум ×</label><input type="number" name="crop_scale" value="1.0" min="1" max="8" step="0.1" /></div>
-          <div class="form-group"><label>Смещение музыки, с</label><input type="number" name="music_offset_sec" value="0" min="0" step="1" /></div>
-          <div class="form-group"><label>Fade in, мс</label><input type="number" name="fade_in_ms" value="0" min="0" step="100" /></div>
-          <div class="form-group"><label>Fade out, мс</label><input type="number" name="fade_out_ms" value="0" min="0" step="100" /></div>
+          <div class="form-group"><label>Music</label>
+            <select class="preset-music" name="music_path" data-current=""><option value="">No music</option></select></div>
+          <div class="form-group"><label>Crop X %</label><input type="number" name="crop_x" value="50" min="0" max="100" /></div>
+          <div class="form-group"><label>Crop Y %</label><input type="number" name="crop_y" value="50" min="0" max="100" /></div>
+          <div class="form-group"><label>Zoom ×</label><input type="number" name="crop_scale" value="1.0" min="1" max="8" step="0.1" /></div>
+          <div class="form-group"><label>Music offset, s</label><input type="number" name="music_offset_sec" value="0" min="0" step="1" /></div>
+          <div class="form-group"><label>Fade in, ms</label><input type="number" name="fade_in_ms" value="0" min="0" step="100" /></div>
+          <div class="form-group"><label>Fade out, ms</label><input type="number" name="fade_out_ms" value="0" min="0" step="100" /></div>
         </div>
       </details>
-      <button type="submit" class="btn btn-primary">Create Project</button>
+      <button type="submit" class="btn btn-primary">Create project</button>
     </form>
   </div>
 </div>

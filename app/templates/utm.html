@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>🔗 UTM links</h2>
+    <div class="muted mk-sub">Tagged links to your game’s page — Steamworks shows how many visits, wishlists and purchases came from each network. Saved links stay here.</div>
+  </div>
+  <div class="row">
+    <a class="btn" href="/">← Home</a>
+    <a class="btn" href="/guide#measure">📖 Playbook</a>
+  </div>
+</div>
+
+{% if not projects %}
+<section class="card muted">No projects yet — <a href="/projects">create one</a> and give it a Steam App ID.</section>
+{% else %}
+<section class="card utm-builder" id="utm-form">
+  <h3>New link</h3>
+  <form method="post" action="/api/utm/links" id="utm_form">
+    <div class="utm-grid">
+      <label>Project
+        <select name="project_id" id="utm_project">
+          {% for p in projects %}
+          <option value="{{ p.id }}" {% if p.id == preselect %}selected{% endif %}>{{ p.name }}{% if p.status == 'paused' %} (paused){% endif %}{% if not p.steam_app_id %} — no Steam App ID{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label><span>Custom link <span class="muted">(optional)</span></span>
+        <input type="url" name="base_url" id="utm_base" maxlength="500" placeholder="https://name.itch.io/game">
+        <small class="muted" id="utm_base_hint"></small>
+      </label>
+      <label>Campaign
+        <input type="text" name="campaign" id="utm_campaign" list="utm_campaigns" maxlength="80" required
+               value="{{ campaign }}" placeholder="patch_oct" autocomplete="off">
+        <datalist id="utm_campaigns"></datalist>
+        <small class="muted" id="utm_campaign_hint"></small>
+      </label>
+      <label>Network
+        <select name="source" id="utm_source">
+          {% for key, s in sources.items() %}<option value="{{ key }}" {% if key == pre_source %}selected{% endif %}>{{ s.label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Placement
+        <select name="medium" id="utm_medium" data-pre="{{ pre_medium }}" required></select>
+      </label>
+      <label><span>Content tag <span class="muted">(optional)</span></span>
+        <input type="text" name="content" id="utm_content" maxlength="80" placeholder="trailer_v2" autocomplete="off">
+      </label>
+      <label class="utm-span-2"><span>Note <span class="muted">(optional)</span></span>
+        <input type="text" name="note" maxlength="300" placeholder="where the link lives">
+      </label>
+    </div>
+
+    <div class="utm-result" aria-live="polite">
+      <code class="utm-result-url" id="utm_url">—</code>
+      <button type="button" class="btn btn-sm" id="utm_copy" data-copy="" disabled>📋 Copy</button>
+    </div>
+    <p class="utm-hint muted" id="utm_hint"></p>
+
+    <div class="row utm-actions">
+      <button class="btn btn-primary">💾 Save</button>
+      <button class="btn" formaction="/api/utm/set" formnovalidate
+              title="Saves all at once: {{ set_labels|join(', ') }} — profile/bio for YouTube, TikTok, Instagram and posts for the rest">📦 Campaign set</button>
+      <span class="muted utm-set-note">the set: links for the YouTube, TikTok, Instagram profiles and for X, Telegram, Discord, VK, Reddit posts</span>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if set_rows %}
+<section class="card" id="utm-set">
+  <h3>Campaign set <code>{{ campaign }}</code></h3>
+  <div class="table-scroll">
+  <table class="utm-table">
+    <thead><tr><th>Network</th><th>Placement</th><th>Link</th><th></th></tr></thead>
+    <tbody>
+    {% for r in set_rows %}
+      <tr>
+        <td class="utm-col-src">{{ r.source_label }}</td>
+        <td class="utm-col-med">{{ r.medium_label }}</td>
+        <td><span class="utm-url" title="{{ r.url }}">{{ r.url }}</span></td>
+        <td class="utm-row-actions"><button type="button" class="btn btn-sm" data-copy="{{ r.url }}">📋 Copy</button></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card" id="utm-saved">
+  <h3>Saved links</h3>
+  {% for g in groups %}
+  <div class="utm-group">
+    <div class="utm-group-head">
+      <b>{{ g.p.name }}</b>
+      {% if g.report %}<a href="{{ g.report.url }}" target="_blank" rel="noopener">{{ g.report.label }} in Steamworks ↗</a>{% endif %}
+    </div>
+    {% for campaign_name, rows in g.campaigns %}
+    <div class="utm-campaign"><code>{{ campaign_name }}</code> <span class="muted">· {{ rows|length }}</span></div>
+    <div class="table-scroll">
+    <table class="utm-table">
+      <tbody>
+      {% for r in rows %}
+        <tr id="utm-l{{ r.link.id }}" class="{{ 'utm-row--new' if r.link.id == saved_id else '' }}">
+          <td class="utm-col-src">{{ r.source_label }}</td>
+          <td class="utm-col-med">{{ r.medium_label }}{% if r.clickable == false %} <span class="utm-flag" title="The link isn’t clickable here">not clickable</span>{% endif %}
+            {% if r.link.content %}<div class="muted">{{ r.link.content }}</div>{% endif %}</td>
+          <td>
+            {% if r.url %}<span class="utm-url" title="{{ r.url }}">{{ r.url }}</span>
+            {% else %}<span class="muted">the project no longer has a Steam App ID</span>{% endif %}
+            {% if r.link.note %}<div class="muted utm-note">{{ r.link.note }}</div>{% endif %}
+          </td>
+          <td class="utm-row-actions">
+            {% if r.url %}<button type="button" class="btn btn-sm" data-copy="{{ r.url }}">📋</button>{% endif %}
+            <form method="post" action="/api/utm/links/{{ r.link.id }}/delete" class="inline-form"
+                  onsubmit="return confirm('Delete this link? Its stats in Steam stay.');">
+              <input type="hidden" name="next" value="/utm?project={{ g.p.id }}#utm-saved">
+              <button class="btn-link" title="Delete">delete</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">Nothing yet — build a link above or click “Campaign set”.</p>
+  {% endfor %}
+</section>
+
+<section class="card st-guide utm-howto">
+  <h3>How it works</h3>
+  <dl>
+    <dt>What Steam counts</dt>
+    <dd>Every click on a link with <code>?utm_…</code> and what happened next: visits, wishlist adds, purchases and activations. The report is in Steamworks → Marketing &amp; Visibility → UTM Analytics (linked for each project above). Data shows up with about a day’s delay.</dd>
+    <dt>Where links are clickable</dt>
+    <dd>In YouTube Shorts, TikTok and Reels, links in captions and comments <b>aren’t clickable</b> — only the channel profile / bio link and the story sticker work. In X, Telegram, Discord, VK and Reddit posts and in a long YouTube video’s description, links are clickable.</dd>
+    <dt>Automatic link in posts</dt>
+    <dd>Write <code>{steam}</code> in a post text or video description — when it’s published, each network gets its own link in its place: the network comes from the post itself, the placement is <code>post</code>, <code>video</code> or <code>shorts</code>, and the campaign is the linked goal’s name (no goal — <code>organic</code>). It needs a selected project with a Steam App ID, otherwise <code>{steam}</code> is simply removed from the text.</dd>
+    <dt>The invisible part</dt>
+    <dd>Most Shorts viewers come without a link — they type the name into Steam search. UTM shows only part of the effect; look for the rest in <a href="/steam/traffic">Steam traffic</a> (growth in “search” and direct visits) and in wishlist growth after videos.</dd>
+    <dt>Naming</dt>
+    <dd>One campaign — one slug across all networks, e.g. <code>patch_oct</code> or <code>nextfest_2027</code>. Network and placement are filled in for you (<code>utm_source=tiktok</code>, <code>utm_medium=bio</code>). Cyrillic names are transliterated to Latin, other symbols become <code>_</code>. Use a content tag to tell videos apart within a campaign (<code>trailer_v2</code>).</dd>
+  </dl>
+</section>
+
+<script type="application/json" id="utm_data">{{ {"projects": form_projects, "sources": sources}|tojson }}</script>
+<script>
+(function () {
+  // copy buttons (form result, set table, saved links)
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('[data-copy]');
+    if (!btn || !btn.dataset.copy) return;
+    const text = btn.dataset.copy;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  });
+
+  const form = document.getElementById('utm_form');
+  if (!form) return;
+  const data = JSON.parse(document.getElementById('utm_data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const project = $('utm_project'), base = $('utm_base'), campaign = $('utm_campaign'),
+        source = $('utm_source'), medium = $('utm_medium'), content = $('utm_content'),
+        out = $('utm_url'), copy = $('utm_copy'), hint = $('utm_hint');
+
+  function fillMedium(pre) {
+    const src = data.sources[source.value];
+    const keep = pre || medium.value;
+    medium.innerHTML = '';
+    src.placements.forEach(p => medium.add(new Option(p.label, p.key)));
+    if ([...medium.options].some(o => o.value === keep)) medium.value = keep;
+  }
+
+  function syncProject() {
+    const p = data.projects[project.value] || {};
+    base.required = !p.appid;
+    $('utm_base_hint').textContent = p.appid
+      ? 'Empty = the game’s Steam page (' + p.appid + ').'
+      : 'The project has no Steam App ID — paste your own link (itch.io, website).';
+    const list = $('utm_campaigns');
+    list.innerHTML = '';
+    (p.campaigns || []).forEach(c => list.appendChild(new Option(c)));
+    $('utm_campaign_hint').textContent = (p.campaigns || []).length
+      ? 'Used before: ' + p.campaigns.slice(0, 5).join(', ') : '';
+  }
+
+  let timer = null, seq = 0;
+  function refresh() {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      const q = new URLSearchParams({project_id: project.value, base_url: base.value, source: source.value,
+                                     medium: medium.value, campaign: campaign.value, content: content.value});
+      let res;
+      if (!campaign.value.trim()) {
+        res = {ok: false, empty: true, error: 'enter a campaign — the link appears here'};
+      } else {
+        try {
+          res = await (await fetch('/api/utm/build?' + q)).json();
+        } catch (e) {
+          res = {ok: false, error: 'the server didn’t respond'};
+        }
+      }
+      if (my !== seq) return;  // a newer request is on its way
+      out.textContent = res.ok ? res.url : '— ' + res.error;
+      out.classList.toggle('utm-result-err', !res.ok && !res.empty);
+      copy.disabled = !res.ok;
+      copy.dataset.copy = res.ok ? res.url : '';
+      hint.textContent = res.ok ? (res.clickable === false ? '⚠ ' : res.clickable ? '✓ ' : '? ') + res.hint : '';
+      hint.className = 'utm-hint ' + (!res.ok ? 'muted' : res.clickable === false ? 'utm-hint--no'
+                                      : res.clickable ? 'utm-hint--yes' : 'muted');
+    }, 200);
+  }
+
+  project.addEventListener('change', () => { syncProject(); refresh(); });
+  source.addEventListener('change', () => { fillMedium(); refresh(); });
+  [base, campaign, content].forEach(el => el.addEventListener('input', refresh));
+  medium.addEventListener('change', refresh);
+  fillMedium(medium.dataset.pre);
+  syncProject();
+  refresh();
+})();
+</script>
+{% endblock %}

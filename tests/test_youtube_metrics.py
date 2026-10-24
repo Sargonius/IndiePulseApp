@@ -235,7 +235,7 @@ def test_reconnecting_youtube_schedules_the_backfill(client, set_settings, monke
         {"access_token": "at-new", "refresh_token": "rt-new", "expires_in": 3600}
         if req.url.path == "/token" else {"items": []})))
     r = client.get("/api/accounts/callback/youtube", params={"code": "c", "state": "state-1"})
-    assert r.status_code == 200 and "YouTube подключён" in r.text
+    assert r.status_code == 200 and "YouTube connected" in r.text
     assert load_settings()["yt_refresh_token"] == "rt-new"
     assert len(scheduled) == 1
 

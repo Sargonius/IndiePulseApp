@@ -11,6 +11,7 @@ from sqlmodel import Session
 from sqlmodel import select
 from typing import Optional
 from app.routers.api.common import templates_api
+from app.services import thumbs
 
 router = APIRouter()
 
@@ -143,10 +144,7 @@ def jobs_kill(request: Request, id: Optional[int] = Form(None), id_q: Optional[i
                     if b:
                         base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
                         preview = (base[:140] + ('…' if len(base) > 140 else ''))
-                        media_rel = getattr(b, 'media_path', None)
-                        if media_rel:
-                            name = str(media_rel).replace('\\','/').split('/')[-1]
-                            thumb_url = f"/media/{name}"
+                        thumb_url = thumbs.thumb_url(b)
         except Exception:
             pass
         enriched.append({
@@ -205,10 +203,7 @@ def jobs_remove(request: Request, id: Optional[int] = Form(None), id_q: Optional
                     if b:
                         base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
                         preview = (base[:140] + ('…' if len(base) > 140 else ''))
-                        media_rel = getattr(b, 'media_path', None)
-                        if media_rel:
-                            name = str(media_rel).replace('\\','/').split('/')[-1]
-                            thumb_url = f"/media/{name}"
+                        thumb_url = thumbs.thumb_url(b)
         except Exception:
             pass
         enriched.append({
@@ -263,10 +258,7 @@ def jobs_refresh_metrics(request: Request, id: Optional[int] = Form(None), id_q:
                     if b:
                         base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
                         preview = (base[:140] + ('…' if len(base) > 140 else ''))
-                        media_rel = getattr(b, 'media_path', None)
-                        if media_rel:
-                            name = str(media_rel).replace('\\','/').split('/')[-1]
-                            thumb_url = f"/media/{name}"
+                        thumb_url = thumbs.thumb_url(b)
         except Exception:
             pass
         enriched.append({
@@ -308,8 +300,18 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
     # Reset the post back to queued, otherwise publish_news_post exits with
     # 'skipped_already_handled' and the new job hangs in queued forever.
     from app.models.models import PostStatusEnum as _PSE
+    from app.services import duplicates
     target_post = session.get(Post, post_id)
     do_schedule = True
+    payload_json = job.payload_json
+    if target_post is not None and duplicates.MARK in (target_post.error_text or ''):
+        # Retry on a post the duplicate guard stopped = "yes, publish it again"
+        try:
+            payload = _json.loads(payload_json or '{}') or {}
+        except Exception:
+            payload = {"post_id": post_id}
+        payload[duplicates.ALLOW] = True
+        payload_json = _json.dumps(payload, ensure_ascii=False)
     if target_post is None:
         do_schedule = False
     elif target_post.status == _PSE.done:
@@ -325,7 +327,7 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
         session.commit()
     if do_schedule:
         # Create a new queued job with same payload
-        nj = Job(kind=JobKindEnum.publish, payload_json=job.payload_json, status=JobStatusEnum.queued)
+        nj = Job(kind=JobKindEnum.publish, payload_json=payload_json, status=JobStatusEnum.queued)
         session.add(nj)
         session.commit()
         session.refresh(nj)
@@ -360,10 +362,7 @@ def jobs_retry(request: Request, id: Optional[int] = Form(None), id_q: Optional[
                     if b:
                         base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
                         preview = (base[:140] + ('…' if len(base) > 140 else ''))
-                        media_rel = getattr(b, 'media_path', None)
-                        if media_rel:
-                            name = str(media_rel).replace('\\','/').split('/')[-1]
-                            thumb_url = f"/media/{name}"
+                        thumb_url = thumbs.thumb_url(b)
         except Exception:
             pass
         enriched.append({

@@ -76,13 +76,37 @@ def _get_valid_access_token(cfg: dict, *, margin_sec: int = 300) -> str:
     if not new_access:
         logger.error(f'TikTok token refresh rejected: {data}')
         return access
-    save_settings({
+    update = {
         'tiktok_access_token': new_access,
         'tiktok_refresh_token': (data.get('refresh_token') or refresh),
         'tiktok_token_expires_at': int(_now()) + int(data.get('expires_in') or 86400),
-    })
+    }
+    if data.get('scope'):
+        update['tiktok_scope'] = str(data['scope'])
+    save_settings(update)
     logger.info('TikTok access token refreshed')
     return new_access
+
+
+class TikTokAPIError(RuntimeError):
+    """A TikTok API answer with an error code; `code` is TikTok's (scope_not_authorized...)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(f"{code}: {message}" if message else code)
+        self.code = code
+
+
+def _data(r: httpx.Response, what: str) -> dict:
+    """The `data` of a TikTok v2 answer; TikTokAPIError when `error.code` isn't "ok"."""
+    try:
+        body = r.json()
+    except ValueError:
+        raise TikTokAPIError(f"http_{r.status_code}", f"{what}: {r.text[:200]}")
+    err = (body.get("error") or {}) if isinstance(body, dict) else {}
+    code = str(err.get("code") or ("ok" if r.status_code < 400 else f"http_{r.status_code}"))
+    if code != "ok":
+        raise TikTokAPIError(code, str(err.get("message") or "")[:300])
+    return (body.get("data") or {}) if isinstance(body, dict) else {}
 
 
 class TikTokClient:
@@ -193,18 +217,41 @@ class TikTokClient:
 
     # ------------------------------------------------------------------ status
     def check_status(self, publish_id: str) -> dict:
-        """Check upload/publish status for a publish_id."""
-        url = f"{self.base_url}/post/publish/status/fetch/"
-        headers = {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json",
-        }
-        payload = {"publish_id": publish_id}
-        with httpx.Client(timeout=15) as client:
-            response = client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-        return data.get("data", {}) or {}
+        """Upload/publish status of a publish_id (video.upload scope, 30 calls a minute):
+        {status: PROCESSING_UPLOAD | SEND_TO_USER_INBOX | PUBLISH_COMPLETE | FAILED,
+        fail_reason, publicaly_available_post_id: [...] (TikTok's spelling)}. For an
+        inbox draft PUBLISH_COMPLETE means the creator posted it; the post id follows
+        once the post is public and has passed moderation."""
+        return self._post("/post/publish/status/fetch/", {}, {"publish_id": publish_id})
+
+    # ------------------------------------------------------- account and stats
+    def _get(self, path: str, params: dict) -> dict:
+        with httpx.Client(timeout=20) as client:
+            r = client.get(f"{self.base_url}{path}", params=params,
+                           headers={"Authorization": f"Bearer {self.access_token}"})
+        return _data(r, path)
+
+    def _post(self, path: str, params: dict, body: dict) -> dict:
+        with httpx.Client(timeout=20) as client:
+            r = client.post(f"{self.base_url}{path}", params=params, json=body,
+                            headers={"Authorization": f"Bearer {self.access_token}",
+                                     "Content-Type": "application/json; charset=UTF-8"})
+        return _data(r, path)
+
+    def user_info(self, fields: list[str]) -> dict:
+        """GET /user/info/ — each field needs its scope (follower_count: user.info.stats,
+        username: user.info.profile); asking for one without it fails the whole call."""
+        return (self._get("/user/info/", {"fields": ",".join(fields)}).get("user") or {})
+
+    def query_videos(self, video_ids: list[str], fields: list[str]) -> list[dict]:
+        """POST /video/query/ (video.list scope), at most 20 ids per call."""
+        out: list[dict] = []
+        ids = [str(v) for v in video_ids if str(v or "").strip()]
+        for i in range(0, len(ids), 20):
+            data = self._post("/video/query/", {"fields": ",".join(fields)},
+                              {"filters": {"video_ids": ids[i:i + 20]}})
+            out += data.get("videos") or []
+        return out
 
     # -------------------------------------------------- backwards-compat shim
     def upload_video(self, file_path: str, title: str = "", privacy_level: str = "", **_ignored) -> tuple[Optional[str], Optional[str]]:

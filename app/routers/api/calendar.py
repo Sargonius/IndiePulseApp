@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 from typing import List
 from typing import Optional
+from app.services import thumbs
 
 router = APIRouter()
 
@@ -51,10 +52,7 @@ def calendar_events(start: Optional[str] = None, end: Optional[str] = None, sess
         if brief:
             base = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
             preview = base[:120] + ('...' if len(base) > 120 else '')
-            media_rel = getattr(brief, 'media_path', None)
-            if media_rel:
-                name = str(media_rel).replace('\\', '/').split('/')[-1]
-                thumb_url = f"/media/{name}"
+            thumb_url = thumbs.thumb_url(brief)
             brief_type = getattr(brief, 'type', '') or ''
         
         platform_items = []

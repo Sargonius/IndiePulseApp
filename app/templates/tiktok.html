@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="tt-top">
+	<div>
+		<h2>🎵 TikTok</h2>
+		<p class="muted tt-lead">Shorts that did well on YouTube → the TikTok account. Each clip gets a TikTok version (game audio only), a caption in the test language and its checklist; once it’s live, its numbers show up here.</p>
+	</div>
+	<div id="tt_account" class="tt-account"></div>
+</div>
+<div id="tt_connect"></div>
+<div id="tt_summary" class="tt-summary"></div>
+
+<div class="tt-layout">
+	<section class="tt-main">
+		<div class="card tt-add">
+			<div class="tt-add-head">
+				<h3>Add a clip</h3>
+				<label class="tt-inline">Caption language
+					<select id="tt_lang"></select>
+				</label>
+				<span class="muted tt-small">Your Shorts, most YouTube views first. The caption and the frame text are translated; baked-in music comes off.</span>
+			</div>
+			<div id="tt_cands" class="tt-cands"></div>
+			<div class="tt-drop" id="tt_drop" tabindex="0" role="button" aria-label="Drop a video file or click to pick one">
+				<input type="file" id="tt_file" accept="video/*" hidden>
+				<span>…or drop a video here (click to pick)</span>
+				<label class="tt-inline" onclick="event.stopPropagation()">Game
+					<select id="tt_project"><option value="">—</option></select>
+				</label>
+				<span id="tt_drop_msg" class="muted tt-small"></span>
+			</div>
+		</div>
+		<div id="tt_items" class="tt-items"></div>
+		<p id="tt_empty" class="muted tt-empty" hidden>No clips yet. Add one of your best Shorts above.</p>
+	</section>
+
+	<aside class="tt-side">
+		<div class="card tt-clock" id="tt_clock" aria-live="polite"></div>
+		<div class="card tt-book">
+			<h3>The test</h3>
+			<p>Does a Japanese caption bring Japanese viewers to an account from another region? TikTok picks a new clip’s first viewers by the account’s region, the viewers’ language and the clip’s language. Only TikTok knows the weights, so measure.</p>
+			<p><b>It works</b> when Japan gives at least 30% of the viewers across 5–7 clips. Below that the region wins, and the next step is an account with another region.</p>
+			<h4>Rules while testing</h4>
+			<ul>
+				<li>One language for the first 10–15 clips. A mixed account muddles who it’s for.</li>
+				<li>At most one clip a day, in Japan’s evening.</li>
+				<li>Don’t upload the same clip twice: repeats get little reach.</li>
+				<li>No VPN. TikTok goes by the SIM’s country, and a VPN only looks suspicious.</li>
+			</ul>
+			<h4>Sound</h4>
+			<p>The app’s trend list shows your own region. See what’s trending in Japan in <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/music/pc/en" target="_blank" rel="noopener">TikTok Creative Center</a> (Trends → Songs, region Japan; free business login), then search the track by name in the app. Or keep the game audio.</p>
+			<h4>Where the numbers come from</h4>
+			<ul>
+				<li><b>Posted yet?</b> TikTok’s status API, checked every 10 minutes (Refresh checks now).</li>
+				<li><b>Views, likes, comments, shares:</b> the <code>video.list</code> scope. Every 30 min for two days, then every 3 hours, then daily.</li>
+				<li><b>Followers:</b> the <code>user.info.stats</code> scope, read every 2 hours with the other networks.</li>
+				<li><b>Viewer countries</b> aren’t in the API: <a href="https://www.tiktok.com/tiktokstudio" target="_blank" rel="noopener">TikTok Studio</a> → the video → Viewers → Locations. Type the Japan share into the clip’s card.</li>
+			</ul>
+			<p class="muted tt-small">The long version: <a href="/guide">📖 Indie marketing playbook</a>.</p>
+		</div>
+	</aside>
+</div>
+<div id="tt_tip" class="tt-tip" hidden></div>
+
+<style>
+.tt-top { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+.tt-top h2 { margin-bottom:4px; }
+.tt-lead { margin-top:0; max-width:760px; }
+.tt-small { font-size:12px; }
+.tt-inline { display:inline-flex; align-items:center; gap:6px; font-size:13px; color:#475569; }
+.tt-inline select { font-size:13px; padding:3px 6px; }
+.tt-account { display:flex; align-items:center; gap:10px; font-size:13px; min-height:40px; }
+.tt-account img { width:40px; height:40px; border-radius:50%; object-fit:cover; background:#e2e8f0; }
+.tt-account .tt-acc-name { font-weight:600; }
+.tt-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--border); background:#f8fafc; color:#475569; }
+.tt-chip.on { background:#dcfce7; border-color:#bbf7d0; color:#166534; }
+.tt-chip.off { background:#fff7ed; border-color:#fed7aa; color:#9a3412; }
+.tt-connect { border:1px solid #fed7aa; background:#fffbeb; border-radius:10px; padding:12px 14px; margin:10px 0 14px; font-size:13px; display:flex; flex-direction:column; gap:8px; }
+.tt-connect.ok { border-color:#bfdbfe; background:#eff6ff; }
+.tt-connect ol { margin:0; padding-left:20px; display:flex; flex-direction:column; gap:3px; }
+.tt-connect .tt-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.tt-summary { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:12px; margin:6px 0 16px; }
+.tt-tile { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; min-width:0; }
+.tt-tile .tt-k { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; }
+.tt-tile .tt-v { font-size:24px; font-weight:700; line-height:1.2; color:var(--text); font-variant-numeric:tabular-nums; }
+.tt-tile .tt-s { font-size:12px; color:#64748b; }
+.tt-tile .tt-verdict { font-size:12px; font-weight:600; }
+.tt-verdict.good { color:#166534; } .tt-verdict.bad { color:#9a3412; }
+.tt-tile .spark { height:32px; margin-top:4px; }
+.tt-layout { display:grid; grid-template-columns:minmax(0, 1fr) 300px; gap:18px; align-items:start; }
+@media (max-width: 1100px) { .tt-layout { grid-template-columns:minmax(0, 1fr); } }
+.tt-side { position:sticky; top:12px; display:flex; flex-direction:column; gap:12px; }
+@media (max-width: 1100px) { .tt-side { position:static; } }
+.tt-book { font-size:13px; line-height:1.45; }
+.tt-book h3 { margin:0 0 6px; font-size:15px; }
+.tt-book h4 { margin:12px 0 4px; font-size:13px; }
+.tt-book p { margin:0 0 6px; }
+.tt-book ul { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:3px; }
+.tt-clock { font-size:13px; display:flex; flex-direction:column; gap:2px; }
+.tt-clock .tt-jst { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
+.tt-clock .tt-prime { color:#166534; font-weight:600; }
+.tt-add { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+.tt-add-head { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.tt-add-head h3 { margin:0; font-size:15px; }
+.tt-cands { display:flex; gap:10px; overflow-x:auto; padding-bottom:6px; scroll-snap-type:x proximity; }
+.tt-cand { flex:0 0 132px; scroll-snap-align:start; border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; display:flex; flex-direction:column; font-size:12px; }
+.tt-cand.in { opacity:.65; }
+.tt-cand-img { aspect-ratio:9/16; background:#0b1220; display:block; width:100%; object-fit:cover; }
+.tt-cand-body { padding:6px 7px 7px; display:flex; flex-direction:column; gap:3px; flex:1; }
+.tt-cand-title { font-weight:600; line-height:1.25; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; min-height:2.5em; }
+.tt-cand-meta { color:#64748b; font-variant-numeric:tabular-nums; }
+.tt-cand .btn { margin-top:auto; justify-content:center; }
+.tt-drop { border:2px dashed #cbd5e1; border-radius:10px; padding:12px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; color:#475569; cursor:pointer; font-size:13px; }
+.tt-drop.over { border-color:var(--primary); background:var(--primary-soft); }
+.tt-items { display:flex; flex-direction:column; gap:14px; }
+.tt-empty { text-align:center; padding:20px 0; }
+.tt-item { display:grid; grid-template-columns:170px minmax(0, 1fr); gap:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px; box-shadow:var(--shadow-sm); }
+.tt-item.flash { box-shadow:0 0 0 3px var(--primary-soft); border-color:var(--primary); }
+@media (max-width: 700px) { .tt-item { grid-template-columns:minmax(0, 1fr); } .tt-vid { width:100%; max-width:220px; } }
+.tt-vid { display:flex; flex-direction:column; gap:6px; }
+.tt-frame { width:100%; aspect-ratio:9/16; background:#0b1220; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; color:#cbd5e1; font-size:12px; text-align:center; position:relative; }
+.tt-frame video { width:100%; height:100%; object-fit:contain; background:#000; }
+.tt-frame .tt-prog { position:absolute; left:10%; right:10%; bottom:18px; height:4px; background:#334155; border-radius:2px; overflow:hidden; }
+.tt-frame .tt-prog i { display:block; height:100%; background:var(--primary); }
+.tt-vid .btn { justify-content:center; }
+.tt-body { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.tt-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.tt-head .tt-title { font-weight:600; font-size:14px; word-break:break-word; }
+.tt-head .tt-sp { flex:1; }
+.tt-stage { font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.3px; }
+.tt-stage.ready { background:#e0f2fe; color:#075985; }
+.tt-stage.rendering, .tt-stage.sending { background:#fff7ed; color:#9a3412; }
+.tt-stage.inbox { background:#ede9fe; color:#5b21b6; }
+.tt-stage.live { background:#dcfce7; color:#166534; }
+.tt-stage.render_failed, .tt-stage.send_failed { background:#fee2e2; color:#991b1b; }
+.tt-cols { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.1fr); gap:14px; }
+@media (max-width: 1250px) { .tt-cols { grid-template-columns:minmax(0, 1fr); } }
+.tt-caption { display:flex; flex-direction:column; gap:6px; }
+.tt-langs { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; align-self:flex-start; }
+.tt-langs button { border:0; background:#fff; padding:3px 10px; font-size:12px; cursor:pointer; color:#475569; }
+.tt-langs button + button { border-left:1px solid var(--border); }
+.tt-langs button.on { background:var(--primary); color:#fff; }
+.tt-langs button:disabled { cursor:wait; }
+.tt-caption textarea { width:100%; min-height:110px; resize:vertical; font-family:inherit; font-size:13px; }
+.tt-caption input { width:100%; font-size:13px; }
+.tt-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; }
+.tt-capfoot { display:flex; align-items:center; gap:8px; font-size:12px; color:#64748b; flex-wrap:wrap; }
+.tt-capfoot .tt-sp { flex:1; }
+.tt-flow { display:flex; flex-direction:column; gap:10px; }
+.tt-box { border:1px solid var(--border); border-radius:10px; padding:10px; background:#f8fafc; display:flex; flex-direction:column; gap:7px; font-size:13px; }
+.tt-box.live { background:#f0fdf4; border-color:#bbf7d0; }
+.tt-box.inbox { background:#f5f3ff; border-color:#ddd6fe; }
+.tt-box.err { background:#fef2f2; border-color:#fecaca; }
+.tt-box .tt-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.tt-box input[type="url"], .tt-box input[type="text"] { flex:1; min-width:160px; font-size:13px; }
+.tt-box input[type="number"] { width:72px; font-size:13px; }
+.tt-steps { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:2px; }
+.tt-metrics { display:grid; grid-template-columns:repeat(auto-fit, minmax(76px, 1fr)); gap:6px; }
+.tt-m { background:#fff; border:1px solid var(--border); border-radius:8px; padding:5px 7px; min-width:0; }
+.tt-m b { display:block; font-size:16px; font-variant-numeric:tabular-nums; color:var(--text); }
+.tt-m span { font-size:11px; color:#64748b; }
+.tt-chart { position:relative; }
+.tt-chart svg { display:block; width:100%; height:64px; }
+.tt-tip { position:absolute; z-index:50; pointer-events:none; background:#0f172a; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; white-space:nowrap; }
+.tt-checks { display:flex; flex-direction:column; gap:4px; }
+.tt-checks details { border:1px solid var(--border); border-radius:8px; background:#fff; }
+.tt-checks summary { cursor:pointer; padding:6px 9px; font-size:12px; font-weight:600; color:#334155; display:flex; gap:8px; align-items:center; list-style:none; }
+.tt-checks summary::-webkit-details-marker { display:none; }
+.tt-checks summary::before { content:'▸'; color:#94a3b8; }
+.tt-checks details[open] summary::before { content:'▾'; }
+.tt-checks summary .tt-count { margin-left:auto; font-weight:500; color:#64748b; font-variant-numeric:tabular-nums; }
+.tt-ck { display:grid; grid-template-columns:20px minmax(0, 1fr) auto; gap:6px; align-items:start; padding:5px 9px; border-top:1px solid #f1f5f9; font-size:13px; }
+.tt-ck .tt-ic { font-weight:700; text-align:center; line-height:1.4; }
+.tt-ck.ok .tt-ic { color:#16a34a; } .tt-ck.warn .tt-ic { color:#d97706; } .tt-ck.todo .tt-ic, .tt-ck.na .tt-ic { color:#94a3b8; }
+.tt-ck.na { color:#94a3b8; }
+.tt-ck .tt-note { display:block; font-size:12px; color:#64748b; }
+.tt-ck .tt-hint { display:block; font-size:12px; color:#94a3b8; }
+.tt-ck input[type="checkbox"] { margin:2px 0 0; }
+.tt-ck .btn { white-space:nowrap; }
+.tt-err { color:#b91c1c; font-size:12px; word-break:break-word; }
+.tt-ok { color:#166534; }
+.tt-toast { position:fixed; right:16px; bottom:16px; z-index:60; background:#0f172a; color:#fff; padding:9px 14px; border-radius:8px; font-size:13px; max-width:420px; box-shadow:var(--shadow-sm); }
+.tt-toast.err { background:#991b1b; }
+</style>
+
+<script>
+window.TT_CTX = {{ ctx|tojson }};
+window.TT_JUST_CONNECTED = {{ 'true' if just_connected else 'false' }};
+</script>
+<script src="/static/charts.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/video_editor.js?v={{ request.app.state.asset_version }}"></script>
+<script src="/static/tiktok.js?v={{ request.app.state.asset_version }}"></script>
+{% endblock %}

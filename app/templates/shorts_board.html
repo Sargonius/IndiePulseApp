@@ -1,26 +1,42 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="row" style="justify-content:space-between; align-items:center;">
-	<h2>🎞️ Доска фабрики</h2>
-	<a href="/shorts" class="btn btn-primary">+ Добавить клипы</a>
-</div>
+{% include "partials/shorts_tabs.html" %}
+<p class="muted" style="margin-top:0;">All Shorts and their status on each network. A Short took off? Hit <b>📣 Cross-post</b> on its card to send it to other networks, each with its own caption and language.</p>
+{% include "partials/shorts_tips.html" %}
 <div class="toolbar" style="margin:8px 0;">
-	<button class="btn" hx-get="/shorts/board/partial" hx-target="#shorts_board" hx-swap="innerHTML">Обновить</button>
-	<button class="btn" hx-post="/shorts/board/refresh_metrics" hx-target="#shorts_board" hx-swap="innerHTML">↻ Метрики</button>
+	<button class="btn" hx-get="/shorts/board/partial" hx-target="#shorts_board" hx-swap="innerHTML">Refresh</button>
+	<button class="btn" hx-post="/shorts/board/refresh_metrics" hx-target="#shorts_board" hx-swap="innerHTML">↻ Metrics</button>
 	<label class="row" style="gap:6px;">
-		<input type="checkbox" id="sb_auto" checked /> Авто-обновление (5с)
+		<input type="checkbox" id="sb_auto" checked /> Auto-refresh (5 s)
 	</label>
 </div>
 
 <div id="shorts_board" hx-get="/shorts/board/partial" hx-trigger="load, every 5s" hx-swap="innerHTML">
-	<div class="muted" style="padding:30px; text-align:center;">Загрузка…</div>
+	<div class="muted" style="padding:30px; text-align:center;">Loading…</div>
+</div>
+
+<div id="sb_player" class="sb-player" hidden>
+	<div class="sb-player-box">
+		<video controls playsinline></video>
+		<button type="button" class="btn btn-sm sb-player-close" title="Esc">✕</button>
+	</div>
 </div>
 
 <style>
-.sf-board { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; }
+.sf-board { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 300px)); gap:14px; }
 .sf-bcard { border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:8px; }
-.sf-bthumb { width:100%; aspect-ratio:9/16; max-height:300px; background:#0b1220; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
-.sf-bthumb img, .sf-bthumb video { width:100%; height:100%; object-fit:cover; }
+/* the whole 9:16 frame, as the viewer sees it (nothing cropped) */
+.sf-bthumb { position:relative; height:360px; aspect-ratio:9/16; max-width:100%; margin:0 auto; background:#0b1220; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+.sf-bthumb img, .sf-bthumb video { width:100%; height:100%; object-fit:contain; }
+.sf-bthumb[data-video] { cursor:pointer; }
+.sf-bplay { position:absolute; left:50%; top:50%; width:52px; height:52px; margin:-26px 0 0 -26px; border-radius:50%; background:rgba(15,23,42,.6); color:#fff; font-size:22px; display:flex; align-items:center; justify-content:center; opacity:0; transition:opacity .15s; pointer-events:none; }
+.sf-bthumb:hover .sf-bplay { opacity:1; }
+.sb-player { position:fixed; inset:0; z-index:1000; background:rgba(15,23,42,.75); display:flex; align-items:center; justify-content:center; padding:20px; }
+.sb-player[hidden] { display:none; }
+.sb-player-box { position:relative; height:min(88vh, 900px); aspect-ratio:9/16; max-width:100%; }
+.sb-player-box video { width:100%; height:100%; background:#000; border-radius:10px; }
+.sb-player-close { position:absolute; top:-10px; right:-44px; }
+@media (max-width: 640px) { .sb-player-close { right:6px; top:6px; } }
 .sf-rendering { color:#93c5fd; font-size:13px; }
 .sf-btitle { font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sf-chips { display:flex; flex-direction:column; gap:5px; }
@@ -39,6 +55,22 @@
 		box.setAttribute('hx-trigger', chk.checked ? 'load, every 5s' : 'load');
 		if (window.htmx) htmx.process(box);
 	});
+
+	// Click a thumbnail → the finished short in a player above the board (the board
+	// itself re-renders every 5 s, a video inside it would restart)
+	const player = document.getElementById('sb_player');
+	const pv = player.querySelector('video');
+	const closePlayer = () => { pv.pause(); pv.removeAttribute('src'); pv.load(); player.hidden = true; };
+	box.addEventListener('click', e => {
+		const t = e.target.closest('.sf-bthumb[data-video]');
+		if (!t) return;
+		pv.src = t.dataset.video;
+		player.hidden = false;
+		pv.play().catch(() => {});
+	});
+	player.addEventListener('click', e => { if (e.target === player) closePlayer(); });
+	player.querySelector('.sb-player-close').addEventListener('click', closePlayer);
+	document.addEventListener('keydown', e => { if (e.key === 'Escape' && !player.hidden) closePlayer(); });
 })();
 </script>
 {% endblock %}

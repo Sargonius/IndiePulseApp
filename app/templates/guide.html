@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>📖 Indie marketing playbook</h2>
+    <div class="muted mk-sub">Short vertical videos: why, which kinds, how to make them fast and how to measure them. Revision of Oct 1, 2026 — edit <code>app/templates/guide.html</code> whenever experience stops matching the text.</div>
+  </div>
+  <div class="row">
+    <a class="btn" href="/shorts">🎞️ Shorts factory</a>
+    <a class="btn" href="/goals">🎯 Goals</a>
+    <a class="btn" href="/steam/traffic">📈 Steam traffic</a>
+    <a class="btn" href="/utm">🔗 UTM links</a>
+    <a class="btn" href="/outreach">📣 Outreach</a>
+  </div>
+</div>
+
+<div class="gd-layout">
+<nav class="gd-toc card" aria-label="Contents">
+  <b>Basics</b>
+  <a href="#truth">1. What to expect from Shorts</a>
+  <a href="#anatomy">2. Anatomy of a Short</a>
+  <a href="#formats">3. Formats that work</a>
+  <a href="#lang">4. Language, text, voice-over</a>
+  <a href="#pipeline">5. Pipeline and tools</a>
+  <a href="#measure">6. How to measure</a>
+  <b>Playbooks</b>
+  <a href="#pb-released">A. Released game + update</a>
+  <a href="#pb-page">B. Unreleased, page is live</a>
+  <a href="#pb-nopage">C. Nothing yet: testing the idea</a>
+  <b>Creators</b>
+  <a href="#outreach">7. YouTubers and streamers</a>
+  <b>Cheat sheets</b>
+  <a href="#checklist">Pre-queue checklist</a>
+  <a href="#mistakes">Common mistakes</a>
+</nav>
+
+<div class="gd-body">
+
+<section class="card gd-sec" id="truth">
+  <h3>1. What to expect from Shorts</h3>
+  <p>Shorts are <b>cheap reach and a fast test of “do the visuals grab people”</b>, not a sales machine. Viewers are on their phones, links in Shorts and TikTok barely get clicked, and Steam lives on the PC. So the viewer’s path looks like this: saw it → remembered the name → found it later through Steam search.</p>
+  <ul>
+    <li><b>The game’s name has to be on screen and in the caption.</b> That’s your “link”.</li>
+    <li>Conversion from views to wishlists is low and swings by multiples depending on the genre and the video. A rough planning benchmark: about 1 wishlist per 1–3k views; work out your own number from real data (section 6).</li>
+    <li>Views are a lottery with a heavy tail: 8 videos out of 10 will collect the baseline few hundred, and 1–2 will bring in almost all of the results. So what wins is <b>the number of attempts with different hooks</b>, not polishing a single video.</li>
+    <li>The strongest Steam levers sit outside Shorts: a discount (an email to everyone who has the game on their wishlist), festivals, streamers, the store page itself. Shorts support them but don’t replace them.</li>
+  </ul>
+</section>
+
+<section class="card gd-sec" id="anatomy">
+  <h3>2. Anatomy of a Short</h3>
+  <div class="table-scroll">
+  <table class="gd-table">
+    <thead><tr><th>Seconds</th><th>What’s on screen</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>0–2</td><td><b>Hook:</b> the juiciest moment or the payoff + a 3–7-word text line, sound from the very first frame</td><td>This is where the “watch or swipe” decision gets made. Open mid-action: no logos, intros, fades or “hi, I’m a developer”. Result first, process second.</td></tr>
+      <tr><td>2–15</td><td><b>Build-up:</b> one idea, one mechanic, motion or an event on screen every 1–2 s</td><td>Retention. If the frame stands still, cut it.</td></tr>
+      <tr><td>last 2–4</td><td><b>Payoff</b> (what the hook promised) + the game’s name and “Wishlist on Steam”</td><td>Name recall. The ending should flow back into the opening so the video loops.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <dl class="gd-dl">
+    <dt>Length</dt>
+    <dd><b>12–25 seconds</b> for gameplay videos. 30–45 s only for a story (“I rebuilt my game after feedback”) that actually has a plot. Nothing longer than a minute.</dd>
+    <dt>Framing</dt>
+    <dd>9:16, 1080×1920. From horizontal gameplay: a crop zoomed in on the action, or “gameplay on top + close-up/text below”. Blurred bars on the sides are the worst option — the picture ends up tiny.</dd>
+    <dt>Safe zones</dt>
+    <dd>Keep text in the middle third. The bottom ~20% is covered by the caption and buttons, the right edge by icons, the top by search.</dd>
+    <dt>Game UI</dt>
+    <dd>Small UI is unreadable on a phone. Record with the UI scale bumped up, or crop so it stays out of frame.</dd>
+    <dt>Title</dt>
+    <dd>The Shorts player shows a single line (~40 Latin characters / ~20 Japanese). Put the hook and the game’s name first — viewers won’t see the hashtags in the description. Write about a feeling or a situation in the game, not about the process. Formulas: <b>question</b> (“Would you drive this through a warzone?”), <b>situation</b> (“Hovercar vs. the entire city”), <b>conflict</b> (“This hovercar was a terrible idea”), <b>comparison</b> (“Day 1 vs Day 30 of my hovercar game”). 1–3 relevant hashtags, no wall of tags.</dd>
+  </dl>
+</section>
+
+<section class="card gd-sec" id="formats">
+  <h3>3. Formats that work</h3>
+  <div class="table-scroll">
+  <table class="gd-table">
+    <thead><tr><th>Format</th><th>Example hook</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><b>Player fantasy</b></td><td>“A game where you build a shelter after the end of the world”</td><td>Always. The backbone of your feed; answers “what kind of game is this”.</td></tr>
+      <tr><td><b>Feedback → fix</b></td><td>“A player said the combat sucks. So I rebuilt it”</td><td>Patches. Shows the game is alive and gives you a before/after story.</td></tr>
+      <tr><td><b>Before / after</b></td><td>“My game in 2022 vs. now”</td><td>Any update, any reworked mechanic.</td></tr>
+      <tr><td><b>Dev story</b></td><td>“Year three of making this game solo, in the evenings”</td><td>1 in 5 videos. Grows your following but sells the game itself less well.</td></tr>
+      <tr><td><b>Weird moment</b></td><td>A bug, unexpected physics, a funny death</td><td>Whenever you catch one. Best reach, weak conversion.</td></tr>
+      <tr><td><b>Question to viewers</b></td><td>“Which UI is better: 1 or 2?”</td><td>For testing ideas and getting comments (comments push the video).</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted st-note">Process labels (“Level design”, “UI work”, “Prototyping…”, “More layout changes”, “WIP”, “Devlog #12”) are not hooks. A hook promises the viewer something for <i>them</i>: an emotion, a result, an answer. The factory checklist flags titles like these.</p>
+</section>
+
+<section class="card gd-sec" id="lang">
+  <h3>4. Language, text, voice-over</h3>
+  <dl class="gd-dl">
+    <dt>Main language</dt>
+    <dd><b>English.</b> The biggest Steam audience and the widest distribution on every platform.</dd>
+    <dt>Second language</dt>
+    <dd>Only where the game is localized, and only as a separate render with text in that language (title + on-screen text). For Project Apocalypse that’s Japanese and Russian. Start at 1 in 4 videos and compare views and visits by country.</dd>
+    <dt>One channel or several</dt>
+    <dd>One YouTube channel is fine: Shorts are distributed per video, not per channel. If the Japanese videos consistently get several times fewer views than the English ones, that’s a reason to drop them, not to start a second channel.</dd>
+    <dt>TikTok and region</dt>
+    <dd>TikTok first shows a video in the account’s region (SIM and country of registration). An account on a Taiwanese number gets pushed to Taiwan, not to Japan or the US. Pick the region that matches the audience you want.</dd>
+    <dt>Russian speakers</dt>
+    <dd>VK Clips from the same queue with Russian text: a cheap extra channel.</dd>
+    <dt>On-screen text</dt>
+    <dd><b>Mandatory.</b> A hook line in the first 2 seconds, then 2–4 short captions along the way. Big bold font with an outline, 2 lines max.</dd>
+    <dt>Voice-over</dt>
+    <dd>Optional. Game audio + music + text works fine without a voice. Viewers recognize synthetic voices and often take them as a sign of content-farm output; your own voice builds trust but costs time. Try a voice only in the “dev story” format.</dd>
+    <dt>Music</dt>
+    <dd>YouTube: baked in at render (the track from the project preset). TikTok: a draft without music; add a trending sound in the app at low volume — that’s what gets you reach.</dd>
+  </dl>
+</section>
+
+<section class="card gd-sec" id="pipeline">
+  <h3>5. Pipeline and tools</h3>
+  <p>The goal: <b>5–7 minutes per video</b> and one session a week instead of fiddling with it every day.</p>
+  <ol class="gd-steps">
+    <li><b>Capture without editing.</b> OBS → Replay Buffer of 45–60 seconds + a hotkey. You’re playing or testing a build, a good moment happens — hit the key, and the clip is already on disk. Recording for hours and then hunting for moments is the biggest time sink there is. Record at 1080p60: 4K adds nothing for vertical, and the files are four times heavier.<br><b>UE5:</b> record Standalone or PIE in a new window, without the editor UI (in the viewport <code>G</code> switches to game view, <code>F11</code> to fullscreen); run <code>DisableAllScreenMessages</code> in the console to get rid of warnings and debug text. A 9:16 game window (720×1280 or 1080×1920) gives you native vertical: objects come out bigger than when you crop horizontal footage.</li>
+    <li><b>One session a week, 60–90 minutes.</b> Take the 8–10 clips you’ve collected, and for each one: trim to 12–25 s, crop, hook line, title.</li>
+    <li><b>Queue.</b> The <a href="/shorts">factory</a> spreads the batch out at one video a day to YouTube Shorts (fully automatic), TikTok and Instagram (drafts, finished in the app), and VK.</li>
+    <li><b>10 minutes a week on the numbers</b> (section 6): which hooks worked → more of those in the next batch.</li>
+  </ol>
+  <div class="table-scroll">
+  <table class="gd-table">
+    <thead><tr><th>Tool</th><th>What for</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><b>OBS Replay Buffer</b></td><td>Capturing moments</td><td>The core. Free, already installed.</td></tr>
+      <tr><td><b>IndiePulse Shorts factory</b></td><td>Crop, trim, on-screen text, music, EN/JA/RU translation, queue, publishing, cross-posting to other networks</td><td>The core. Framing, trim and on-screen text — ✂ Editor on the clip card; “📣 Cross-post” — on the board.</td></tr>
+      <tr><td><b>CapCut (desktop)</b></td><td>Text, auto-captions, quick cuts</td><td>The fastest manual editor for vertical video. Some features are paid.</td></tr>
+      <tr><td><b>DaVinci Resolve</b></td><td>The same, free and without limits</td><td>Heavier and slower to work in. Use it if CapCut doesn’t suit you.</td></tr>
+      <tr><td><b>“Long video → clips” services</b> (OpusClip and the like)</td><td>Auto-clipping</td><td>Built for talking heads and speech. They cut voiceless gameplay badly — don’t waste your time.</td></tr>
+      <tr><td><b>AI video generation</b></td><td>—</td><td>Not for showing the game: viewers need to see real gameplay, or the Steam page will let them down.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="card gd-sec" id="measure">
+  <h3>6. How to measure</h3>
+  <dl class="gd-dl">
+    <dt>Main metric</dt>
+    <dd><b>Wishlists</b> (before release) and <b>visits + sales</b> (after release). Views are an intermediate number — don’t make them the goal.</dd>
+    <dt><a href="/utm">UTM links</a></dt>
+    <dd>Steam counts visits, wishlists and purchases by tag: <code>store.steampowered.com/app/ID/?utm_source=tiktok&amp;utm_medium=shorts&amp;utm_campaign=patch_oct</code>. The report lives in Steamworks → Marketing &amp; Visibility → UTM Analytics. Put these links in the channel profile, your TikTok/Instagram bio, a pinned comment, and Discord and X posts. Build and save the links in <a href="/utm">UTM links</a>.</dd>
+    <dt>The invisible part</dt>
+    <dd>Most viewers will come without a link — through Steam search. So on the <a href="/steam/traffic">traffic</a> page, look for growth in the “search” and “direct visits” sources and in overall wishlist growth in the days after a video, compared with the usual baseline.</dd>
+    <dt>Video metrics</dt>
+    <dd>Average percentage viewed (for 15–20 s it’s good when it’s above 70–80%), the share of viewers who stay past the first 3 seconds, shares, and comments asking “what game is this / where can I get it”. Compare these numbers across your own videos, not against other people’s.</dd>
+    <dt>Hook experiment</dt>
+    <dd>One piece of footage → 2–3 versions with different hooks and titles (drop the same file into the factory 2–3 times). After 3–7 days, compare the “Swiped away” rate in YouTube Studio (target: under 50–60%) and the average % viewed, write down which hook won, and build the next batch around it. Send the winner to the other networks with “📣 Cross-post” on the factory board.</dd>
+    <dt>Window</dt>
+    <dd>Judge a video after 7 days, a series after 3–4 weeks and no fewer than 10 videos. One or two videos are not enough to draw conclusions from.</dd>
+    <dt>Where to send people</dt>
+    <dd>1) The Steam page — always, if you have one. 2) A demo on itch.io — while there’s no page. 3) Discord — for your core (playtesters, feedback); only a handful of people get there from Shorts, so don’t make it the main target.</dd>
+  </dl>
+  <p class="muted st-note">In IndiePulse: create a <a href="/goals">goal</a> for the campaign (e.g. “+150 visits a week” or “+50 wishlists in a month”) and link videos to it when you queue them — the goal chart will show what went out on which day.</p>
+</section>
+
+<section class="card gd-sec gd-pb" id="pb-released">
+  <h3>A. Released game + update <span class="badge default">Project Apocalypse</span></h3>
+  <p><b>Goal:</b> store page visits and sales during the patch window. <b>Where to send people:</b> the Steam page with UTM.</p>
+  <ol class="gd-steps">
+    <li><b>Tie the patch to a discount.</b> A discount of 20% or more emails everyone who has the game on their wishlist — that beats any video. The videos ride on top and explain why to come back.</li>
+    <li><b>On the Steam page:</b> an update event/news post, fresh screenshots, a fixed Japanese description.</li>
+    <li><b>A series of 10–12 videos:</b> start a week before the patch, one a day, peaking on release day.
+      <ul>
+        <li>4–5 × “feedback → fix” (a quote from a real review on screen);</li>
+        <li>3 × “before / after”;</li>
+        <li>2–3 × player fantasy on the new content;</li>
+        <li>1 × story: “this game is 4 years old and I’m still updating it”.</li>
+      </ul>
+    </li>
+    <li><b>Languages:</b> English as the main one; Japanese and Russian get 2–3 videos each, using the best hooks.</li>
+    <li><b>Measure:</b> bot-free visits and sales over the 14 days of the patch vs. the 14 days before it; the UTM report; visits by country (JP, RU).</li>
+  </ol>
+  <p class="muted st-note">Realistic expectation: for a game with 39 reviews, Shorts will bring tens to hundreds of visits, and sales will mostly come from the discount. A successful campaign means a visible bump on the visits chart and a few new reviews.</p>
+</section>
+
+<section class="card gd-sec gd-pb" id="pb-page">
+  <h3>B. Unreleased, page is live <span class="badge default">Synthetica</span></h3>
+  <p><b>Goal:</b> wishlists. <b>Where to send people:</b> the Steam page, with a “Wishlist on Steam” call to action.</p>
+  <ol class="gd-steps">
+    <li><b>While the project is frozen, don’t run a steady stream.</b> Regular videos with no development behind them burn time and promise something that isn’t there.</li>
+    <li><b>A one-off test of 5–6 videos</b> from what’s already recorded of the new core loop: 3–4 different hooks on the same mechanic. That answers “is it worth unfreezing”.</li>
+    <li><b>If you unfreeze:</b> 2–3 videos a week in the “player fantasy” and “before / after” formats (old vs. new core loop).</li>
+    <li><b>Measure:</b> wishlist growth over the 7 days after a video vs. a normal week; wishlists per 1,000 views for each hook.</li>
+  </ol>
+  <p class="muted st-note">Rule of thumb: if a series of 5–6 videos didn’t move weekly wishlist growth at all, the problem is the hook or the game’s visuals, not the number of videos.</p>
+</section>
+
+<section class="card gd-sec gd-pb" id="pb-nopage">
+  <h3>C. Nothing yet: testing the idea <span class="badge default">Wasteland Life</span></h3>
+  <p><b>Goal:</b> find out whether there’s demand. <b>Where to send people:</b> a “Coming Soon” Steam page — build it first.</p>
+  <ol class="gd-steps">
+    <li><b>Steam page first.</b> Wishlists are the only metric tied to future sales, and every video without a page loses viewers who have nowhere to go. You need: a capsule, 5 screenshots, a short description, a 30–40-second trailer (which you also cut up into Shorts).</li>
+    <li><b>While there’s no page (the first 1–2 weeks):</b> 4–5 videos as a hook test; the caption has the game’s name and “Steam page coming soon”, and the profile links to an itch.io demo. Look only at retention and comments.</li>
+    <li><b>Validation series: 12–15 videos over 3–4 weeks</b>, 3–4 different angles (survival / daily life / building / humor). At least 3 videos per angle.</li>
+    <li><b>Discord</b> — a button on the Steam page and in the profile for people who want to playtest. Don’t advertise it in the videos.</li>
+    <li><b>Decision after the series:</b>
+      <ul>
+        <li><span class="badge success">go ahead</span> at least 1–2 videos took off at 5–10× the rest, comments ask about the game, wishlists grow every week;</li>
+        <li><span class="badge running">change the pitch</span> there are views but no wishlists → the problem is the page, or the video promises a different game;</li>
+        <li><span class="badge error">red flag</span> every angle got equally few views and no comments → the visuals don’t read; look at the art and the game’s fantasy.</li>
+      </ul>
+    </li>
+  </ol>
+  <p class="muted st-note">Shorts test whether the <i>visuals</i> grab people. Whether the <i>game</i> does is for the demo to show: median session length and the share of returning players. Next Fest (February 2027) is the main chance to rack up wishlists, and you need the page and a demo for it.</p>
+</section>
+
+<section class="card gd-sec" id="outreach">
+  <h3>7. YouTubers and streamers (outreach)</h3>
+  <p>A creator who plays your game for half an hour reaches people who already like this kind of game — the most targeted free traffic an indie can get. The price is patience: most letters go unanswered, and that is normal. Work in small batches from <a href="/outreach">📣 Outreach</a>: similar games → creators who covered them → a short personal letter with a key.</p>
+  <dl class="gd-dl">
+    <dt>Who to write to</dt>
+    <dd>People who played <b>games like yours in the last 1–2 years</b> and still upload. Channels of <b>1K–100K subscribers</b> answer indie devs far more often than big ones, and their viewers trust them more. Their language should be one your game supports. Skip publishers, platforms and news channels — they post trailers of everything (IndiePulse skips the obvious ones).</dd>
+    <dt>The letter</dt>
+    <dd>Under ~150 words, plain text. First line: one of <i>their</i> videos and why your game fits their channel. Then one sentence on what the game is and what’s new, the store link, <b>the key right in the letter</b> (creators rarely answer “want a key?”), “no obligation to cover it”, your name. Last line: where you found their address and that one reply is enough to never hear from you again. No attachments, no hype words, no mass BCC.</dd>
+    <dt>Sending</dt>
+    <dd>From your own Gmail, one by one: “Open in Gmail” → read → Send → “Mark as sent”. <b>10–20 letters a day</b> is plenty and keeps Gmail happy. One follow-up after about a week, as a reply in the same thread — then stop. A “no” or “don’t write” → tick <i>Don’t contact</i>.</dd>
+    <dt>Timing</dt>
+    <dd>Creators plan videos ahead: send <b>1–2 weeks before</b> the date you want videos to land on (a patch with a discount, a demo, Next Fest), never on the day itself.</dd>
+    <dt>Keys</dt>
+    <dd>Request a separate batch in Steamworks (“Request Steam Product Keys”, tag it “Influencers”) so its activations are visible on their own; import the .txt on the Outreach page. One key per creator, written into the letter when you draft it. Key resellers pose as YouTubers: only send keys to addresses published on the channel itself (that is exactly what IndiePulse collects), and be suspicious of incoming requests from addresses that don’t match the channel.</dd>
+    <dt>Curator Connect</dt>
+    <dd>Free and built into Steamworks: a copy goes straight into a curator’s library (up to 100 curators, 5 copies each), filtered by tags and language, with their YouTube/Twitch follower counts shown. Many creators run curator pages — do it in parallel with letters.</dd>
+    <dt>Twitch</dt>
+    <dd>IndiePulse can’t search Twitch: its API terms forbid using Twitch data for marketing outreach. Open the SullyGnome link next to each similar game (the channels that streamed it most in the last year), pick small and mid streamers, find the business email in the panels under the stream, and paste the channel link into “Add a creator by hand”.</dd>
+    <dt>Emails</dt>
+    <dd>Only public ones: the channel description, video descriptions, link-in-bio pages and personal sites (IndiePulse reads these). YouTube’s “View email address” button on the About page asks for a captcha — copy it by hand when a creator is worth it. Addresses seen on several unrelated channels are sponsors’, not creators’, and are marked “sponsor?”.</dd>
+    <dt>Measure</dt>
+    <dd>The store link in letters carries <code>utm_medium=outreach</code> and <code>utm_content=&lt;creator&gt;</code> → Steamworks UTM report. Wishlists and visits in the days after a video goes out. Mark “Covered” with the video link. Each sending day adds an “Outreach: emailed N creators” marker to the home charts.</dd>
+  </dl>
+  <h4>Paid tools — when the free search runs dry</h4>
+  <div class="table-scroll">
+  <table class="gd-table">
+    <thead><tr><th>Service</th><th>What it gives</th><th>Verdict (Oct 2026)</th></tr></thead>
+    <tbody>
+      <tr><td><b>CreatorScout</b> <span class="muted">Pro ≈ €5/mo</span></td><td>Paste a Steam link → comparable games → YouTube <i>and Twitch</i> creators with their published emails, CSV export</td><td><b>First to try</b> when YouTube search is exhausted or for Twitch. Import its CSV on the Outreach page. Free plan: 10 searches a day, emails masked.</td></tr>
+      <tr><td><b>IMPRESS</b> <span class="muted">free tier; emails ≈ $70 per 100</span></td><td>Creator + press database matched on similar games, sending, coverage tracking, CSV export</td><td>Closest full product to this page; worth a look for a big launch (Next Fest).</td></tr>
+      <tr><td><b>Keymailer (Partnier)</b>, <b>Gamosy KeyVault</b> <span class="muted">free tiers</span></td><td>Inbound: list the game, creators request keys</td><td>A passive channel next to letters. Vet every request.</td></tr>
+      <tr><td><b>Steam Curator Connect</b> <span class="muted">free</span></td><td>Copies to curators’ libraries</td><td>Always.</td></tr>
+      <tr><td>Streams Charts API, Modash, HypeAuditor, Upfluence</td><td>Big influencer databases</td><td>$199–$10,000+ a month or year — not for a solo dev.</td></tr>
+      <tr><td>Woovit, GameOutreach, Terminals</td><td>—</td><td>Woovit shut down in Dec 2024; GameOutreach closed to new accounts in Jul 2026; Terminals is a $2–6k agency.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted st-note"><b>Project Apocalypse patch:</b> creators of zombie / colony city builders; the hook is “the core loop was rebuilt after player feedback”; letters 1–2 weeks before the patch + discount, key included. <b>Wasteland Life:</b> once the demo is out, letters about two weeks before Next Fest (Feb 22 – Mar 1, 2027) with a link to the demo — no key needed.</p>
+</section>
+
+<section class="card gd-sec" id="checklist">
+  <h3>Pre-queue checklist</h3>
+  <ul class="gd-check">
+    <li><label><input type="checkbox"> Motion and a hook line in the first 2 seconds</label></li>
+    <li><label><input type="checkbox"> First frame is already mid-action, sound right away (no fade-in or intro)</label></li>
+    <li><label><input type="checkbox"> The hook promises the viewer something instead of describing my work</label></li>
+    <li><label><input type="checkbox"> No “Prototyping / layout / WIP / devlog” in the title</label></li>
+    <li><label><input type="checkbox"> No editor UI, warnings or debug text on screen</label></li>
+    <li><label><input type="checkbox"> The main subject is big and readable on a phone</label></li>
+    <li><label><input type="checkbox"> 12–25 s long, no static shots</label></li>
+    <li><label><input type="checkbox"> Text in the middle third, readable on a phone</label></li>
+    <li><label><input type="checkbox"> Game name on screen at the end and in the title</label></li>
+    <li><label><input type="checkbox"> The ending loops back into the opening</label></li>
+    <li><label><input type="checkbox"> Title: the hook is within the first 40 characters</label></li>
+    <li><label><input type="checkbox"> On-screen text language = title language</label></li>
+    <li><label><input type="checkbox"> The video is linked to a campaign goal</label></li>
+    <li><label><input type="checkbox"> The hook differs from the previous three videos</label></li>
+    <li><label><input type="checkbox"> 1–3 relevant hashtags</label></li>
+  </ul>
+</section>
+
+<section class="card gd-sec" id="mistakes">
+  <h3>Common mistakes</h3>
+  <ul>
+    <li>The same hook on several videos in a row — both the platform and viewers treat them as repeats.</li>
+    <li>An intro, logo, fade-in or slow build-up at the start.</li>
+    <li>Process-label titles: “Prototyping…”, “More layout changes”, “Finished basic layout”.</li>
+    <li>Editor UI, warnings or debug text on screen.</li>
+    <li>A video without the game’s name: views come in, but nobody can find the game.</li>
+    <li>TikTok/Instagram drafts piling up for weeks. Finish them as a batch on session day, or turn the network off in the preset.</li>
+    <li>Drawing conclusions from a single video, or abandoning a series at video three.</li>
+    <li>Videos about a game nobody can buy or wishlist.</li>
+    <li>English on-screen text with a Japanese title (and vice versa).</li>
+  </ul>
+</section>
+
+</div>
+</div>
+{% endblock %}

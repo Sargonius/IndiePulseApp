@@ -1,7 +1,15 @@
+{#- One <tbody> per publication (a Brief): its summary row, then a row per network (hidden
+    until the summary row is clicked). Filters and the open state live in analytics.html. -#}
+{% macro metric(v) -%}
+	{% if v is not none %}<span class="metric-value">{{ v }}</span>{% else %}<span class="metric-pending">—</span>{% endif %}
+{%- endmacro %}
+{% macro total(v, has) -%}
+	{% if v and v > 0 %}<span class="engagement-badge">🔥 {{ v }}</span>{% elif has %}<span class="metric-pending">0</span>{% else %}<span class="metric-pending">—</span>{% endif %}
+{%- endmacro %}
 <table class="table" id="analytics_table">
 	<thead>
 		<tr>
-			<th>ID</th>
+			<th></th>
 			<th>Media</th>
 			<th>Platform</th>
 			<th>Status</th>
@@ -16,32 +24,92 @@
 			<th>Actions</th>
 		</tr>
 	</thead>
+	{% if groups|length == 0 %}
 	<tbody>
-	{% if posts|length == 0 %}
 	<tr>
 		<td colspan="13" style="text-align:center; padding:24px; color:#999;">
 			No posts to display. Create and publish posts via the News page.
 		</td>
 	</tr>
+	</tbody>
 	{% else %}
-		{% for p in posts %}
-		<tr class="analytics-row {% if p.m_total and p.m_total > 0 %}has-engagement{% endif %}"
-			data-platform="{{ p.platform_text }}"
-			data-status="{{ p.status_text }}"
-			data-published="{{ p.published_at.isoformat() if p.published_at else '' }}"
-			data-likes="{{ p.m_like if p.m_like is not none else 0 }}"
-			data-reposts="{{ p.m_repost if p.m_repost is not none else 0 }}"
-			data-comments="{{ p.m_reply if p.m_reply is not none else 0 }}"
-			data-engagement="{{ p.m_total or 0 }}"
-			data-views="{{ p.m_views if p.m_views is not none else 0 }}">
-			<td>{{ p.id }}</td>
+	{% for g in groups %}
+	<tbody class="pub-group" data-brief="{{ g.brief_id }}">
+		<tr class="pub-row {% if g.m_total and g.m_total > 0 %}has-engagement{% endif %}" onclick="toggleGroup(event, this)" title="Click to show each network">
+			<td class="pub-toggle"><span class="chev">▸</span></td>
 			<td>
-				{% if p.thumb_url %}
-					<img src="{{ p.thumb_url }}" alt="thumb" class="thumbnail-clickable" data-lightbox="true" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
+				{% if g.thumb_url %}
+					<span class="thumb-wrap {% if g.thumb_is_video %}is-video{% endif %}">
+						<img src="{{ g.thumb_url }}" alt="thumb" loading="lazy" class="thumbnail-clickable" data-lightbox="true" style="width:48px;height:48px;object-fit:cover;border-radius:4px;"/>
+					</span>
 				{% else %}
 					—
 				{% endif %}
 			</td>
+			<td>
+				<div class="pub-platforms">
+				{% for p in g.posts %}
+					<span class="platform-badge platform-{{ p.platform_text }} {% if p.status_text != 'done' %}not-done{% endif %}" data-post="{{ p.id }}" title="{{ p.platform_text }}: {{ p.status_text }}">{{ p.platform_text }}</span>
+				{% endfor %}
+				</div>
+			</td>
+			<td>
+				<div class="pub-status">
+				{% for st, n in g.counts|dictsort %}
+					{% if st == 'done' %}<span class="badge success" title="{{ n }} published">✓ {{ n }}</span>
+					{% elif st == 'error' %}<span class="badge error" title="{{ n }} failed">✗ {{ n }}</span>
+					{% elif st == 'queued' %}<span class="badge default" title="{{ n }} queued">⏳ {{ n }}</span>
+					{% elif st == 'running' %}<span class="badge running" title="{{ n }} running">🔄 {{ n }}</span>
+					{% else %}<span class="badge default">{{ st }} {{ n }}</span>{% endif %}
+				{% endfor %}
+				</div>
+			</td>
+			<td>
+				{% if g.published_at %}
+					<span title="{{ g.published_at }}">{{ g.published_at.strftime('%Y-%m-%d %H:%M') }}</span>
+				{% else %}
+					—
+				{% endif %}
+			</td>
+			<td></td>
+			<td class="muted">
+				<div class="analytics-preview">{{ g.preview or g.title }}</div>
+				{% if g.project %}<span class="pub-project">{{ g.project }}</span>{% endif %}
+			</td>
+			<td class="metric-cell" data-sum="likes">{{ metric(g.m_like) }}</td>
+			<td class="metric-cell" data-sum="reposts">{{ metric(g.m_repost) }}</td>
+			<td class="metric-cell" data-sum="comments">{{ metric(g.m_reply) }}</td>
+			<td class="metric-cell" data-sum="views">{{ metric(g.m_views) }}</td>
+			<td class="metric-cell" data-sum="total">{{ total(g.m_total, g.has_metrics) }}</td>
+			<td>
+				<div class="row" style="gap:4px;flex-wrap:nowrap;">
+					{% if g.metric_errors %}
+						<span class="metric-error" title="Metrics fetch failed on {{ g.metric_errors }} network(s): expand to see which" style="cursor:help;color:#e0a800;align-self:center;">⚠</span>
+					{% endif %}
+					{% if g.counts.done %}
+						<a class="btn btn-icon" href="/publications/{{ g.brief_id }}" title="Post report: all networks, followers before/after">📊</a>
+					{% endif %}
+					{% if g.is_short and g.counts.done %}
+						<a class="btn btn-icon" href="/shorts/repost/{{ g.brief_id }}" title="Cross-post this Short to other networks (own caption and language for each)">📣</a>
+					{% endif %}
+					<button class="btn btn-icon btn-green" title="Refresh metrics of every network" hx-post="/api/analytics/refresh_brief" hx-vals='{"id": {{ g.brief_id }} }' hx-target="#analytics_table" hx-swap="outerHTML">⟳</button>
+				</div>
+			</td>
+		</tr>
+		{% for p in g.posts %}
+		<tr class="analytics-row analytics-child {% if p.m_total and p.m_total > 0 %}has-engagement{% endif %}"
+			data-post="{{ p.id }}"
+			data-platform="{{ p.platform_text }}"
+			data-status="{{ p.status_text }}"
+			data-published="{{ p.published_at.isoformat() if p.published_at else '' }}"
+			data-likes="{{ p.m_like if p.m_like is not none else '' }}"
+			data-reposts="{{ p.m_repost if p.m_repost is not none else '' }}"
+			data-comments="{{ p.m_reply if p.m_reply is not none else '' }}"
+			data-views="{{ p.m_views if p.m_views is not none else '' }}"
+			data-engagement="{{ p.m_total or 0 }}"
+			data-has="{{ '1' if p.has_metrics else '' }}">
+			<td class="child-id">#{{ p.id }}</td>
+			<td></td>
 			<td>
 				<span class="platform-badge platform-{{ p.platform_text }}">{{ p.platform_text }}</span>
 			</td>
@@ -72,7 +140,11 @@
 					<span style="color:#999;">—</span>
 				{% endif %}
 			</td>
-			<td class="muted"><div class="analytics-preview">{{ p.preview if p.preview else '' }}</div></td>
+			<td class="muted">
+				{% if p.status_text == 'error' and p.error_text %}
+					<div class="analytics-preview child-error" title="{{ p.error_text }}">{{ p.error_text }}</div>
+				{% endif %}
+			</td>
 			<td class="metric-cell">
 				{% if p.m_like is not none and p.m_like >= 0 %}
 					<span class="metric-value">{{ p.m_like }}</span>
@@ -109,15 +181,7 @@
 					—
 				{% endif %}
 			</td>
-			<td class="metric-cell">
-				{% if p.m_total and p.m_total > 0 %}
-					<span class="engagement-badge">🔥 {{ p.m_total }}</span>
-				{% elif p.has_metrics %}
-					<span class="metric-pending">0</span>
-				{% else %}
-					—
-				{% endif %}
-			</td>
+			<td class="metric-cell">{{ total(p.m_total, p.has_metrics) }}</td>
 			<td>
 				<div class="row" style="gap:4px;flex-wrap:nowrap;">
 					{% if p.m_error %}
@@ -131,8 +195,9 @@
 			</td>
 		</tr>
 		{% endfor %}
-	{% endif %}
 	</tbody>
+	{% endfor %}
+	{% endif %}
 </table>
 
 <style>
@@ -145,7 +210,7 @@
 	text-transform: uppercase;
 }
 
-.platform-badge.platform-vk { background: #4a76a8; color: white; }
+.platform-badge.platform-vk, .platform-badge.platform-vk_video { background: #4a76a8; color: white; }
 .platform-badge.platform-x { background: #1da1f2; color: white; }
 .platform-badge.platform-discord { background: #5865f2; color: white; }
 .platform-badge.platform-tg { background: #0088cc; color: white; }
@@ -154,8 +219,59 @@
 .platform-badge.platform-yt { background: #ff0000; color: white; }
 .platform-badge.platform-tiktok { background: #000000; color: white; }
 .platform-badge.platform-bluesky { background: #0085ff; color: white; }
+.platform-badge.platform-ig_reels { background: #d62976; color: white; }
 
-.analytics-row.has-engagement td:first-child {
+/* ── publication (summary) row ── */
+.pub-row { cursor: pointer; }
+.pub-row:hover td { background: #f8fafc; }
+.pub-toggle { width: 18px; padding-right: 0; color: var(--muted); }
+.chev { display: inline-block; transition: transform .15s; font-size: 12px; }
+.pub-group.open .chev { transform: rotate(90deg); }
+.pub-group.open .pub-row td { background: #f1f5f9; border-bottom-color: #f1f5f9; }
+
+.pub-platforms { display: flex; flex-wrap: wrap; gap: 3px; max-width: 210px; }
+.pub-platforms .platform-badge { padding: 1px 5px; font-size: 10px; }
+.pub-platforms .platform-badge.not-done { opacity: .45; }
+.pub-platforms .platform-badge.dim { display: none; }
+.pub-status { display: flex; flex-wrap: wrap; gap: 4px; }
+.pub-project {
+	display: inline-block;
+	margin-top: 4px;
+	padding: 1px 6px;
+	border-radius: 4px;
+	background: #eef2ff;
+	color: #3730a3;
+	font-size: 11px;
+	font-weight: 600;
+}
+
+/* a video's poster frame gets a ▶ mark */
+.thumb-wrap { position: relative; display: inline-block; line-height: 0; }
+.thumb-wrap.is-video::after {
+	content: '▶';
+	position: absolute;
+	right: 3px;
+	bottom: 3px;
+	padding: 2px 3px 2px 4px;
+	border-radius: 3px;
+	background: rgba(0, 0, 0, .6);
+	color: #fff;
+	font-size: 8px;
+	line-height: 1;
+	pointer-events: none;
+}
+
+/* ── per-network rows: hidden until the publication is opened ── */
+.analytics-child { display: none; }
+.pub-group.open .analytics-child:not(.filtered-out) { display: table-row; }
+.analytics-child td { background: #f8fafc; padding-top: 7px; padding-bottom: 7px; }
+.analytics-child td:nth-child(3) { padding-left: 20px; }
+.pub-group.open .analytics-child:last-child td { border-bottom: 2px solid #cbd5e1; }
+.child-id { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.child-error { color: #991b1b; font-size: 12px; }
+
+.analytics-row.has-engagement td:first-child,
+.pub-row.has-engagement td:first-child {
 	box-shadow: inset 3px 0 0 var(--success);
 }
 
@@ -215,13 +331,13 @@ table#analytics_table {
 <script>
 async function deleteRemote(postId) {
 	if (!confirm('Delete this post from the platform?')) return;
-	
+
 	try {
 		const resp = await fetch(`/api/posts/${postId}/delete_remote`, { method: 'POST' });
 		const data = await resp.json();
 		if (data.deleted) {
 			alert('Post deleted successfully!');
-			htmx.trigger('#analytics_table', 'refresh');
+			htmx.ajax('GET', '/api/analytics/table', { target: '#analytics_table', swap: 'outerHTML' });
 		} else if (data.fallback_url) {
 			if (confirm('API deletion not supported. Open post page to delete manually?\n\n' + data.error)) {
 				window.open(data.fallback_url, '_blank');
@@ -240,8 +356,8 @@ if (typeof filterAnalytics === 'function') {
 }
 </script>
 
-{% if posts|length > 0 %}
+{% if groups|length > 0 %}
 <div style="margin-top:12px; padding:12px; background:#f0f9ff; border-left:3px solid var(--primary); border-radius:4px; font-size:13px; color:#1e40af;">
-	<b>💡 Tip:</b> Click "Update Metrics" to refresh statistics from all platforms. Some platforms may require specific API setup in Settings.
+	<b>💡 Tip:</b> Each row is one publication with its networks summed up — click it to see every network. "Update Metrics" refreshes statistics from all platforms; some need API setup in Settings.
 </div>
 {% endif %}

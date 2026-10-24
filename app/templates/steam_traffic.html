@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "partials/mk_macros.html" import steam_menu %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>📈 Steam traffic</h2>
+    <div class="muted mk-sub">Daily visits and impressions of your game pages. Steam has no API for this — a browser bookmarklet grabs the numbers in one click.</div>
+  </div>
+  <a class="btn" href="/">← Home</a>
+</div>
+
+<section class="card st-steps">
+  <h3>How to update</h3>
+  {% if not plan.apps %}
+  <p>First set a Steam App ID for your games in <a href="/projects">Projects</a>.</p>
+  {% else %}
+  <ol>
+    <li>
+      <b>Once:</b> drag the button to Chrome’s bookmarks bar (show the bar with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>).
+      <div class="st-bm-row">
+        <a class="bm-btn" href="{{ bookmarklet }}" title="Drag me to the bookmarks bar" onclick="alert('Drag this button to the bookmarks bar, then click it on a Steamworks page.'); return false;">IndiePulse ← Steam</a>
+        <span class="muted">← drag it</span>
+      </div>
+    </li>
+    <li>
+      Open Steamworks (you need to be logged in):
+      <a class="btn btn-sm btn-primary" href="{{ sync_url }}" target="_blank" rel="noopener">Open traffic in Steamworks ↗</a>
+    </li>
+    <li>
+      Click the bookmarklet. It downloads the traffic CSV one day at a time for
+      {% for p in plan.projects %}{{ p.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+      over the last {{ plan.days }} days (~{{ ((plan.apps|length) * plan.days / 10)|round|int + 2 }} s) and opens a tab with the result.
+    </li>
+  </ol>
+  <p class="muted st-note">Home shows a reminder once the data is a week old. The “Open traffic” link tells the bookmarklet which games and how many days it needs, so you don’t have to replace the bookmarklet after adding a game.
+    The bookmarklet runs in your Steamworks tab — your Steam password and cookies never reach IndiePulse; it carries a secret key, without which IndiePulse won’t accept the data.</p>
+  {% if last_sync %}<p class="muted st-note">Last import: {{ last_sync.at[:10]|day }}, {{ last_sync.at[11:16] }}{% if last_sync.failed %} · Steam didn’t return {{ last_sync.failed|length }} d{% endif %}</p>{% endif %}
+  {% endif %}
+</section>
+
+{% if rows %}
+<section class="card">
+  <h3>Already imported</h3>
+  <div class="table-scroll">
+  <table class="st-table">
+    <thead><tr><th>Game</th><th>Data through</th><th class="num">Visits, 7 d</th><th class="num">Impressions</th><th class="num">Bots</th><th>Visit sources</th><th>Countries</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><b>{{ r.p.name }}</b>{% if r.p.status == 'paused' %} <span class="muted">(paused)</span>{% endif %}</td>
+        {% if r.last %}
+        <td>{{ r.last|day }}</td>
+        <td class="num">{{ r.visits7|num }}</td>
+        <td class="num">{{ r.impressions7|num }}</td>
+        <td class="num muted">{{ r.bots7|num }}</td>
+        <td class="st-breakdown">{% for k, v in r.sources %}{{ k }} {{ v|num }}{% if not loop.last %} · {% endif %}{% endfor %}
+          {% if r.referrers %}<div class="muted">sites: {% for k, v in r.referrers %}{{ k }} {{ v|num }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}</td>
+        <td class="st-breakdown">{% for k, v in r.countries %}{{ k }} {{ v|num }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+        {% else %}
+        <td colspan="6" class="muted">not imported yet</td>
+        {% endif %}
+        <td>{{ steam_menu(r.links) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted st-note">7 days — up to and including the last imported day. Countries are as Steam counts them, bots included.</p>
+</section>
+{% endif %}
+
+<section class="card st-guide">
+  <h3>How to read the Steamworks numbers</h3>
+  <dl>
+    <dt>Visits</dt>
+    <dd>Loads of the game page. The big VISITS number in Steamworks includes bot traffic (the “Bot Traffic” row in the breakdown) — for small games that can be a third of all visits. IndiePulse counts visits without bots, so its number is lower.</dd>
+    <dt>Impressions</dt>
+    <dd>How many times the game’s capsule was on screen: search, tags, “More like this”, wishlists. Outside links don’t add impressions — only visits (External Traffic).</dd>
+    <dt>“All Products” and Overview</dt>
+    <dd>The publisher pages (<a href="{{ publisher_links[1].url }}" target="_blank" rel="noopener">breakdown</a>, <a href="{{ publisher_links[0].url }}" target="_blank" rel="noopener">overview</a>) show the sum over all games at once. For one game, use “Page traffic” in that game’s Steamworks menu (or the product filter).</dd>
+    <dt>Days</dt>
+    <dd>In GMT; Steam doesn’t return today.</dd>
+  </dl>
+  {% if plan.projects %}
+  <details class="st-manual">
+    <summary>Enter manually (if the bookmarklet doesn’t work)</summary>
+    <form method="post" action="/api/metrics/manual" class="row manual-form">
+      <input type="hidden" name="next" value="/steam/traffic">
+      <select name="project_id" aria-label="Game">{% for p in plan.projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+      <select name="metric" aria-label="Metric"><option value="steam_visits">Visits</option><option value="steam_impressions">Impressions</option></select>
+      <input type="date" name="start_day" value="{{ manual_start }}" aria-label="Period start">
+      <span class="muted">—</span>
+      <input type="date" name="end_day" value="{{ manual_end }}" aria-label="Period end">
+      <input type="number" name="value" min="0" step="1" required placeholder="number" aria-label="Number">
+      <button class="btn btn-sm">Save</button>
+    </form>
+    <p class="muted st-note">Take the number from that game’s “Page traffic” page (not “All Products”), for the same dates as in its filter. Bot traffic can’t be subtracted on manual entry.</p>
+  </details>
+  {% endif %}
+</section>
+<script src="/static/steam_menu.js?v={{ request.app.state.asset_version }}"></script>
+{% endblock %}

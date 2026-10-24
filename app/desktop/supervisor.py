@@ -119,9 +119,9 @@ class Supervisor:
 		self.port = port
 		self.health_url = f"http://{host}:{port}/health"
 		self.on_change, self.on_ready, self.on_stopped, self.notify = on_change, on_ready, on_stopped, notify
-		self.server = Child("server", "app.serve", "Сервер", stop_timeout=15)
+		self.server = Child("server", "app.serve", "Server", stop_timeout=15)
 		# the worker finishes the task in progress (a publish, a render) before exiting
-		self.worker = Child("worker", "app.worker", "Воркер", stop_timeout=90)
+		self.worker = Child("worker", "app.worker", "Worker", stop_timeout=90)
 		self.phase = "starting"  # starting | updating | running | restarting | stopping | stopped
 		self.problem = ""        # blocking error shown in the tray (port taken, ...)
 		self._job = KillOnCloseJob()
@@ -155,12 +155,12 @@ class Supervisor:
 
 	def child_line(self, c: Child) -> str:
 		text = {
-			"starting": "запускается…",
-			"running": "работает",
-			"backoff": f"упал, перезапуск через {max(0, int(c.next_start_at - time.monotonic()))} с",
-			"failed": f"не запускается (logs\\{c.name}.log)",
-			"stopping": "останавливается…" if c is self.server else "завершает текущую задачу…",
-			"stopped": "остановлен",
+			"starting": "starting…",
+			"running": "running",
+			"backoff": f"crashed, restarting in {max(0, int(c.next_start_at - time.monotonic()))} s",
+			"failed": f"won’t start (logs\\{c.name}.log)",
+			"stopping": "stopping…" if c is self.server else "finishing the current task…",
+			"stopped": "stopped",
 		}.get(c.state, c.state)
 		return f"{c.title}: {text}"
 
@@ -168,14 +168,14 @@ class Supervisor:
 		if self.problem:
 			return self.problem
 		return {
-			"updating": "обновляю зависимости…",
-			"starting": "запуск…",
-			"restarting": "перезапуск…",
-			"stopping": "останавливаюсь…",
-			"stopped": "остановлен",
-		}.get(self.phase) or ("работает" if self.healthy else
-							 "запуск…" if "starting" in (self.server.state, self.worker.state) else
-							 "сбой, перезапускаю…")
+			"updating": "updating dependencies…",
+			"starting": "starting…",
+			"restarting": "restarting…",
+			"stopping": "stopping…",
+			"stopped": "stopped",
+		}.get(self.phase) or ("running" if self.healthy else
+							 "starting…" if "starting" in (self.server.state, self.worker.state) else
+							 "crashed, restarting…")
 
 	# ── supervisor thread ────────────────────────────────────────────────────
 	def _changed(self, force: bool = False) -> None:
@@ -229,7 +229,7 @@ class Supervisor:
 			logger.info("dependencies updated")
 		else:
 			logger.error("pip install failed, see logs/pip.log")
-			self.notify("Не удалось обновить зависимости (logs\\pip.log). Запускаю как есть.")
+			self.notify("Couldn’t update dependencies (logs\\pip.log). Starting as is.")
 
 	def _restart_requested(self) -> bool:
 		if RESTART_REQUEST_FILE.exists():
@@ -284,7 +284,7 @@ class Supervisor:
 		if len(c.crashes) >= _MAX_CRASHES:
 			c.state = "failed"
 			logger.error(f"{c.name}: {why}; gave up after {len(c.crashes)} crashes")
-			self.notify(f"{c.title} постоянно падает — смотрите logs\\{c.name}.log и перезапустите из меню.")
+			self.notify(f"{c.title} keeps crashing — see logs\\{c.name}.log and restart from the menu.")
 		else:
 			delay = _BACKOFF[min(len(c.crashes), len(_BACKOFF)) - 1]
 			c.state = "backoff"
@@ -380,10 +380,10 @@ class Supervisor:
 				name = p.name()
 			except psutil.Error:
 				name = "?"
-			self.problem = f"порт {self.port} занят: {name} (pid {pid})"
+			self.problem = f"port {self.port} is taken: {name} (pid {pid})"
 			logger.error(self.problem)
-			self.notify(f"Порт {self.port} занят другой программой ({name}, pid {pid}). "
-						f"Закройте её или смените APP_PORT в .env и перезапустите.")
+			self.notify(f"Port {self.port} is taken by another program ({name}, pid {pid}). "
+						f"Close it or change APP_PORT in .env and restart.")
 			self.server.state = "failed"
 			return False
 		self.problem = ""

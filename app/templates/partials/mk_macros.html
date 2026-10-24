@@ -1,0 +1,103 @@
+{# Marketing building blocks. Filters (num/day/...) are registered by app/routers/home.py. #}
+
+{% macro stat_tile(t, small=False) %}
+<div class="stat-tile{% if small %} stat-tile--sm{% endif %}">
+  <div class="stat-label">{{ t.label }}</div>
+  <div class="stat-value">{% if t.href %}<a href="{{ t.href }}">{{ t.value }}</a>{% else %}{{ t.value }}{% endif %}</div>
+  {% if t.delta %}
+  <div class="stat-delta {{ t.delta_dir }}">
+    <span aria-hidden="true">{{ '▲' if t.delta_dir == 'up' else ('▼' if t.delta_dir == 'down' else '•') }}</span>
+    {{ t.delta }} <span class="muted">{{ t.sub }}</span>
+  </div>
+  {% elif t.sub %}<div class="stat-delta flat"><span class="muted">{{ t.sub }}</span></div>{% endif %}
+  {% if t.spark %}<div class="spark" data-spark='{{ t.spark|tojson }}' data-days='{{ t.spark_days|tojson }}' data-kind="{{ t.kind }}" data-label="{{ t.label }}"></div>{% endif %}
+</div>
+{% endmacro %}
+
+{# Steamworks pages of one game (steam_links.app_links) as a small drop-down. #}
+{% macro steam_menu(links, label='Steamworks') %}
+<details class="sw-menu">
+  <summary>{{ label }} <span aria-hidden="true">▾</span></summary>
+  <div class="sw-menu-list">
+    {% for l in links %}
+    <a href="{{ l.url }}" target="_blank" rel="noopener"><span>{{ l.label }}</span>{% if l.hint %}<small>{{ l.hint }}</small>{% endif %}</a>
+    {% endfor %}
+  </div>
+</details>
+{% endmacro %}
+
+{# Change of a follower count: {value, since}; "since" = the series is younger than the window. #}
+{% macro change(d) %}
+{%- if d.value is none -%}<span class="muted">—</span>
+{%- else -%}<span class="chg {{ 'up' if d.value > 0 else ('down' if d.value < 0 else 'flat') }}{% if d.since %} chg--partial{% endif %}"
+  {% if d.since %}title="since {{ d.since|day }} — no earlier reads"{% endif %}>{{ d.value|delta }}</span>
+{%- endif -%}
+{% endmacro %}
+
+{# Followers gained after a publication (publications.follower_gain). #}
+{% macro gain(g) %}
+{%- if g.posted is none and g.all is none -%}<span class="muted" title="no follower read before or after the post">—</span>
+{%- else -%}
+{%- set v = g.posted if g.posted is not none else g.all -%}
+{%- set partial = g.posted is not none and g.missing -%}
+<span class="chg {{ 'up' if v > 0 else ('down' if v < 0 else 'flat') }}{% if partial %} chg--partial{% endif %}"
+  title="{{ 'over the first 3 days' if g.complete else g.elapsed ~ ' after publishing (counting 3 days)' }}{% if g.posted is not none %} · on the post’s networks {{ g.posted|delta }}{% endif %}{% if g.all is not none %} · on all networks {{ g.all|delta }}{% endif %}{% if g.steam is not none %} · Steam {{ g.steam|delta }}{% endif %}{% if partial %} · counted only on: {{ g.counted|join(', ') }}; no before/after read: {{ g.missing|join(', ') }}{% endif %}">{{ v|delta }}{% if not g.complete %}…{% endif %}</span>
+{%- if partial %} <small class="muted" title="networks with a before/after read / networks posted to">{{ g.counted|length }}/{{ g.counted|length + g.missing|length }}</small>{% endif -%}
+{%- endif -%}
+{% endmacro %}
+
+{# Publications with counters and follower gains (publications.published + with_gains). #}
+{% macro pub_table(rows, projects_by_id, full=False) %}
+<div class="table-scroll">
+<table class="pub-table">
+  <thead><tr>
+    <th>Published</th><th>Post</th>
+    <th class="num" title="Views / impressions where the network reports them">Views</th>
+    {% if full %}<th class="num">Likes</th><th class="num">Comm.</th><th class="num">Reposts</th>{% endif %}
+    <th class="num" title="Likes + comments + reposts">Reactions</th>
+    <th class="num" title="Followers gained in the first 3 days on the networks the post went to (hover for details)">+ Followers</th>
+  </tr></thead>
+  <tbody>
+  {% for p in rows %}
+  {% set proj = projects_by_id.get(p.brief.project_id) %}
+  <tr>
+    <td class="nowrap muted">{{ p.t0|when }}</td>
+    <td class="pub-title">
+      <a href="/publications/{{ p.brief.id }}">{{ p.title }}</a>
+      <div class="muted pub-meta">{% if proj %}{{ proj.name }} · {% endif %}{{ p.platform_labels|join(', ') }}{% if p.errors %} · <span title="metrics didn’t update for some posts">⚠</span>{% endif %}</div>
+    </td>
+    <td class="num">{{ p.total.views|num if p.total.views is not none else '—' }}</td>
+    {% if full %}
+    <td class="num">{{ p.total.likes|num if p.total.likes is not none else '—' }}</td>
+    <td class="num">{{ p.total.comments|num if p.total.comments is not none else '—' }}</td>
+    <td class="num">{{ p.total.reposts|num if p.total.reposts is not none else '—' }}</td>
+    {% endif %}
+    <td class="num">{{ p.total.reactions|num if p.total.reactions is not none else '—' }}</td>
+    <td class="num">{{ gain(p.gain) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endmacro %}
+
+{% macro meter(pct, done=False) %}
+<div class="meter{% if done %} meter--done{% endif %}" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pct }}"><span style="width: {{ pct }}%"></span></div>
+{% endmacro %}
+
+{% macro goal_row(r, show_project=True) %}
+{% set g = r.goal %}{% set gp = r.gp %}
+<a class="goal-row" href="/goals/{{ g.id }}">
+  <div class="goal-row-head">
+    <span class="goal-title">{{ g.title }}</span>
+    {% if show_project %}<span class="muted">· {{ r.project.name if r.project else 'global' }}</span>{% endif %}
+    {% if g.status == 'achieved' %}<span class="goal-badge done">✓ reached {{ g.achieved_day|day }}</span>{% endif %}
+  </div>
+  {{ meter(r.pct100, g.status == 'achieved') }}
+  <div class="goal-row-meta muted">
+    {% if gp.has_data %}{{ gp.current|num }} of {{ gp.target|num }} · {{ r.pct100 }}%{% else %}no data yet{% endif %}
+    {% if gp.eta_day and g.status == 'active' %} · forecast {{ gp.eta_day|day }}{% endif %}
+    {% if g.deadline and gp.days_left is not none and g.status == 'active' %} · {% if gp.days_left >= 0 %}{{ gp.days_left }} d to deadline{% else %}deadline passed{% endif %}{% endif %}
+  </div>
+</a>
+{% endmacro %}

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "partials/mk_macros.html" import change %}
+{% block content %}
+{% macro cp_cell(cp, r) %}
+{%- if cp.pending -%}<span class="muted" title="this point hasn’t come yet">too early</span>
+{%- elif cp.delta is not none -%}<span title="{{ cp.value|num }}">{{ change({'value': cp.delta}) }}</span>
+{%- elif cp.value is not none -%}<span class="muted" title="no reading before the post">{{ cp.value|num }}</span>
+{%- else -%}<span class="muted" title="no readings in this window">—</span>{%- endif -%}
+{% endmacro %}
+{% macro aud_row(r) %}
+<tr>
+  <td>{{ r.label }}</td>
+  <td class="num">{% if r.before is not none %}<b>{{ r.before|num }}</b>{% else %}<span class="muted" title="no reading before the post went out">—</span>{% endif %}</td>
+  {% for cp in r.checkpoints %}<td class="num">{{ cp_cell(cp, r) }}</td>{% endfor %}
+  <td class="num">{% if r.now is not none %}{{ r.now|num }}{% if r.now_delta is not none %} <span class="muted">({{ change({'value': r.now_delta}) }})</span>{% endif %}{% else %}—{% endif %}</td>
+  <td class="num muted">{% if r.usual_per_day is not none %}{{ (r.usual_per_day * 3)|delta }}{% else %}—{% endif %}</td>
+</tr>
+{% endmacro %}
+
+<div class="mk-head">
+  <div>
+    <div class="muted mk-sub"><a href="/publications">Publications</a>{% if project %} · <a href="/publications?project={{ project.id }}">{{ project.name }}</a>{% endif %}
+      {% for g in goals %} · 🎯 <a href="/goals/{{ g.id }}">{{ g.title }}</a>{% endfor %}</div>
+    <h2>{{ title }}</h2>
+  </div>
+  <div class="row">
+    {% if brief.vertical_916 and brief.media_vertical_path %}<a class="btn btn-sm btn-primary" href="/shorts/repost/{{ brief.id }}" title="Cross-post this Short to other networks, with its own caption and language for each">📣 Cross-post</a>{% endif %}
+    <a class="btn btn-sm" href="/analytics">Analytics</a>
+  </div>
+</div>
+
+{% if not t0 %}
+<section class="card">
+  <p>This post hasn’t gone out yet{% if planned %} — scheduled for {{ planned.strftime('%b') }} {{ planned.day }}, {{ planned.strftime('%H:%M') }}{% endif %}.
+    Right before it goes out, IndiePulse reads followers on every network, and a “before → after” report appears here.</p>
+</section>
+{% else %}
+<section class="card pub-hero">
+  <div class="pub-hero-main">
+    {% if gain_posted is not none %}
+    <div class="hero-value">{{ gain_posted|delta }} <span class="hero-of">followers</span></div>
+    <div class="muted">on the post’s networks {% if window_complete %}in the first 3 days{% else %}in {{ window_elapsed }} since it went out (counting 3 days){% endif %}{% if gain_all is not none and gain_all != gain_posted %} · all networks {{ gain_all|delta }}{% endif %}{% if gain_steam is not none %} · Steam page {{ gain_steam|delta }}{% endif %}</div>
+    {% if gain_missing %}<div class="pub-partial">Counted only on: {{ gain_counted|join(', ') }}. No reading before or after the post: {{ gain_missing|join(', ') }}.</div>{% endif %}
+    {% elif has_before %}
+    <div class="hero-value muted">…</div>
+    <div class="muted">Followers were read before the post went out; the first reading after comes within 2 hours.</div>
+    {% else %}
+    <div class="muted">No follower reading before the post — it went out before IndiePulse started counting them. Views and reactions below are up to date.</div>
+    {% endif %}
+  </div>
+  <ul class="goal-facts">
+    <li>published <b>{{ t0|when }}</b></li>
+    <li>{{ platform_labels|join(', ') }}</li>
+    <li>views <b>{{ total.views|num if total.views is not none else '—' }}</b></li>
+    <li>reactions <b>{{ total.reactions|num if total.reactions is not none else '—' }}</b>{% if total.reactions is not none %} <span class="muted">({{ (total.likes or 0)|num }} likes · {{ (total.comments or 0)|num }} comments · {{ (total.reposts or 0)|num }} reposts)</span>{% endif %}</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h3>Followers: before → after</h3>
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="aud-table pub-aud">
+    <thead><tr>
+      <th>Network</th><th class="num" title="last reading before the post went out">Before</th>
+      {% for name, _h in checkpoints %}<th class="num">{{ name }}</th>{% endfor %}
+      <th class="num">Now</th>
+      <th class="num" title="How many usually arrive in 3 days, at the pace of the 2 weeks before the post">Usual in 3 days</th>
+    </tr></thead>
+    <tbody>
+    {% set here = rows|selectattr('posted')|list %}{% set rest = rows|rejectattr('posted')|list %}
+    {% if here %}<tr class="aud-group"><td colspan="{{ checkpoints|length + 4 }}">Where the post went out</td></tr>{% endif %}
+    {% for r in here %}{{ aud_row(r) }}{% endfor %}
+    {% if rest %}<tr class="aud-group"><td colspan="{{ checkpoints|length + 4 }}">Other networks</td></tr>{% endif %}
+    {% for r in rest %}{{ aud_row(r) }}{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted mk-card-note">Column numbers are growth since “before”; hover to see the count itself. If growth is clearly above “usual”, the post most likely worked.</p>
+  {% else %}
+  <p class="muted">Followers weren’t tracked yet on those days.</p>
+  {% endif %}
+</section>
+
+{% if others %}
+<section class="card">
+  <h3>Also out in the same window</h3>
+  <p class="muted mk-card-note">From a day before to 3 days after — these posts share the follower growth.</p>
+  <ul class="event-list">
+    {% for o in others %}
+    <li><span class="ev-day">{{ o.t0|when }}</span><a href="/publications/{{ o.brief.id }}">{{ o.title }}</a><span class="muted">· {{ o.platform_labels|join(', ') }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+
+<section class="card">
+  <h3>Posts</h3>
+  <div class="table-scroll">
+  <table class="pub-table">
+    <thead><tr><th>Network</th><th>Status</th><th class="num">Views</th><th class="num">Likes</th><th class="num">Comments</th><th class="num">Reposts</th><th></th></tr></thead>
+    <tbody>
+    {% for r in posts %}
+    <tr>
+      <td>{% if r.post.platform_url %}<a href="{{ r.post.platform_url }}" target="_blank" rel="noopener">{{ r.label }} ↗</a>{% else %}{{ r.label }}{% endif %}</td>
+      <td class="muted">{% if r.status == 'done' %}{{ r.post.published_at|when }}{% elif r.status == 'queued' %}queued{% if r.post.scheduled_at %} · {{ r.post.scheduled_at.strftime('%b') }} {{ r.post.scheduled_at.day }}, {{ r.post.scheduled_at.strftime('%H:%M') }}{% endif %}{% elif r.status == 'awaiting_finish' %}draft in the app{% elif r.status == 'error' %}error{% else %}{{ r.status }}{% endif %}</td>
+      <td class="num">{{ r.e.views|num if r.e.views is not none else '—' }}</td>
+      <td class="num">{{ r.e.likes|num if r.e.likes is not none else '—' }}</td>
+      <td class="num">{{ r.e.comments|num if r.e.comments is not none else '—' }}</td>
+      <td class="num">{{ r.e.reposts|num if r.e.reposts is not none else '—' }}</td>
+      <td>{% if r.e.error %}<span class="aud-err" title="Metrics didn’t update: {{ r.e.error }}">⚠</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted mk-card-note">Post counters update every 30 minutes during the first week (YouTube takes longer). X’s free API doesn’t return views or likes.</p>
+</section>
+{% endblock %}

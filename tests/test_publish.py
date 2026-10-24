@@ -94,16 +94,20 @@ def test_discord_timeout_is_never_resent(make_post, fake_discord):
     assert fake_discord.calls.count("https://hook/ru") == 1
 
 
-def test_discord_rejected_attachment_falls_back_to_text(make_post, fake_discord, tmp_path, monkeypatch):
+def test_discord_rejected_attachment_never_posts_text_only(make_post, fake_discord, tmp_path):
+    # used to resend as "text + [Attachment upload failed]" into the news channel
     img = tmp_path / "shot.png"
     img.write_bytes(b"x")
     post_id, job_id = make_post("discord", {"gallery": [str(img)]})
     fake_discord.plan = {
-        "https://hook/ru": [DiscordSendError("HTTP 413", delivered=False), "m1"],
+        "https://hook/ru": [DiscordSendError("HTTP 413", delivered=False)],
         "https://hook/en": ["m2"],
     }
-    assert tasks._publish_news_post_impl(job_id, post_id) == "ok"
-    assert fake_discord.calls.count("https://hook/ru") == 2
+    assert tasks._publish_news_post_impl(job_id, post_id) == "error"
+    assert fake_discord.calls == ["https://hook/ru"]
+    post = reload(Post, post_id)
+    assert post.status == PostStatusEnum.error
+    assert "413" in post.error_text
 
 
 class FakeResp:

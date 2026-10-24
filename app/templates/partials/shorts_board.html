@@ -1,37 +1,38 @@
 {% if not cards %}
 <div class="muted" style="padding:30px; text-align:center;">
-	Пока пусто. <a href="/shorts">Загрузи пачку клипов →</a>
+	Nothing here yet. <a href="/shorts">Upload a batch of clips →</a>
 </div>
 {% else %}
 <div class="sf-summary">
-	<span><b>{{ total_views_fmt }}</b> просмотров</span>
-	<span><b>{{ published_count }}</b> опубликовано</span>
-	<span class="muted">{{ cards|length }} шортсов</span>
+	<span><b>{{ total_views_fmt }}</b> views</span>
+	<span><b>{{ published_count }}</b> published</span>
+	<span class="muted">{{ cards|length }} Shorts</span>
 </div>
 <div class="sf-board">
 	{% for c in cards %}
 	{% set ns = namespace(tt=false) %}
 	{% for ch in c.chips %}{% if ch.platform == 'tiktok' and ch.status == 'awaiting_finish' %}{% set ns.tt = true %}{% endif %}{% endfor %}
 	<div class="sf-bcard">
-		<div class="sf-bthumb">
+		<div class="sf-bthumb"{% if c.vertical_url %} data-video="{{ c.vertical_url }}" title="Watch the finished Short"{% endif %}>
 			{% if c.poster_url %}
-				<img src="{{ c.poster_url }}" alt="poster" />
+				<img src="{{ c.poster_url }}" alt="poster" loading="lazy" />
 			{% elif c.vertical_url %}
 				<video src="{{ c.vertical_url }}" muted playsinline preload="metadata"></video>
 			{% else %}
-				<span class="sf-rendering">⏳ рендер…</span>
+				<span class="sf-rendering">⏳ rendering…</span>
 			{% endif %}
+			{% if c.vertical_url %}<span class="sf-bplay">▶</span>{% endif %}
 		</div>
 
-		<div class="sf-btitle" title="{{ c.title }}">{{ c.title or ('Клип #' ~ c.brief_id) }}</div>
+		<div class="sf-btitle" title="{{ c.title }}">{{ c.title or ('Clip #' ~ c.brief_id) }}</div>
 
 		<div>
 			{% if c.render_status == 'error' %}
-				<span class="badge error" title="{{ c.render_error }}">рендер ✗</span>
+				<span class="badge error" title="{{ c.render_error }}">render ✗</span>
 			{% elif c.rendered %}
-				<span class="badge success">рендер ✓</span>
+				<span class="badge success">render ✓</span>
 			{% else %}
-				<span class="badge running">рендер…</span>
+				<span class="badge running">rendering…</span>
 			{% endif %}
 		</div>
 
@@ -43,24 +44,27 @@
 					{% if ch.url %}<a class="badge success" href="{{ ch.url }}" target="_blank" rel="noopener">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</a>
 					{% else %}<span class="badge success">✓ live{% if ch.views_fmt %} · {{ ch.views_fmt }}👁{% endif %}</span>{% endif %}
 				{% elif ch.status == 'awaiting_finish' %}
-					<span class="badge sf-await" title="Открой приложение и опубликуй">📲 доделать</span>
+					<span class="badge sf-await" title="Open the app and publish">📲 finish</span>
 				{% elif ch.status == 'error' %}
-					<span class="badge error" title="{{ ch.error }}">✗ ошибка</span>
+					<span class="badge error" title="{{ ch.error }}">✗ error</span>
 				{% elif ch.status == 'running' %}
-					<span class="badge running">↑ выкладываю</span>
+					<span class="badge running">↑ uploading</span>
 				{% elif ch.status == 'canceled' %}
-					<span class="badge default">отменён</span>
+					<span class="badge default">canceled</span>
 				{% else %}
-					<span class="badge default">⏳ в очереди</span>
+					<span class="badge default">⏳ queued</span>
 				{% endif %}
 			</div>
 			{% endfor %}
-			{% if not c.chips %}<span class="muted" style="font-size:12px;">посты появятся после рендера</span>{% endif %}
+			{% if not c.chips %}<span class="muted" style="font-size:12px;">posts appear after the render</span>{% endif %}
 		</div>
 
 		{% if ns.tt %}
 		<button type="button" class="btn btn-sm" data-caption="{{ c.caption|e }}"
-			onclick="navigator.clipboard.writeText(this.dataset.caption); this.textContent='Скопировано ✓';">📋 Подпись для TikTok</button>
+			onclick="navigator.clipboard.writeText(this.dataset.caption); this.textContent='Copied ✓';">📋 TikTok caption</button>
+		{% endif %}
+		{% if c.rendered %}
+		<a class="btn btn-sm" href="/shorts/repost/{{ c.brief_id }}" title="Send to other networks, each with its own caption and language">📣 Cross-post</a>
 		{% endif %}
 	</div>
 	{% endfor %}

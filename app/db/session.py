@@ -47,17 +47,22 @@ def migrate_db() -> None:
             ("media_vertical_path", "VARCHAR(500)"), ("music_path", "VARCHAR(500)"),
             ("music_offset_sec", "INTEGER"), ("fade_in_ms", "INTEGER"), ("fade_out_ms", "INTEGER"),
             ("vertical_916", "BOOLEAN"), ("crop_x", "INTEGER"), ("crop_y", "INTEGER"),
-            ("crop_scale", "REAL"),
+            ("crop_scale", "REAL"), ("project_id", "INTEGER"),
+            ("trim_start", "REAL"), ("trim_end", "REAL"), ("overlays_json", "TEXT"),
+            ("edit_spec_json", "TEXT"),
         ],
-        # Shorts render-preset columns
+        # Shorts render-preset columns + marketing fields
         "projects": [
             ("crop_x", "INTEGER"), ("crop_y", "INTEGER"), ("crop_scale", "REAL"),
             ("music_path", "VARCHAR(500)"), ("music_offset_sec", "INTEGER"),
             ("fade_in_ms", "INTEGER"), ("fade_out_ms", "INTEGER"),
             ("platforms_csv", "VARCHAR(200)"),
+            ("steam_app_id", "INTEGER"), ("stage", "VARCHAR(40)"), ("status", "VARCHAR(20)"),
         ],
         # "clip type" preset columns (title/description/music)
         "presets": [("title", "VARCHAR(300)"), ("text_en", "TEXT"), ("music_path", "VARCHAR(500)")],
+        # per-network texts of a reposted short (see platforms.common.brief_for_publish)
+        "posts": [("overrides_json", "TEXT")],
     }
     with engine.begin() as conn:
         conn.exec_driver_sql(

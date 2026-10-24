@@ -1,5 +1,5 @@
 ﻿<!doctype html>
-<html lang="{{ ui_language or 'en' }}">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>IndiePulse</title>
@@ -19,11 +19,14 @@
 				<a href="/create/post" class="{% if request.url.path.startswith('/create/post') %}active{% endif %}">📷 Post</a>
 				<a href="/create/video" class="{% if request.url.path.startswith('/create/video') %}active{% endif %}">🎬 Video</a>
 				<a href="/shorts" class="{% if request.url.path.startswith('/shorts') %}active{% endif %}">🎞️ Shorts</a>
+				<a href="/tiktok" title="TikTok pipeline: proven Shorts → TikTok, checklist and numbers" class="{% if request.url.path.startswith('/tiktok') %}active{% endif %}">🎵 TikTok</a>
 				<a href="/calendar" class="{% if request.url.path.startswith('/calendar') %}active{% endif %}">📅 Calendar</a>
 				<a href="/posts" class="{% if request.url.path.startswith('/posts') %}active{% endif %}">Posts</a>
 				<a href="/analytics" class="{% if request.url.path.startswith('/analytics') %}active{% endif %}">Analytics</a>
 				<a href="/jobs" class="{% if request.url.path.startswith('/jobs') %}active{% endif %}">Jobs</a>
+				<a href="/outreach" title="Creator outreach: YouTubers and streamers" class="{% if request.url.path.startswith('/outreach') %}active{% endif %}">📣 Outreach</a>
 				<a href="/projects" class="{% if request.url.path.startswith('/projects') %}active{% endif %}">Projects</a>
+				<a href="/guide" title="Indie marketing playbook" class="{% if request.url.path.startswith('/guide') %}active{% endif %}">📖</a>
 				<a href="/status" title="API health check" class="{% if request.url.path.startswith('/status') %}active{% endif %}">🩺</a>
 				<a href="/accounts" class="{% if request.url.path.startswith('/accounts') %}active{% endif %}">⚙️</a>
 				<span id="nav_ar_btn" class="nav-inline" hx-get="/api/system/autoreload_status" hx-trigger="load" hx-swap="innerHTML"></span>
@@ -34,6 +37,8 @@
 		<div class="container">
 			<!-- "YouTube is disconnected" banner; empty (removed) while everything works -->
 			<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>
+			<!-- "X API credits ran out" banner (HTTP 402); empty while X takes requests -->
+			<div id="x_alert" hx-get="/api/x/alert" hx-trigger="load" hx-swap="outerHTML"></div>
 			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>
@@ -125,44 +130,24 @@
 		}
 	});
 
-	// Auto-attach lightbox to images with data-lightbox attribute or .thumbnail-clickable class
-	function initLightbox() {
-		// Single images
-		document.querySelectorAll('img[data-lightbox], img.thumbnail-clickable').forEach(img => {
-			if (img.dataset.lightboxInit) return;
-			img.dataset.lightboxInit = 'true';
-			img.style.cursor = 'zoom-in';
-			img.addEventListener('click', function(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				const fullSrc = this.dataset.fullSrc || this.src;
-				openLightbox(fullSrc);
-			});
-		});
-		
-		// Gallery images (data-lightbox-gallery)
-		const galleries = {};
-		document.querySelectorAll('img[data-lightbox-gallery]').forEach(img => {
-			const galleryName = img.dataset.lightboxGallery;
-			if (!galleries[galleryName]) galleries[galleryName] = [];
-			const fullSrc = img.dataset.fullSrc || img.src;
-			galleries[galleryName].push(fullSrc);
-			
-			if (img.dataset.lightboxInit) return;
-			img.dataset.lightboxInit = 'true';
-			img.style.cursor = 'zoom-in';
-			img.addEventListener('click', function(e) {
-				e.preventDefault();
-				e.stopPropagation();
-				const fullSrc = this.dataset.fullSrc || this.src;
-				openLightbox(fullSrc, galleries[galleryName]);
-			});
-		});
-	}
-
-	// Initialize on load and after htmx swaps
-	document.addEventListener('DOMContentLoaded', initLightbox);
-	document.addEventListener('htmx:afterSwap', initLightbox);
+	// One delegated listener, so images rendered by JS later (Create Post screenshots,
+	// calendar modal, news previews) zoom too. Capture phase: the click opens the lightbox
+	// and never reaches parents (drop zones, clickable rows).
+	// data-lightbox-gallery="name" → arrows walk every image of that gallery on the page.
+	const LIGHTBOX_SEL = 'img[data-lightbox], img[data-lightbox-gallery], img.thumbnail-clickable';
+	document.addEventListener('click', function(e) {
+		const img = e.target.closest && e.target.closest(LIGHTBOX_SEL);
+		if (!img || img.closest('#lightbox')) return;
+		e.preventDefault();
+		e.stopPropagation();
+		const full = el => el.dataset.fullSrc || el.src;
+		const name = img.dataset.lightboxGallery;
+		const gallery = name
+			? Array.from(document.querySelectorAll('img[data-lightbox-gallery]'))
+				.filter(el => el.dataset.lightboxGallery === name).map(full)
+			: null;
+		openLightbox(full(img), gallery);
+	}, true);
 	</script>
 	<!-- Connection monitor: shows when the server is gone (restart / tray closed) and
 	     reloads the page once a *new* server answers, unless you were typing. -->
@@ -171,6 +156,10 @@
 	(function () {
 		const bar = document.getElementById('conn_banner');
 		let boot = '{{ request.app.state.asset_version if request and request.app.state.asset_version else '' }}' || null, down = false, dirty = false, timer = null;
+		// reload() of a page that answered a form POST re-sends the form (that re-published a
+		// whole post after a restart on 2026-09-30): such pages are re-opened with a GET instead
+		const fromPost = {{ 'true' if request and request.method == 'POST' else 'false' }};
+		window.ipRefresh = () => fromPost ? location.replace(location.pathname + location.search) : location.reload();
 		document.addEventListener('input', () => { dirty = true; }, true);
 		document.addEventListener('submit', () => { dirty = false; }, true);
 		function show(html, cls) { bar.innerHTML = html; bar.className = cls; bar.hidden = false; }
@@ -182,15 +171,15 @@
 				const j = await r.json();
 				if (boot === null) boot = j.boot;
 				if (j.boot !== boot) {
-					if (!dirty) { location.reload(); return; }
-					show('Сервер IndiePulse перезапустился. <button type="button" class="btn" onclick="location.reload()">Обновить страницу</button>', 'ok');
+					if (!dirty) { ipRefresh(); return; }
+					show('IndiePulse server restarted. <button type="button" class="btn" onclick="ipRefresh()">Reload page</button>', 'ok');
 				} else if (down) {
 					bar.hidden = true;
 				}
 				down = false;
 			} catch (e) {
 				down = true;
-				show('Нет связи с IndiePulse — переподключаюсь… (если закрыли из трея, запустите снова)', 'down');
+				show('Lost connection to IndiePulse — reconnecting… (if you quit it from the tray, start it again)', 'down');
 			}
 			timer = setTimeout(ping, down ? 2000 : 15000);
 		}

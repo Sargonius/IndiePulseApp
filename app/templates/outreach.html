@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mk-head">
+  <div>
+    <h2>📣 Creator outreach</h2>
+    <div class="muted mk-sub">Find YouTubers and streamers who played games like yours, collect their public emails and send short personal letters with Steam keys — one by one, from your own Gmail.</div>
+  </div>
+  <div class="row">
+    <a class="btn" href="/guide#outreach">📖 Playbook</a>
+    {% if project and project.steam_app_id %}<a class="btn" href="https://partner.steamgames.com/curators/manage/{{ project.steam_app_id }}" target="_blank" rel="noopener" title="Send copies straight into Steam curators’ libraries — many YouTubers run curator pages">Curator Connect ↗</a>{% endif %}
+  </div>
+</div>
+
+{% if msg %}<div class="card or-flash">{{ msg }}</div>{% endif %}
+
+{% if not project %}
+<section class="card muted">No projects yet — <a href="/projects">create one</a> and give it a Steam App ID.</section>
+{% else %}
+<div class="chip-row or-projects">
+  {% for p in projects %}
+  <a class="chip {{ 'active' if p.id == project.id else '' }}" href="/outreach?project={{ p.id }}">{{ p.name }}{% if p.status == 'paused' %} <span class="muted">(paused)</span>{% endif %}</a>
+  {% endfor %}
+</div>
+
+<div class="or-steps">
+  <a href="#games" class="or-step"><b>1</b> Similar games <span class="muted">{{ active_games|length }} in use</span></a>
+  <a href="#creators" class="or-step"><b>2</b> Creators <span class="muted">{{ rows|length }} · {{ with_email }} with email</span></a>
+  <a href="#creators" class="or-step" data-filter="drafted"><b>3</b> Letters <span class="muted">{{ status_counts.get('drafted', 0) }} drafted · {{ status_counts.get('sent', 0) + status_counts.get('replied', 0) + status_counts.get('covered', 0) + status_counts.get('declined', 0) }} sent</span></a>
+  <a href="#keys" class="or-step"><b>4</b> Keys <span class="muted">{{ keys.free }} free</span></a>
+</div>
+
+<div class="card or-job" id="or_job" hidden aria-live="polite">
+  <div class="or-job-head"><b id="or_job_label"></b> <span class="muted" id="or_job_msg"></span></div>
+  <div class="meter" id="or_job_meter"><span style="width:0%"></span></div>
+  <div class="or-job-result" id="or_job_result"></div>
+</div>
+
+<section class="card" id="games">
+  <div class="mk-card-head">
+    <h3>1 · Similar games</h3>
+    <span class="muted">Creators who covered these get onto the list. Tick the games whose players would enjoy yours.</span>
+  </div>
+  <div class="or-toolbar">
+    <button type="button" class="btn" data-run="suggest" title="Steam’s “More like this” for your game; similarity = overlap of Steam tags">✨ Suggest from Steam</button>
+    {% if games|selectattr('status', 'equalto', 'suggested')|list %}
+    <button type="button" class="btn" data-bulk="use_top" title="Mark the 10 closest suggestions as used">✓ Use top 10</button>
+    <button type="button" class="btn" data-bulk="reject_suggested">✕ Skip remaining suggestions</button>
+    {% endif %}
+    <form class="or-add-game" id="or_add_game">
+      <input type="text" name="text" placeholder="Steam link, app id or game name" required maxlength="300">
+      <button class="btn">+ Add</button>
+    </form>
+  </div>
+
+  {% set shown = games|rejectattr('status', 'equalto', 'rejected')|list %}
+  {% if shown %}
+  <div class="table-scroll">
+  <table class="or-table or-games">
+    <thead><tr><th>Game</th><th title="Overlap of Steam tags with your game">Match</th><th title="Steam reviews — how many people played it">Reviews</th><th>Use</th><th title="What YouTube is searched for. Default: the exact name in quotes">YouTube query</th><th>Searched</th><th>Twitch &amp; more</th></tr></thead>
+    <tbody>
+    {% for g in shown %}
+      <tr data-game="{{ g.id }}" class="or-game--{{ g.status }}">
+        <td>
+          {% if g.steam_app_id %}<a href="https://store.steampowered.com/app/{{ g.steam_app_id }}/" target="_blank" rel="noopener">{{ g.name }}</a>{% else %}{{ g.name }}{% endif %}
+          {% if g.source == 'own' %}<span class="badge sf-await" title="Creators who already played your game — the warmest leads">your game</span>{% endif %}
+          {% if g.tags_json %}<div class="muted or-tags">{{ g.tags_json|fromjson|join(' · ') }}</div>{% endif %}
+        </td>
+        <td class="num">{% if g.similarity is not none %}<span class="or-match" style="--m: {{ (g.similarity * 100)|round|int }}%">{{ (g.similarity * 100)|round|int }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="nowrap muted">{% if g.reviews %}{{ g.reviews|num }}{% if g.positive is not none %} · {{ g.positive }}%{% endif %}{% else %}—{% endif %}</td>
+        <td class="nowrap">
+          <label class="or-use"><input type="checkbox" data-use {% if g.status == 'active' %}checked{% endif %}> use</label>
+          {% if g.status == 'suggested' %}<button type="button" class="btn-link" data-reject title="Hide this suggestion">skip</button>{% endif %}
+        </td>
+        <td><input type="text" class="or-query" data-query value="{{ g.search_query or '' }}" placeholder="&quot;{{ g.name }}&quot;" maxlength="200"></td>
+        <td class="nowrap">{% if g.searched_at %}{{ g.searched_at.strftime('%b %d') }} · {{ g.videos_found }} video{{ '' if g.videos_found == 1 else 's' }}{% else %}<span class="muted">not yet</span>{% endif %}</td>
+        <td class="nowrap or-research">
+          {% for l in research_links(g) %}<a href="{{ l.url }}" target="_blank" rel="noopener" title="{{ l.hint }}">{{ l.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No games yet. {% if project.steam_app_id %}Click “Suggest from Steam” — it reads Steam’s “More like this” for {{ project.name }}.{% else %}This project has no Steam App ID: add 3–5 similar games by hand (Steam links), then “Suggest from Steam” finds more like them.{% endif %}</p>
+  {% endif %}
+  {% set rejected = games|selectattr('status', 'equalto', 'rejected')|list %}
+  {% if rejected %}
+  <details class="or-rejected"><summary class="muted">Skipped games ({{ rejected|length }})</summary>
+    <div class="chip-row">{% for g in rejected %}<button type="button" class="chip" data-restore="{{ g.id }}" title="Bring back">{{ g.name }} ↺</button>{% endfor %}</div>
+  </details>
+  {% endif %}
+
+  <div class="or-search-bar">
+    <button type="button" class="btn btn-primary" data-run="youtube" {% if not active_games %}disabled title="Tick at least one game first"{% endif %}>🔎 Find creators on YouTube</button>
+    <button type="button" class="btn" data-run="youtube" data-force="1" {% if not active_games %}disabled{% endif %} title="Search every used game again (new videos since last time)">Search again</button>
+    <span class="muted">YouTube searches today: <b id="or_calls">{{ search_calls }}</b>/{{ search_limit }} · {{ cfg.pages }} per game · videos from the last {{ cfg.years }} year{{ '' if cfg.years == 1 else 's' }} · via {{ 'API key' if yt_api_key_set else 'the connected channel' }}</span>
+  </div>
+</section>
+
+<section class="card" id="creators">
+  <div class="mk-card-head">
+    <h3>2 · Creators</h3>
+    <span class="muted">Sorted by score: how many similar games they covered, how recently, channel size (1K–100K answer best), email, language. Click a row to open the letter.</span>
+  </div>
+  {% if rows %}
+  <div class="or-filters">
+    <div class="chip-row" id="or_status_chips">
+      <button type="button" class="chip active" data-status="open">To do <span class="muted">{{ status_counts.get('found', 0) + status_counts.get('shortlist', 0) + status_counts.get('drafted', 0) }}</span></button>
+      {% for key, label in statuses.items() %}{% if status_counts.get(key) %}
+      <button type="button" class="chip" data-status="{{ key }}">{{ label }} <span class="muted">{{ status_counts.get(key) }}</span></button>
+      {% endif %}{% endfor %}
+      {% if followups_due %}<button type="button" class="chip" data-status="followup">Follow-up due <span class="muted">{{ followups_due }}</span></button>{% endif %}
+      <button type="button" class="chip" data-status="all">All <span class="muted">{{ rows|length }}</span></button>
+    </div>
+    <div class="or-filter-row">
+      <label><input type="checkbox" id="or_f_email"> with email</label>
+      <select id="or_f_lang"><option value="">any language</option>{% for l in languages_seen %}<option value="{{ l }}">{{ lang_names.get(l, l) }}</option>{% endfor %}</select>
+      <select id="or_f_subs">
+        <option value="0">any size</option><option value="300">300+ subs</option><option value="1000">1K+ subs</option>
+        <option value="10000">10K+ subs</option>
+      </select>
+      <input type="search" id="or_f_text" placeholder="Search name or game">
+      <span class="muted" id="or_f_count"></span>
+      <button type="button" class="btn btn-sm" data-run="links" title="Opens link-in-bio pages and personal sites of creators without an email (3 links each)">🔗 Look for emails on their sites</button>
+    </div>
+  </div>
+  <div class="table-scroll">
+  <table class="or-table or-creators" id="or_creators">
+    <thead><tr><th class="num">Score</th><th>Creator</th><th>Played</th><th>Last video</th><th>Email</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr data-contact="{{ r.c.id }}" data-status="{{ r.c.status }}" data-email="{{ 1 if r.email else 0 }}"
+          data-lang="{{ r.cr.language or '' }}" data-subs="{{ r.cr.subscribers or 0 }}" data-followup="{{ 1 if r.followup_due else 0 }}"
+          data-text="{{ (r.cr.name ~ ' ' ~ (r.games|map(attribute='name')|join(' ')))|lower }}" tabindex="0">
+        <td class="num"><span class="or-score" title="{{ r.score_parts|join('&#10;') }}" style="--s: {{ r.score }}%">{{ r.score }}</span></td>
+        <td class="or-who">
+          {% if r.cr.avatar_url %}<img src="{{ r.cr.avatar_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="or-avatar-ph">{{ r.cr.name[:1] }}</span>{% endif %}
+          <div>
+            <b>{{ r.cr.name }}</b> <span class="or-platform or-platform--{{ r.cr.platform }}">{{ r.cr.platform }}</span>
+            <div class="muted">{% if r.cr.subscribers is not none %}{{ r.cr.subscribers|num }} subs{% else %}— subs{% endif %}{% if r.cr.language %} · {{ lang_names.get(r.cr.language, r.cr.language) }}{% endif %}{% if r.cr.country %} · {{ r.cr.country }}{% endif %}</div>
+          </div>
+        </td>
+        <td class="or-played">
+          {% for g in r.games[:3] %}<a class="or-game-chip" href="https://www.youtube.com/watch?v={{ g.video_id }}" target="_blank" rel="noopener" title="{{ g.title }}{% if g.views is not none %} — {{ g.views|num }} views{% endif %}">{{ g.name }}</a>{% endfor %}
+          {% if r.games|length > 3 %}<span class="muted">+{{ r.games|length - 3 }}</span>{% endif %}
+          {% if not r.games and r.c.manual %}<span class="muted">added by hand</span>{% endif %}
+        </td>
+        <td class="nowrap muted">{{ r.last_video.strftime('%b %Y') if r.last_video else '—' }}</td>
+        <td class="or-email-cell">{% if r.email %}<span title="{{ r.email }}">✉ {{ r.email|truncate(26, True, '…') }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="nowrap"><span class="or-status or-status--{{ r.c.status }}">{{ r.status_label }}</span>{% if r.followup_due %} <span class="or-status or-status--due" title="No reply yet — time for one short follow-up">follow-up</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">Nobody yet. Tick some similar games above and click “Find creators on YouTube”, or add creators by hand below.</p>
+  {% endif %}
+</section>
+
+<div class="or-two" id="add">
+  <section class="card">
+    <h3>Add a creator by hand</h3>
+    <form method="post" action="/api/outreach/{{ project.id }}/creators" class="or-form">
+      <label>Channel link <input type="text" name="url" placeholder="https://www.youtube.com/@name or https://www.twitch.tv/name" maxlength="500"></label>
+      <div class="or-form-row">
+        <label>Name <span class="muted">(Twitch / other)</span><input type="text" name="name" maxlength="200"></label>
+        <label>Email <input type="text" name="email" maxlength="200" placeholder="from their About / panels"></label>
+      </div>
+      <label>Notes <input type="text" name="notes" maxlength="500" placeholder="streamed Frostpunk 2 in May, 300 viewers"></label>
+      <button class="btn btn-primary">Add to shortlist</button>
+    </form>
+    <p class="muted or-note">Twitch can’t be searched from here — its API terms forbid using its data for outreach. Open the SullyGnome / Twitch links next to each game, pick streamers, and paste their channel links here (business emails usually sit in the panels under the stream).</p>
+  </section>
+  <section class="card">
+    <h3>Import a CSV</h3>
+    <form method="post" action="/api/outreach/{{ project.id }}/import" enctype="multipart/form-data" class="or-form">
+      <input type="file" name="file" accept=".csv,text/csv,.tsv,.txt" required>
+      <button class="btn">Import</button>
+    </form>
+    <p class="muted or-note">Exports from CreatorScout, IMPRESS or any spreadsheet. Columns are recognised by name: <code>name</code>, <code>url</code> / <code>channel</code>, <code>email</code>, <code>subscribers</code> / <code>followers</code>, <code>language</code>, <code>country</code>, <code>notes</code> / <code>games</code>. Rows land on the shortlist.</p>
+  </section>
+</div>
+
+<section class="card" id="keys">
+  <div class="mk-card-head">
+    <h3>Steam keys</h3>
+    <span class="muted">{{ keys.free }} free · {{ keys.assigned }} in drafts · {{ keys.sent }} sent · {{ keys.activated }} activated{% if keys.void %} · {{ keys.void }} void{% endif %}</span>
+  </div>
+  <div class="or-two or-two--tight">
+    <form method="post" action="/api/outreach/{{ project.id }}/keys" enctype="multipart/form-data" class="or-form">
+      <label>Paste keys or upload the .txt from Steamworks
+        <textarea name="text" rows="3" placeholder="XXXXX-XXXXX-XXXXX"></textarea></label>
+      <div class="or-form-row">
+        <input type="file" name="file" accept=".txt,.csv,text/plain">
+        <input type="text" name="batch" maxlength="80" placeholder="batch label, e.g. Influencers Oct 2026">
+        <button class="btn">Import keys</button>
+      </div>
+    </form>
+    <div class="muted or-note">
+      {% if project.steam_app_id %}
+      Request a batch in <a href="https://partner.steamgames.com/apps/landing/{{ project.steam_app_id }}" target="_blank" rel="noopener">Steamworks → your game → Request Steam Product Keys ↗</a> (tag it “Influencers” or “Press”). Keys arrive as a zip with a .txt file.
+      {% endif %}
+      A key goes into a letter when you write the draft and returns to the pool if you skip that creator before sending. Steam has no API for activations — check single keys at <a href="https://partner.steamgames.com/querycdkey/" target="_blank" rel="noopener">Query Steam keys ↗</a> and mark them here.
+    </div>
+  </div>
+</section>
+
+<section class="card" id="settings">
+  <h3>Letter settings <span class="muted">· {{ project.name }}</span></h3>
+  <form method="post" action="/api/outreach/{{ project.id }}/settings" class="or-form">
+    <label>Pitch <span class="muted">— what the game is, what’s new, why now. The letter uses only these facts.</span>
+      <textarea name="pitch" rows="5" maxlength="3000" placeholder="Project Apocalypse is a zombie-survival city builder… The new update rebuilds the core loop: … It’s 50% off until …">{{ cfg.pitch }}</textarea></label>
+    <div class="or-form-row">
+      <label>Extra links <span class="muted">(trailer, press kit — one per line)</span><textarea name="links" rows="2" maxlength="1000">{{ cfg.links }}</textarea></label>
+      <label>Signature<textarea name="signature" rows="2" maxlength="300" placeholder="Evgeny, solo dev of Project Apocalypse">{{ cfg.signature }}</textarea></label>
+    </div>
+    <div class="or-form-row or-form-row--small">
+      <label>Game languages <input type="text" name="languages" value="{{ cfg.languages }}" title="Creators speaking these get a bonus (codes: en, ru, ja, zh…)"></label>
+      <label>Write letters in <input type="text" name="letter_languages" value="{{ cfg.letter_languages }}" title="If the creator speaks one of these, the letter is in their language; otherwise English"></label>
+      <label>Follow-up after <input type="number" name="followup_days" min="2" max="30" value="{{ cfg.followup_days }}"> days</label>
+      <label>Search videos of the last <input type="number" name="years" min="1" max="10" value="{{ cfg.years }}"> years</label>
+      <label>Result pages per game <input type="number" name="pages" min="1" max="4" value="{{ cfg.pages }}" title="50 videos per page; each page is one of the 100 daily searches"></label>
+      <label>UTM campaign <input type="text" name="campaign" value="{{ cfg.campaign }}" maxlength="40" title="The store link in letters gets utm_source=youtube|twitch, utm_medium=outreach, utm_content=creator"></label>
+    </div>
+    <label class="or-check"><input type="checkbox" name="include_key" value="1" {% if cfg.include_key %}checked{% endif %}> Put a Steam key in the first letter <span class="muted">(recommended: creators rarely answer “want a key?”)</span></label>
+    <button class="btn btn-primary">Save</button>
+  </form>
+  <form method="post" action="/api/outreach/yt_key" class="or-form or-ytkey">
+    <input type="hidden" name="project_id" value="{{ project.id }}">
+    <label>YouTube API key <span class="muted">(optional) — Google Cloud → APIs &amp; Services → Credentials → Create API key, in the same project as YouTube. Unlike the channel connection it doesn’t expire weekly.</span>
+      <div class="or-form-row"><input type="password" name="key" autocomplete="off" placeholder="{{ '•••••••• saved — paste a new one to replace, leave empty to remove' if yt_api_key_set else 'AIza…' }}"><button class="btn">Save key</button></div>
+    </label>
+  </form>
+</section>
+
+<dialog class="or-dialog" id="or_dialog">
+  <div class="or-dlg-inner" id="or_dlg_body"><p class="muted">Loading…</p></div>
+</dialog>
+
+<script type="application/json" id="or_data">{{ {"project_id": project.id, "statuses": statuses}|tojson }}</script>
+<script src="/static/outreach.js?v={{ request.app.state.asset_version if request.app.state.asset_version else '1' }}"></script>
+{% endif %}
+{% endblock %}

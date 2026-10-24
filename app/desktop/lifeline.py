@@ -7,16 +7,38 @@ Windows has no SIGTERM for windowless processes, so this is the portable way to 
 """
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from typing import Callable
 
 from app.desktop import is_supervised
 
+_kept_open: list = []
+
+
+def _keep_pipe_from_children() -> None:
+	"""Subprocesses inherit the process std handles. With the lifeline pipe as its stdin,
+	ffmpeg's keyboard check queues behind our pending read (Windows serializes synchronous
+	I/O on one pipe) and hangs forever — it froze a Reddit publish on 2026-09-30 with the
+	whole queue behind it. Children get NUL instead; sys.stdin keeps its own handle."""
+	if os.name != "nt":
+		return
+	import ctypes
+	import msvcrt
+	nul = open(os.devnull, "rb")
+	_kept_open.append(nul)  # the handle must outlive every child we start
+	STD_INPUT_HANDLE = -10
+	ctypes.windll.kernel32.SetStdHandle(STD_INPUT_HANDLE, msvcrt.get_osfhandle(nul.fileno()))
+
 
 def on_supervisor_gone(callback: Callable[[], None]) -> None:
 	if not is_supervised() or sys.stdin is None:
 		return
+	try:
+		_keep_pipe_from_children()
+	except Exception:
+		pass  # worst case children see the pipe, as before
 
 	def _wait() -> None:
 		try:

@@ -55,6 +55,9 @@
 				{% if s == 'done' %}
 					<button class="btn btn-icon btn-red" title="Delete from Platform" onclick="deleteRemote({{ p.id }})">🗑</button>
 				{% endif %}
+				{% if p.is_short and s == 'done' %}
+					<a class="btn btn-icon" href="/shorts/repost/{{ p.brief_id }}" title="Cross-post this Short to other networks">📣</a>
+				{% endif %}
 				<button class="btn btn-icon btn-green" title="Refresh metrics" hx-post="/api/posts/refresh_metrics" hx-vals='{"id": {{ p.id }} }' hx-target="#posts_table" hx-swap="outerHTML">⟳</button>
 				<button class="btn btn-icon btn-red" title="Remove" hx-post="/api/posts/remove" hx-vals='{"id": {{ p.id }} }' hx-target="#posts_table" hx-swap="outerHTML">✖</button>
 				<button class="btn btn-icon" title="View Text" onclick="openViewModal({{ p.id }})">👁</button>

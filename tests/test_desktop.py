@@ -55,6 +55,29 @@ def test_lifeline_stdin_eof_stops_child():
     p.wait(5)
 
 
+def test_lifeline_pipe_is_not_inherited_by_grandchildren():
+    """ffmpeg started by the worker used to get the lifeline pipe as stdin and hang
+    forever; now it must see an empty stdin (NUL)."""
+    code = ("import subprocess, sys\n"
+            "from app.desktop.lifeline import on_supervisor_gone\n"
+            "on_supervisor_gone(lambda: None)\n"
+            "try:\n"
+            "    r = subprocess.run([sys.executable, '-c', 'import sys; print(repr(sys.stdin.read()))'],\n"
+            "                       stdout=subprocess.PIPE, text=True, timeout=10)\n"
+            "    print(r.stdout.strip())\n"
+            "except subprocess.TimeoutExpired:\n"
+            "    print('hung')\n")
+    env = {**os.environ, desktop.SUPERVISED_ENV: "1"}
+    p = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         env=env, cwd=desktop.ROOT, text=True)
+    try:
+        out = p.stdout.read()  # stdin stays open: the supervisor is "alive"
+    finally:
+        p.stdin.close()
+        p.wait(5)
+    assert out.strip() == "''"
+
+
 def test_requirements_stamp(monkeypatch, tmp_path):
     req = tmp_path / "requirements.txt"
     req.write_text("fastapi\n")

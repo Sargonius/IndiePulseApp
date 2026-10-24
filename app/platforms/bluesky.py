@@ -28,7 +28,8 @@ def publish(session, post, job) -> Optional[str]:
             session.add(job)
         session.commit()
         return 'error'
-    brief = session.get(Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     base_text = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
     hashtags = (getattr(brief, 'tags_json', None) or '').strip() if brief else ''
     langs = ['en'] if (brief and (getattr(brief, 'text_en', None) or '').strip()) else ['ru']
@@ -50,19 +51,24 @@ def publish(session, post, job) -> Optional[str]:
         media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
         if media_rel:
             candidates = [media_rel]
-    # Only images are embedded (video upload needs a separate service); text still posts
+    # One video (through Bluesky's video service) or up to 4 images. A post with media
+    # never goes out as text only: any upload problem fails the post.
     import os as _os, mimetypes as _m
-    image_paths: list[str] = []
-    for rel in candidates[:4]:
+    abs_paths: list[str] = []
+    for rel in candidates:
         p = (rel or '').replace('\\', '/')
         if not p.startswith('media/'):
             p = f"media/{p}"
-        abs_path = _os.path.abspath(p)
-        if (_m.guess_type(abs_path)[0] or '').startswith('image/'):
-            image_paths.append(abs_path)
+        abs_paths.append(_os.path.abspath(p))
+    video_path = next((p for p in abs_paths if (_m.guess_type(p)[0] or '').startswith('video/')), None)
+    image_paths = [] if video_path else abs_paths[:4]
     try:
+        if video_path:
+            from app.services.video_editor import ensure_video_size_limit
+            video_path = ensure_video_size_limit(video_path, 'bluesky', cfg)
         client = BlueskyClient(handle, app_pw, service)
-        uri, web_url = client.post_thread(base_text, hashtags=hashtags, image_paths=image_paths, langs=langs)
+        uri, web_url = client.post_thread(base_text, hashtags=hashtags, image_paths=image_paths, langs=langs,
+                                          video_path=video_path)
         post.platform_post_id = uri
         post.platform_url = web_url
     except Exception as exc:

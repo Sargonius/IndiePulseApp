@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 from typing import List, Optional
 
@@ -10,6 +11,7 @@ from app.db.session import get_session
 from app.models.models import Brief, Post, PlatformEnum, PostStatusEnum, Job, JobKindEnum, JobStatusEnum, Project
 from app.jobs.tasks import publish_news_post
 from app.services.draft_store import load_draft, save_draft, clear_draft
+from app.services import music_library
 from app.services.settings import load_settings
 from app.jobs.tasks import refresh_metrics_for_post
 from app.services.settings import load_settings
@@ -22,7 +24,10 @@ def _enrich_posts(posts):
     from sqlmodel import Session as _Session
     from app.db.session import engine as _engine
     from app.models.models import Brief as _Brief
+    from app.services import thumbs
     enriched = []
+    briefs = {}
+    _s = _Session(_engine)
     for p in posts:
         metrics = {}
         if getattr(p, 'metrics_json', None):
@@ -30,26 +35,26 @@ def _enrich_posts(posts):
                 metrics = _json.loads(p.metrics_json) or {}
             except Exception:
                 metrics = {}
-        def pick(*keys):
-            for k in keys:
-                if metrics.get(k) is not None:
-                    return metrics.get(k)
-            return None
         # Build preview and tags from brief
         preview = ''
         tags_val = None
         thumb_url = None
+        thumb_is_video = False
+        is_short = False
         try:
-            with _Session(_engine) as _s:
-                b = _s.get(_Brief, getattr(p, 'brief_id', None))
-                if b is not None:
-                    base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
-                    preview = (base[:140] + ('…' if len(base) > 140 else ''))
-                    tags_val = getattr(b, 'tags_json', None)
-                    media_rel = getattr(b, 'media_path', None)
-                    if media_rel:
-                        name = str(media_rel).replace('\\','/').split('/')[-1]
-                        thumb_url = f"/media/{name}"
+            bid = getattr(p, 'brief_id', None)
+            if bid not in briefs:
+                briefs[bid] = _s.get(_Brief, bid)
+            b = briefs[bid]
+            if b is not None:
+                base = (getattr(b, 'text_en', None) or getattr(b, 'text_ru', None) or '')
+                preview = (base[:140] + ('…' if len(base) > 140 else ''))
+                tags_val = getattr(b, 'tags_json', None)
+                # a rendered Shorts-Factory clip can be reposted to more networks
+                is_short = bool(getattr(b, 'vertical_916', None) and getattr(b, 'media_vertical_path', None))
+                # a video can't be an <img>: its poster frame stands in
+                thumb_url = thumbs.thumb_url(b)
+                thumb_is_video = thumbs.is_video(getattr(b, 'media_path', None))
         except Exception:
             preview = ''
         platform_text = (p.platform.value if hasattr(p.platform, 'value') else str(p.platform))
@@ -61,14 +66,12 @@ def _enrich_posts(posts):
                     platform_url = f"https://reddit.com/comments/{p.platform_post_id}"
         except Exception:
             platform_url = getattr(p, 'platform_url', None)
-        m_like = pick('like', 'likes')
-        m_repost = pick('retweet', 'reposts', 'repost')
-        m_reply = pick('reply', 'comments')
-        m_quote = pick('quote')
-        m_views = pick('views', 'impressions')
+        from app.services.publications import engagement
+        e = engagement(metrics)
+        m_like, m_repost, m_reply, m_quote, m_views = e['likes'], e['reposts'], e['comments'], e['quotes'], e['views']
         # Total engagement: any direct reaction (views excluded — they are reach, not reaction)
-        m_total = sum(v for v in (m_like, m_repost, m_reply, m_quote) if isinstance(v, int))
-        has_metrics = any(isinstance(v, int) for v in (m_like, m_repost, m_reply, m_quote, m_views))
+        m_total = e['reactions'] or 0
+        has_metrics = e['has']
         row = {
             'id': p.id,
             'platform_text': platform_text,
@@ -87,15 +90,14 @@ def _enrich_posts(posts):
             'tags': tags_val,
             'preview': preview,
             'thumb_url': thumb_url,
+            'thumb_is_video': thumb_is_video,
+            'is_short': is_short,
             'm_error': metrics.get('error'),
+            'error_text': getattr(p, 'error_text', None),
         }
         enriched.append(row)
+    _s.close()
     return enriched
-
-@router.get('/', response_class=HTMLResponse)
-def index(request: Request):
-    cfg = load_settings()
-    return templates.TemplateResponse('index.html', {'request': request, 'body_class': 'page-index', 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/news', response_class=HTMLResponse)
 def news_form(request: Request):
@@ -124,24 +126,17 @@ def steam_export_page(request: Request):
 @router.get('/projects', response_class=HTMLResponse)
 def projects_page(request: Request, session: Session = Depends(get_session)):
     from sqlmodel import select
+    from app.routers.api.projects import _project_dict
+    from app.services.marketing import PROJECT_STAGES, PROJECT_STATUSES
     rows = session.exec(
         select(Project).where(Project.user_id == 1).order_by(Project.sort_order, Project.id)
     ).all()
-    projects = [
-        {
-            "id": p.id,
-            "name": p.name,
-            "icon_url": f"/media/{p.icon_path}" if p.icon_path else None,
-            "tags_json": p.tags_json or "",
-            "platforms_json": p.platforms_json or "{}",
-            "sort_order": p.sort_order,
-        }
-        for p in rows
-    ]
     cfg = load_settings()
     return templates.TemplateResponse('projects.html', {
         'request': request,
-        'projects': projects,
+        'projects': [_project_dict(p) for p in rows],
+        'stages': PROJECT_STAGES,
+        'statuses': PROJECT_STATUSES,
         'ui_language': cfg.get('ui_language', 'en'),
     })
 
@@ -158,6 +153,8 @@ def accounts(request: Request):
             'ui_language': cfg.get('ui_language', 'en'),
             'discord_webhook': cfg.get('discord_webhook_url', ''),
             'discord_bot_token_hint': (('•••' + (cfg.get('discord_bot_token') or '')[-4:]) if (cfg.get('discord_bot_token') or '') else ''),
+            'discord_guild_id': cfg.get('discord_guild_id', ''),
+            'steam_key_hint': (('•••' + (cfg.get('steam_financial_api_key') or '')[-4:]) if (cfg.get('steam_financial_api_key') or '') else ''),
             'vk_client_id': cfg.get('vk_client_id', ''),
             'vk_client_secret': cfg.get('vk_client_secret', ''),
             'vk_group_id': cfg.get('vk_group_id', ''),
@@ -197,8 +194,23 @@ def accounts(request: Request):
             'tiktok_secret_hint': (('•••' + (cfg.get('tiktok_client_secret') or '')[-4:]) if (cfg.get('tiktok_client_secret') or '') else ''),
             'tiktok_redirect_uri': cfg.get('tiktok_redirect_uri'),
             'tiktok_token_hint': (('•••' + (cfg.get('tiktok_access_token') or '')[-4:]) if (cfg.get('tiktok_access_token') or '') else ''),
+            'music_dir': '\n'.join(music_library.folders(cfg)),
+            'music_folders': _music_folder_rows(cfg),
+            'discord_upload_limit_mb': cfg.get('discord_upload_limit_mb') or 10,
         },
     )
+
+
+def _music_folder_rows(cfg) -> list:
+    rows = []
+    for f in music_library.folders(cfg):
+        ok = os.path.isdir(f)
+        n = 0
+        if ok:
+            for _root, _dirs, files in os.walk(f):
+                n += sum(1 for x in files if os.path.splitext(x)[1].lower() in music_library.AUDIO_EXTS)
+        rows.append({'path': f, 'exists': ok, 'tracks': n})
+    return rows
 
 @router.get('/jobs', response_class=HTMLResponse)
 def jobs_list(request: Request, session: Session = Depends(get_session)):
@@ -296,12 +308,10 @@ def posts_list(request: Request, session: Session = Depends(get_session)):
     return templates.TemplateResponse('posts.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
 @router.get('/analytics', response_class=HTMLResponse)
-def analytics_list(request: Request, session: Session = Depends(get_session)):
-    from sqlmodel import select
-    rows = session.exec(select(Post).order_by(Post.created_at.desc()).limit(100)).all()
-    data = _enrich_posts(rows)
+def analytics_list(request: Request):
+    # the table itself loads from /api/analytics/table
     cfg = load_settings()
-    return templates.TemplateResponse('analytics.html', {'request': request, 'posts': data, 'body_class': 'page-analytics', 'ui_language': cfg.get('ui_language', 'en')})
+    return templates.TemplateResponse('analytics.html', {'request': request, 'body_class': 'page-analytics', 'ui_language': cfg.get('ui_language', 'en')})
 
 
 @router.get('/status', response_class=HTMLResponse)
@@ -323,6 +333,57 @@ def posts_table_partial(request: Request, session: Session = Depends(get_session
     cfg = load_settings()
     return templates.TemplateResponse('partials/posts_table.html', {'request': request, 'posts': data, 'ui_language': cfg.get('ui_language', 'en')})
 
+
+# ==================== Publication result (Post/Redirect/Get) ====================
+# The publish forms answer with a redirect to a GET page: a reload of the result must
+# never re-submit the form (a restart-triggered reload re-published a post on 2026-09-30).
+
+def _published_redirect(brief_id: int, skipped: Optional[List[str]] = None, duplicate: bool = False):
+    from urllib.parse import urlencode
+    from fastapi.responses import RedirectResponse
+    query = {k: v for k, v in (('skipped', ','.join(skipped or [])), ('duplicate', '1' if duplicate else '')) if v}
+    return RedirectResponse(f"/published/{brief_id}" + (f"?{urlencode(query)}" if query else ''), status_code=303)
+
+
+def _duplicate_redirect(session: Session, brief: Brief, platforms: Optional[List[str]], allow_duplicate: Optional[str]):
+    """Refuse to create a publication the chosen networks already got (or are about to
+    get) unless "publish again" was ticked; None = go ahead."""
+    if allow_duplicate:
+        return None
+    from app.services import duplicates
+    chosen = []
+    for p in platforms or []:
+        try:
+            chosen.append(PlatformEnum(p))
+        except ValueError:
+            pass
+    twin = duplicates.existing_publication(session, brief, chosen)
+    return _published_redirect(twin.brief_id, duplicate=True) if twin is not None else None
+
+
+def _mark_allowed(payload: dict, allow_duplicate: Optional[str]) -> dict:
+    """A ticked "publish again" also lets the post through the worker's duplicate guard."""
+    if allow_duplicate:
+        from app.services import duplicates
+        payload[duplicates.ALLOW] = True
+    return payload
+
+
+@router.get('/published/{brief_id}', response_class=HTMLResponse)
+def published_page(request: Request, brief_id: int, skipped: str = '', duplicate: str = '',
+                   session: Session = Depends(get_session)):
+    from sqlmodel import select
+    posts = session.exec(select(Post).where(Post.brief_id == brief_id).order_by(Post.id)).all()
+    return templates.TemplateResponse('news_success.html', {
+        'request': request,
+        'brief_id': brief_id,
+        'num_posts': len(posts),
+        'posts': posts,
+        'skipped': [s for s in skipped.split(',') if s],
+        'duplicate': bool(duplicate),
+    })
+
+
 @router.post('/news')
 def submit_news(
     request: Request,
@@ -338,6 +399,7 @@ def submit_news(
     reddit_sentences: Optional[int] = Form(2),
     yt_title: Optional[str] = Form(None),
     x_split: Optional[str] = Form(None),
+    allow_duplicate: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
     media_path: Optional[str] = None
@@ -401,6 +463,9 @@ def submit_news(
         tags_json=tags_final,
         media_path=media_path,
     )
+    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate)
+    if dup is not None:
+        return dup
     session.add(brief)
     session.commit()
     session.refresh(brief)
@@ -529,6 +594,7 @@ def submit_news(
                 payload["reddit_sentences"] = rn
         except Exception:
             pass
+        _mark_allowed(payload, allow_duplicate)
         job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
         session.add(job)
         session.commit()
@@ -554,12 +620,7 @@ def submit_news(
     # Clear draft on successful queue
     clear_draft()
 
-    return templates.TemplateResponse('news_success.html', {
-        'request': request,
-        'brief_id': brief.id,
-        'num_posts': len(created_posts),
-        'skipped': skipped,
-    })
+    return _published_redirect(brief.id, skipped)
 
 
 # ==================== Create Post / Video Pages ====================
@@ -588,6 +649,10 @@ def submit_post(
     gallery_order: Optional[str] = Form(None),
     reddit_sentences: Optional[int] = Form(2),
     x_split: Optional[str] = Form(None),
+    project_id: Optional[str] = Form(None),
+    goal_id: Optional[str] = Form(None),
+    allow_duplicate: Optional[str] = Form(None),
+    yt_title: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
     """Process image post submission."""
@@ -621,9 +686,14 @@ def submit_post(
         tags_json=tags_final,
         media_path=media_path,
     )
+    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate)
+    if dup is not None:
+        return dup  # the draft stays, so "publish again" is one tick away
     session.add(brief)
     session.commit()
     session.refresh(brief)
+    from app.services.marketing import tag_brief
+    tag_brief(session, brief, project_id, goal_id)
 
     created_posts: List[Post] = []
     cfg = load_settings()
@@ -664,6 +734,11 @@ def submit_post(
             payload["x_thread"] = bool(x_split)
         if str(post.platform) in (str(PlatformEnum.reddit), 'reddit'):
             payload["reddit_sentences"] = max(1, min(10, int(reddit_sentences or 2)))
+        # YouTube from the post page (only offered for a video): title of its own,
+        # not Brief.title — Reddit would take that as its post title
+        if str(post.platform) in (str(PlatformEnum.yt), 'yt') and (yt_title or '').strip():
+            payload["yt_title"] = yt_title.strip()[:100]
+        _mark_allowed(payload, allow_duplicate)
 
         job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
         session.add(job)
@@ -678,12 +753,7 @@ def submit_post(
 
     clear_draft()
 
-    return templates.TemplateResponse('news_success.html', {
-        'request': request,
-        'brief_id': brief.id,
-        'num_posts': len(created_posts),
-        'skipped': [],
-    })
+    return _published_redirect(brief.id)
 
 
 @router.get('/shorts', response_class=HTMLResponse)
@@ -710,15 +780,23 @@ def submit_shorts(
     meta: str = Form('[]'),
     session: Session = Depends(get_session),
 ):
-    """Accept a batch of clips + per-card metadata, save sources, and enqueue a
-    render_short job per clip. Posts are created later by render_short (post-render)."""
+    """Accept a batch of clips + per-card metadata and enqueue a render_short job per
+    clip. Posts are created later by render_short (post-render).
+
+    The page uploads every clip as soon as it is dropped (/api/shorts/upload) and sends
+    `src_rel` + the video editor's `spec` per card; `files` is the older path (the clip
+    in this request, settings as separate fields), kept for scripts and old tabs."""
     import json as _json, os as _os
     from uuid import uuid4
     from app.jobs.tasks import render_short
+    from app.services import music_library, shorts_upload, video_edit
+    from app.services.text_overlay import clean_overlays, clean_trim
 
     try:
         metas = _json.loads(meta or '[]') or []
     except Exception:
+        metas = []
+    if not isinstance(metas, list):
         metas = []
 
     def _num(v, default=0.0):
@@ -728,18 +806,59 @@ def submit_shorts(
             return float(default)
 
     _os.makedirs('media', exist_ok=True)
+    uploads = iter(files or [])
+    extra = len(files or []) - sum(1 for m in metas if not (isinstance(m, dict) and m.get('src_rel')))
+    metas += [{}] * max(0, extra)  # a clip without its settings still goes, as before
+    allowed_music = None
     created = 0
-    for i, up in enumerate(files or []):
-        m = metas[i] if i < len(metas) else {}
-        try:
-            raw = up.file.read()
-        except Exception:
-            raw = b''
-        if not raw:
-            continue
-        fname = f"short_{uuid4().hex[:12]}_{_safe_filename(up.filename or f'clip_{i}.mp4')}"
-        with open(_os.path.join('media', fname), 'wb') as fh:
-            fh.write(raw)
+    for i, m in enumerate(metas):
+        m = m if isinstance(m, dict) else {}
+        spec = None
+        if m.get('src_rel'):
+            try:
+                fname = shorts_upload.uploaded_rel(m['src_rel'])
+            except video_edit.EditError:
+                continue
+            if isinstance(m.get('spec'), dict):
+                info = video_edit.probe(video_edit.media_abs(fname))
+                spec = video_edit.short_spec(m['spec'], info['duration'])
+                if spec['music']:
+                    if allowed_music is None:
+                        allowed_music = music_library.preset_music_paths(session)
+                    if not music_library.is_allowed(spec['music']['path'], extra=allowed_music):
+                        spec['music'] = None
+        else:
+            up = next(uploads, None)
+            if up is None:
+                continue
+            try:
+                raw = up.file.read()
+            except Exception:
+                raw = b''
+            if not raw:
+                continue
+            fname = f"short_{uuid4().hex[:12]}_{_safe_filename(up.filename or f'clip_{i}.mp4')}"
+            with open(_os.path.join('media', fname), 'wb') as fh:
+                fh.write(raw)
+
+        if spec is not None:
+            # The editor's settings, mirrored into the old columns for anything that reads them
+            trim_start, trim_end, overlays = spec['trim_start'], spec['trim_end'], spec['overlays']
+            music = spec['music'] or {}
+            crop = dict(crop_x=int(round(spec['crop_x'] * 100)), crop_y=int(round(spec['crop_y'] * 100)),
+                        crop_scale=spec['zoom'], music_path=music.get('path'),
+                        music_offset_sec=int(music.get('start') or 0),
+                        fade_in_ms=int((music.get('fade_in') or 0) * 1000),
+                        fade_out_ms=int((music.get('fade_out') or 0) * 1000))
+        else:
+            # Editor: trim (source seconds) + text overlays (relative to the trimmed clip)
+            trim_start, trim_end = clean_trim(m.get('trim_start'), m.get('trim_end'))
+            overlays = clean_overlays(m.get('overlays'), (trim_end - (trim_start or 0)) if trim_end else None)
+            crop = dict(crop_x=int(_num(m.get('crop_x'), 50)), crop_y=int(_num(m.get('crop_y'), 50)),
+                        crop_scale=_num(m.get('zoom'), 1.0), music_path=(m.get('music_path') or None),
+                        music_offset_sec=int(_num(m.get('music_offset'), 0)),
+                        fade_in_ms=int(_num(m.get('fade_in'), 0) * 1000),
+                        fade_out_ms=int(_num(m.get('fade_out'), 0) * 1000))
 
         brief = Brief(
             user_id=1,
@@ -750,17 +869,17 @@ def submit_shorts(
             tags_json=(m.get('tags') or '').strip(),
             media_path=fname,
             vertical_916=True,  # marks this Brief as a Shorts-Factory item
-            crop_x=int(_num(m.get('crop_x'), 50)),
-            crop_y=int(_num(m.get('crop_y'), 50)),
-            crop_scale=_num(m.get('zoom'), 1.0),
-            music_path=(m.get('music_path') or None),
-            music_offset_sec=int(_num(m.get('music_offset'), 0)),
-            fade_in_ms=int(_num(m.get('fade_in'), 0) * 1000),
-            fade_out_ms=int(_num(m.get('fade_out'), 0) * 1000),
+            trim_start=trim_start,
+            trim_end=trim_end,
+            overlays_json=(_json.dumps(overlays, ensure_ascii=False) if overlays else None),
+            edit_spec_json=(_json.dumps(spec, ensure_ascii=False) if spec is not None else None),
+            **crop,
         )
         session.add(brief)
         session.commit()
         session.refresh(brief)
+        from app.services.marketing import tag_brief
+        tag_brief(session, brief, m.get('project_id'), m.get('goal_id'))
 
         platforms = [p for p in (m.get('platforms') or []) if p]
         payload = {
@@ -899,6 +1018,22 @@ def shorts_board_partial(request: Request, session: Session = Depends(get_sessio
     })
 
 
+@router.get('/shorts/repost/{brief_id}', response_class=HTMLResponse)
+def shorts_repost_page(brief_id: int, request: Request, session: Session = Depends(get_session)):
+    """Repost a published short to more networks: a caption per network, auto-translated."""
+    from fastapi.responses import RedirectResponse
+    from app.services import repost
+    brief = session.get(Brief, brief_id)
+    if brief is None or not brief.vertical_916:
+        return RedirectResponse('/shorts/board', status_code=303)
+    cfg = load_settings()
+    return templates.TemplateResponse('shorts_repost.html', {
+        'request': request,
+        'ctx': repost.page_context(session, brief, cfg),
+        'ui_language': cfg.get('ui_language', 'en'),
+    })
+
+
 @router.post('/shorts/board/refresh_metrics', response_class=HTMLResponse)
 def shorts_board_refresh_metrics(request: Request, session: Session = Depends(get_session)):
     """Kick a metrics refresh for all published shorts, then re-render the board."""
@@ -944,10 +1079,15 @@ def submit_video(
     media_vertical: Optional[str] = Form(None),
     yt_playlist: Optional[str] = Form(None),
     yt_privacy: Optional[str] = Form('public'),
+    project_id: Optional[str] = Form(None),
+    goal_id: Optional[str] = Form(None),
+    allow_duplicate: Optional[str] = Form(None),
     session: Session = Depends(get_session),
 ):
     """Process video post submission."""
-    # Use horizontal for YouTube, vertical for TikTok/Shorts
+    # Horizontal for YouTube/VK Video (vertical when there's no 16:9: a Short), vertical for TikTok
+    media_horizontal = (media_horizontal or '').strip() or None
+    media_vertical = (media_vertical or '').strip() or None
     media_path = media_horizontal or media_vertical
     if media_path and not media_path.startswith('media/'):
         media_path = f"media/{media_path}"
@@ -960,10 +1100,18 @@ def submit_video(
         title=(title or '').strip() or None,
         tags_json=(tags or '').strip(),
         media_path=media_path,
+        # TikTok reads the brief's vertical file, not the job payload
+        media_vertical_path=media_vertical,
+        media_normal_path=media_horizontal,
     )
+    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate)
+    if dup is not None:
+        return dup
     session.add(brief)
     session.commit()
     session.refresh(brief)
+    from app.services.marketing import tag_brief
+    tag_brief(session, brief, project_id, goal_id)
 
     created_posts: List[Post] = []
 
@@ -984,7 +1132,7 @@ def submit_video(
             # Skip if no media for platform
             if p == 'tiktok' and not media_vertical:
                 continue
-            if p in ('yt', 'vk_video') and not media_horizontal:
+            if p in ('yt', 'vk_video') and not (media_horizontal or media_vertical):
                 continue
 
             post = Post(
@@ -1004,8 +1152,8 @@ def submit_video(
         payload = {"post_id": post.id}
 
         if str(post.platform) in (str(PlatformEnum.yt), 'yt'):
-            if media_horizontal:
-                payload["media_rel"] = media_horizontal
+            if media_horizontal or media_vertical:
+                payload["media_rel"] = media_horizontal or media_vertical
             if title:
                 payload["yt_title"] = title
             # always sent: '' means the user picked "No playlist"
@@ -1016,8 +1164,9 @@ def submit_video(
             if media_vertical:
                 payload["media_rel"] = media_vertical
         else:
-            if media_horizontal:
-                payload["media_rel"] = media_horizontal
+            if media_horizontal or media_vertical:
+                payload["media_rel"] = media_horizontal or media_vertical
+        _mark_allowed(payload, allow_duplicate)
 
         job = Job(kind=JobKindEnum.publish, payload_json=_json.dumps(payload, ensure_ascii=False), status=JobStatusEnum.queued)
         session.add(job)
@@ -1032,9 +1181,4 @@ def submit_video(
 
     clear_draft()
 
-    return templates.TemplateResponse('news_success.html', {
-        'request': request,
-        'brief_id': brief.id,
-        'num_posts': len(created_posts),
-        'skipped': [],
-    })
+    return _published_redirect(brief.id)

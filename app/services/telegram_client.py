@@ -25,6 +25,11 @@ def _retry_request(
     """
     last_exception: Optional[Exception] = None
     for attempt in range(max_retries):
+        # an aborted upload left the file handles mid-way: resend from the start
+        for part in (kwargs.get('files') or {}).values():
+            fh = part[1] if isinstance(part, tuple) else part
+            if hasattr(fh, 'seek'):
+                fh.seek(0)
         try:
             response = func(*args, **kwargs)
             if response.status_code >= 400:

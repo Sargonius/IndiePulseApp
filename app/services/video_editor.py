@@ -257,113 +257,137 @@ def _probe_video_info(video_path: str) -> dict:
         return {"duration": 0, "bitrate": 0, "width": 0, "height": 0}
 
 
+MB = 1024 * 1024
+# Below this video bitrate even 480p gameplay turns to mush: refuse instead of posting it.
+MIN_VIDEO_KBPS = 350
+# Short side of the frame -> the least video bitrate (kbit/s) that still looks decent there.
+_QUALITY_LADDER = ((1080, 2500), (720, 1000), (480, 0))
+
+
+# Marks the error text of a post whose video couldn't be fitted: retrying won't help.
+TOO_LARGE = "video_too_large"
+
+
+class VideoTooLarge(RuntimeError):
+    """The video can't be brought under a platform's upload limit."""
+
+
+def _encode_two_pass(ffmpeg: str, src: str, dst: str, video_kbps: int, audio_kbps: int,
+                     short_side: Optional[int], portrait: bool) -> bool:
+    """Two-pass x264 at an exact average bitrate (one pass undershoots by ~25%)."""
+    import tempfile
+    scale = []
+    if short_side:
+        scale = ["-vf", f"scale={short_side}:-2" if portrait else f"scale=-2:{short_side}"]
+    common = [ffmpeg, "-nostdin", "-v", "error", "-y", "-i", src, *scale,
+              "-c:v", "libx264", "-preset", "medium", "-b:v", f"{video_kbps}k",
+              "-maxrate", f"{int(video_kbps * 1.5)}k", "-bufsize", f"{video_kbps * 2}k",
+              "-pix_fmt", "yuv420p"]
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    with tempfile.TemporaryDirectory(prefix="ip_2pass_") as tmp:
+        log = os.path.join(tmp, "pass")
+        first = common + ["-map", "0:v:0", "-pass", "1", "-passlogfile", log, "-an", "-f", "mp4", os.devnull]
+        second = common + ["-map", "0:v:0", "-map", "0:a:0?", "-pass", "2", "-passlogfile", log,
+                           "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-movflags", "+faststart", dst]
+        for cmd in (first, second):
+            proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, creationflags=flags)
+            if proc.returncode != 0:
+                from loguru import logger
+                logger.warning(f"video compress ffmpeg failed: {proc.stderr[-300:]}")
+                return False
+    return True
+
+
+def compression_plan(duration: float, width: int, height: int, max_size_mb: float,
+                     resolution_fallback: bool = True) -> dict:
+    """The encodes compress_video_to_size tries for a clip: {audio_kbps, attempts:
+    [(video_kbps, short_side or None = keep)]}. An attempt below MIN_VIDEO_KBPS means
+    the clip is too long for that size. Also used to warn before publishing."""
+    source_side = min(width, height) or 1080
+    # ffmpeg's "k" is 1000 bits; leave ~5% for the mp4 container
+    budget_kbps = max_size_mb * MB * 8 / 1000 / max(duration, 0.1) * 0.95
+    audio_kbps = 128 if budget_kbps > 3000 else 64
+    video_kbps = int(budget_kbps - audio_kbps)
+    sides = [s for s, _ in _QUALITY_LADDER if s < source_side]
+    # highest ladder step whose bitrate floor this budget clears (never upscale)
+    start = next((s for s, floor in _QUALITY_LADDER if s <= source_side and video_kbps >= floor), 480)
+    attempts = [(video_kbps, None if start >= source_side else start)]
+    if resolution_fallback:
+        # overshoot: a notch lower resolution with a smaller budget
+        lower = [s for s in sides if s < start]
+        attempts.append((int(video_kbps * 0.85), lower[0] if lower else (None if start >= source_side else start)))
+    return {"audio_kbps": audio_kbps, "attempts": attempts}
+
+
+def max_fit_duration(max_size_mb: float) -> float:
+    """Longest clip (s) that compression can still bring under `max_size_mb`."""
+    return max_size_mb * MB * 8 / 1000 * 0.95 / (MIN_VIDEO_KBPS + 64)
+
+
 def compress_video_to_size(
     input_path: str,
     output_path: str,
-    max_size_mb: int,
+    max_size_mb: float,
     resolution_fallback: bool = True
 ) -> bool:
     """
-    Compress video to fit within max_size_mb.
-    Strategy: reduce bitrate first, then resolution if still too large.
+    Compress video to fit within max_size_mb (MiB) as an H.264/AAC mp4.
+    The bitrate is derived from the duration; the resolution drops when that bitrate
+    is too thin for the source size (and again if the first try still overshoots).
     Returns True if successful, False if failed to compress below limit.
     """
     ffmpeg = _ffmpeg_path()
-    
+    if os.sep in ffmpeg or "/" in ffmpeg:
+        ffmpeg = os.path.abspath(ffmpeg)
+
     # Check current size
-    current_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+    current_size_mb = os.path.getsize(input_path) / MB
     if current_size_mb <= max_size_mb:
         # Already small enough, just copy
         import shutil
         shutil.copy2(input_path, output_path)
         return True
-    
-    # Probe video info
+
     info = _probe_video_info(input_path)
     duration = info["duration"]
     if duration <= 0:
         return False
-    
-    # Calculate target bitrate (90% of theoretical max to leave room for overhead)
-    target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.9)
-    
-    # Try 1: Reduce bitrate, keep resolution
-    try:
-        cmd = [
-            ffmpeg, "-y", "-i", input_path,
-            "-c:v", "libx264",
-            "-b:v", f"{target_bitrate_kbps}k",
-            "-maxrate", f"{target_bitrate_kbps}k",
-            "-bufsize", f"{target_bitrate_kbps * 2}k",
-            "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            output_path,
-        ]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if proc.returncode == 0:
-            output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-            if output_size_mb <= max_size_mb:
+    width, height = info["width"], info["height"]
+    portrait = height > width
+    plan = compression_plan(duration, width, height, max_size_mb, resolution_fallback)
+    audio_kbps = plan["audio_kbps"]
+    for kbps, side in plan["attempts"]:
+        if kbps < MIN_VIDEO_KBPS:
+            return False
+        try:
+            if _encode_two_pass(ffmpeg, input_path, output_path, kbps, audio_kbps, side, portrait) \
+                    and os.path.getsize(output_path) / MB <= max_size_mb:
                 return True
-    except Exception:
-        pass
-    
-    # Try 2: Reduce to 720p if resolution_fallback enabled
-    if resolution_fallback and info["height"] > 720:
-        try:
-            # Re-calculate bitrate for 720p
-            target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.85)
-            cmd = [
-                ffmpeg, "-y", "-i", input_path,
-                "-vf", "scale=-2:720",
-                "-c:v", "libx264",
-                "-b:v", f"{target_bitrate_kbps}k",
-                "-maxrate", f"{target_bitrate_kbps}k",
-                "-bufsize", f"{target_bitrate_kbps * 2}k",
-                "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                "-c:a", "aac",
-                "-b:a", "96k",
-                output_path,
-            ]
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if proc.returncode == 0:
-                output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                if output_size_mb <= max_size_mb:
-                    return True
-        except Exception:
-            pass
-    
-    # Try 3: Reduce to 480p as last resort
-    if resolution_fallback and info["height"] > 480:
-        try:
-            target_bitrate_kbps = int((max_size_mb * 8 * 1024) / duration * 0.80)
-            cmd = [
-                ffmpeg, "-y", "-i", input_path,
-                "-vf", "scale=-2:480",
-                "-c:v", "libx264",
-                "-b:v", f"{target_bitrate_kbps}k",
-                "-maxrate", f"{target_bitrate_kbps}k",
-                "-bufsize", f"{target_bitrate_kbps * 2}k",
-                "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                "-c:a", "aac",
-                "-b:a", "64k",
-                output_path,
-            ]
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if proc.returncode == 0:
-                output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                if output_size_mb <= max_size_mb:
-                    return True
-        except Exception:
-            pass
-    
+        except Exception as exc:
+            from loguru import logger
+            logger.warning(f"video compress error: {exc}")
     return False
+
+
+def platform_video_limit_mb(platform: str, settings: dict) -> float:
+    """Upload limit (MiB) of one video for a platform."""
+    limits = {
+        # 10 MiB is Discord's limit for servers without boosts (webhooks included);
+        # raise the setting only for a server with boost level 2+ (50) / 3 (100).
+        'discord': float(settings.get('discord_upload_limit_mb') or 10),
+        'telegram': 50,
+        'tg': 50,  # Bot API sendVideo
+        'vk': 200,
+        'x': 512,
+        'reddit': 1024,
+        'tiktok': 287,
+        'yt': 256,  # For Shorts
+        'fb_ru': 1024,
+        'fb_en': 1024,
+        'bluesky': 100,  # video.bsky.app; the service may take more, 100 MB is the long-standing cap
+    }
+    return limits.get(platform, 100)
 
 
 def ensure_video_size_limit(
@@ -372,45 +396,42 @@ def ensure_video_size_limit(
     settings: dict
 ) -> str:
     """
-    Ensure video fits platform size limits. Compresses if needed.
-    Returns path to video (original or compressed).
+    Path of the video that fits the platform's upload limit: the original when it
+    already fits, else a compressed copy in render/fit/ (reused by later targets/retries).
+    Raises VideoTooLarge when it can't be fitted, so a post never goes out without it.
     """
-    # Platform size limits in MB
-    limits = {
-        'discord': int(settings.get('discord_max_upload_mb', 50)),
-        'telegram': 50,
-        'tg': 50,
-        'vk': 200,
-        'x': 512,
-        'reddit': 1024,
-        'tiktok': 287,
-        'yt': 256,  # For Shorts
-        'fb_ru': 1024,
-        'fb_en': 1024,
-    }
-    
-    max_size_mb = limits.get(platform, 100)
-    current_size_mb = os.path.getsize(video_path) / (1024 * 1024)
-    
-    if current_size_mb <= max_size_mb:
+    limit_mb = platform_video_limit_mb(platform, settings)
+    # stay a bit under the limit: platforms differ on MB vs MiB and count request overhead
+    target_mb = limit_mb * 0.95
+    current_size_mb = os.path.getsize(video_path) / MB
+    if current_size_mb <= target_mb:
         return video_path
-    
-    # Need to compress
-    base_name = os.path.basename(video_path)
-    name_no_ext = os.path.splitext(base_name)[0]
-    ext = os.path.splitext(base_name)[1]
-    compressed_path = os.path.join(
-        os.path.dirname(video_path),
-        f"{name_no_ext}_compressed{ext}"
-    )
-    
-    success = compress_video_to_size(video_path, compressed_path, max_size_mb, resolution_fallback=True)
-    
-    if success and os.path.exists(compressed_path):
-        return compressed_path
-    else:
-        # Compression failed, return original and let caller handle error
-        return video_path
+
+    stem = os.path.splitext(os.path.basename(video_path))[0]
+    out_dir = os.path.abspath(os.path.join("render", "fit"))
+    out = os.path.join(out_dir, f"{stem}_{target_mb:.1f}mb.mp4")
+    if (os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(video_path)
+            and os.path.getsize(out) / MB <= target_mb):
+        return out
+    os.makedirs(out_dir, exist_ok=True)
+    import tempfile
+    fd, tmp = tempfile.mkstemp(suffix=".mp4", prefix=f"{stem}_", dir=out_dir)
+    os.close(fd)
+    try:
+        if compress_video_to_size(video_path, tmp, target_mb, resolution_fallback=True):
+            os.replace(tmp, out)
+            from loguru import logger
+            logger.info(f"video fit for {platform}: {current_size_mb:.1f} MB -> "
+                        f"{os.path.getsize(out) / MB:.1f} MB ({os.path.basename(out)})")
+            return out
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    info = _probe_video_info(video_path)
+    raise VideoTooLarge(
+        f"{TOO_LARGE}: {platform}: video {current_size_mb:.1f} MB ({info['duration']:.0f} s) is over the "
+        f"{limit_mb:g} MB upload limit and compression couldn't fit it (see worker log) — "
+        f"shorten the clip or post it by hand")
 
 
 def render_horizontal_with_music(
@@ -627,10 +648,17 @@ def render_vertical_with_music(
     start_time: float = 0.0,
     end_time: float = 0.0,
     zoom: float = 1.0,
+    overlays: Optional[list] = None,
 ) -> None:
     """
     Render a vertical 9:16 video from a landscape source.
-    Steps: scale to height 1920, crop 1080x1920 using provided offsets, optional music mix with fades.
+    Steps: scale to height 1920, crop 1080x1920 using provided offsets, optional
+    text overlays, optional music mix with fades.
+
+    `overlays` is a list of (png_path, start_s, end_s): full-frame 1080x1920
+    transparent PNGs (see text_overlay.py) shown between start and end. Times
+    are relative to the trimmed clip: with `-ss` before `-i` the timestamps
+    restart at 0.
     """
     ffmpeg = _ffmpeg_path()
     
@@ -708,13 +736,29 @@ def render_vertical_with_music(
     else:
         input_args.extend(["-i", input_video])
     
-    cmd = [ffmpeg] + input_args
-    
-    # Determine render duration for correct fade-out timing (post-trim duration)
-    if end_time and end_time > start_time:
-        render_duration = max(0.0, float(end_time - start_time))
+    # Text overlays: each PNG is an extra input (1..N), chained after the crop.
+    ovl = [(p, float(s), float(e)) for (p, s, e) in (overlays or []) if p and os.path.exists(p) and e > s]
+    for png, _s, _e in ovl:
+        input_args.extend(["-i", png])
+    if ovl:
+        chain = [f"[0:v]{vf}[v0]"]
+        for i, (_png, s, e) in enumerate(ovl, start=1):
+            out = "[v]" if i == len(ovl) else f"[v{i}]"
+            chain.append(f"[v{i - 1}][{i}:v]overlay=0:0:enable='between(t,{s:.3f},{e:.3f})'{out}")
+        video_fc = ";".join(chain)
     else:
-        render_duration = _probe_duration_seconds(input_video)
+        video_fc = f"[0:v]{vf}[v]"
+    music_idx = 1 + len(ovl)  # the music input comes after the PNGs
+
+    cmd = [ffmpeg] + input_args
+
+    # Determine render duration for correct fade-out timing (post-trim duration)
+    src_duration = _probe_duration_seconds(input_video)
+    if end_time and end_time > start_time:
+        end_eff = min(float(end_time), src_duration) if src_duration > 0 else float(end_time)
+        render_duration = max(0.0, end_eff - float(start_time))
+    else:
+        render_duration = max(0.0, src_duration - float(start_time or 0.0))
 
     has_audio = _probe_has_audio(input_video)
 
@@ -722,7 +766,7 @@ def render_vertical_with_music(
         # Audio filter with music. If input has no audio, use only music track.
         delay_ms = max(0, int(music_offset_s * 1000))
         # Prepare delayed music track
-        music_chain = f"[1:a]adelay={delay_ms}|{delay_ms}[am]"
+        music_chain = f"[{music_idx}:a]adelay={delay_ms}|{delay_ms}[am]"
         # Compute fade-out start relative to render duration
         fo_start = max(0.0, (render_duration or 0.0) - float(fade_out_s or 0.0))
 
@@ -736,20 +780,21 @@ def render_vertical_with_music(
 
         if has_audio:
             fc = (
-                f"[0:v]{vf}[v];"
+                f"{video_fc};"
                 f"{music_chain};"
                 f"[0:a][am]amix=inputs=2:duration=first:dropout_transition=0[a0];"
                 f"[a0]{post_chain}[a]"
             )
             cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
         else:
-            # No input audio: use only delayed music, then apply fades
+            # No input audio: use only delayed music, then apply fades.
+            # The music track is longer than the clip: stop at the video's end.
             fc = (
-                f"[0:v]{vf}[v];"
+                f"{video_fc};"
                 f"{music_chain};"
                 f"[am]{post_chain}[a]"
             )
-            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+            cmd += ["-i", music_path, "-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-shortest"]
     else:
         # No external music
         if has_audio and ((fade_in_s and fade_in_s > 0) or (fade_out_s and fade_out_s > 0)):
@@ -761,8 +806,13 @@ def render_vertical_with_music(
             if fade_out_s and float(fade_out_s) > 0:
                 parts.append(f"afade=t=out:st={fo_start}:d={float(fade_out_s)}")
             post_chain = ",".join(parts) if parts else "anull"
-            fc = f"[0:v]{vf}[v];[0:a]{post_chain}[a]"
+            fc = f"{video_fc};[0:a]{post_chain}[a]"
             cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]"]
+        elif ovl:
+            # Overlays need -filter_complex; keep the source audio as-is (if any)
+            cmd += ["-filter_complex", video_fc, "-map", "[v]"]
+            if has_audio:
+                cmd += ["-map", "0:a:0"]
         else:
             # No audio present or no fades needed: just video processing (no audio mapping)
             cmd += ["-vf", vf]

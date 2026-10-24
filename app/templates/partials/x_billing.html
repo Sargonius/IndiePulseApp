@@ -1,0 +1,78 @@
+{# Accounts → X: the API is prepaid; what it costs and what IndiePulse spends (GET /api/x/billing) #}
+<div class="xb">
+<style>
+.xb { font-size: 13px; color: #374151; margin-top: 16px; }
+.xb a:not(.btn) { color: #1d4ed8; }
+.xb a.btn { text-decoration: none; }
+.xb-verdict { padding: 10px 12px; border-radius: 6px; border-left: 4px solid; margin-bottom: 12px; font-weight: 600; line-height: 1.5; }
+.xb-verdict.ok { background: #dcfce7; border-color: #16a34a; color: #166534; }
+.xb-verdict.info { background: #e0f2fe; border-color: #0284c7; color: #075985; }
+.xb-verdict.error { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
+.xb-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.xb-head h4 { margin: 0; font-size: 14px; color: #1f2937; }
+.xb-head span { display: flex; gap: 6px; flex-wrap: wrap; }
+.xb p { margin: 6px 0; line-height: 1.55; }
+.xb code { background: #e5e7eb; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.xb-prices { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 12px; }
+.xb-prices th, .xb-prices td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.xb-prices th { color: #6b7280; font-weight: 600; }
+.xb-prices td:last-child { white-space: nowrap; }
+.xb-note { font-size: 12px; color: #64748b; }
+.xb-usage { padding: 8px 12px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; margin: 10px 0; line-height: 1.55; }
+.xb ol { margin: 4px 0 0; padding-left: 20px; line-height: 1.6; }
+</style>
+
+{% if since %}
+<div class="xb-verdict error">✗ X API credits ran out on {{ since }} — posts to X don’t go out{% if failed %} ({{ failed }} not sent){% endif %}.
+	Top up your balance, then click “Check”.</div>
+{% elif connected %}
+<div class="xb-verdict ok">✓ X hasn’t answered 402 to billed requests — looks like you have credits. IndiePulse can’t see the balance itself: it’s in console.x.com.</div>
+{% else %}
+<div class="xb-verdict info">ℹ X isn’t connected. Once it is, posting will spend credits — see how much below.</div>
+{% endif %}
+{% if note %}<p class="xb-note">{{ note }}</p>{% endif %}
+
+<div class="xb-head">
+	<h4>💳 X API billing</h4>
+	<span>
+		<a class="btn btn-primary" href="{{ b.CONSOLE_URL }}" target="_blank" rel="noopener">Balance & top-up ↗</a>
+		{% if connected %}<button type="button" class="btn" hx-post="/api/x/credits_check?view=guide" hx-target="#x_billing" hx-swap="innerHTML">↻ Check</button>{% endif %}
+	</span>
+</div>
+
+<p>The X API is prepaid: you buy credits in advance in <b>console.x.com → Billing</b>, and every request deducts
+	them right away. When the balance hits zero, X answers <code>402 credits depleted</code> to everything: tweets fail,
+	X stats and followers freeze. IndiePulse then shows a red banner at the top and a tray notification.</p>
+<p>X Premium on the account is a separate subscription: it lifts the 280-character limit but doesn’t top up the API balance.</p>
+
+<table class="xb-prices">
+	<tr><th>What spends credits in IndiePulse</th><th>Price</th></tr>
+	<tr><td>Tweet: publishing a post, Test Tweet</td><td>${{ '%.3f' % b.PRICE_POST }}</td></tr>
+	<tr><td>Tweet with a link — any <code>http(s)://</code>, including an expanded <code>{steam}</code></td>
+		<td><b>${{ '%.2f' % b.PRICE_POST_URL }}</b><br>= 13 plain tweets</td></tr>
+	<tr><td>Thread: without Premium, long text is split into parts, each part is a separate billed tweet</td>
+		<td>× number of parts</td></tr>
+	<tr><td>Tweet stats (every 30 min for a week after posting), followers (every 2 h), 🩺 health check —
+		reads of your own data; repeating the same request within the same UTC day is free</td><td>~${{ '%.3f' % b.PRICE_OWNED_READ }} per day</td></tr>
+</table>
+<p class="xb-note">Prices from docs.x.com, September 2026. X changes them: <a href="{{ b.PRICING_URL }}" target="_blank" rel="noopener">current pricing ↗</a></p>
+
+<div class="xb-usage">
+{% if u.posts %}
+	X posts in the last {{ u.days }} days: <b>{{ u.posts }}</b>, tweets counting threads: <b>{{ u.tweets }}</b>{% if u.with_url %}
+	(with a link: <b>{{ u.with_url }}</b>){% endif %} ≈ ${{ '%.2f' % u.tweet_cost }}; reads ≈ ${{ '%.2f' % u.read_cost }}.<br>
+	<b>At this pace you need ~${{ '%.2f' % u.total }} a month.</b>
+{% else %}
+	IndiePulse posted nothing to X in the last {{ u.days }} days — only reads cost money, ~${{ '%.2f' % u.read_cost }} a month.
+{% endif %}
+</div>
+
+<h4 style="margin:12px 0 4px;font-size:13px;color:#1f2937">Keep a 402 from hitting mid-campaign</h4>
+<ol>
+	<li><b>Auto-recharge</b> in console.x.com → Billing: a threshold (e.g. $2) and a top-up amount — the balance never hits zero.</li>
+	<li>A monthly <b>Spending limit</b> — a ceiling so a glitch can’t burn through the balance.</li>
+	<li>A link in an X post costs as much as 13 tweets — use <code>{steam}</code> only where the post really leads to Steam.</li>
+	<li>After topping up, click “Check” (here or in the banner), then <a href="/jobs">Jobs</a> → Retry for the posts that didn’t go out.
+		IndiePulse won’t retry them on its own: an empty balance isn’t a network glitch.</li>
+</ol>
+</div>

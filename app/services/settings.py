@@ -15,11 +15,19 @@ DEFAULTS: Dict[str, Any] = {
 	"discord_webhook_url": "",
 	"discord_webhook_ru": "",
 	"discord_webhook_en": "",
-	# Discord upload settings
-	"discord_max_upload_mb": 50,
+	# Per-file upload limit of the Discord servers (MB): 10 without boosts, 50 at boost
+	# level 2, 100 at level 3. Bigger videos are compressed to fit. (Replaced the old
+	# "discord_max_upload_mb" = 50, which let 10+ MB uploads hit HTTP 413.)
+	"discord_upload_limit_mb": 10,
 	# Discord bot token (read-only) — required to collect message reactions for analytics.
 	# Webhooks are write-only and cannot read reactions back.
 	"discord_bot_token": "",
+	# Server whose member count goes to the home screen; empty = the bot's only server
+	"discord_guild_id": "",
+	# Steamworks "Financial API Group" web API key — daily wishlist + sales reports
+	"steam_financial_api_key": "",
+	# Secret baked into the "IndiePulse ← Steam" traffic bookmarklet (created on first use)
+	"steam_traffic_token": "",
 	# UI
 	"ui_language": "en",
 	"vk_client_id": "",
@@ -42,6 +50,9 @@ DEFAULTS: Dict[str, Any] = {
     "x_api_secret": "",
     "x_oauth_token": "",
     "x_oauth_token_secret": "",
+    # Runtime state (not user-editable): when X started answering 402 "credits
+    # depleted"; 0 = the last call went through. See services/x_billing.py.
+    "x_credits_error_at": 0,
     # YouTube Shorts
     "yt_client_id": "",
     "yt_client_secret": "",
@@ -56,6 +67,9 @@ DEFAULTS: Dict[str, Any] = {
     "yt_connected_at": 0,
     "yt_refresh_expires_at": 0,
     "yt_channel": "",
+    # Optional YouTube Data API key (Google Cloud → Credentials) for creator search on
+    # /outreach: unlike the OAuth token it doesn't expire weekly. Empty = use the token.
+    "yt_api_key": "",
     # YouTube playlist preferences
     "yt_playlist_id": "",
     "yt_playlist_title": "Synthetica",
@@ -92,6 +106,14 @@ DEFAULTS: Dict[str, Any] = {
     "tiktok_access_token": "",
     "tiktok_refresh_token": "",
     "tiktok_token_expires_at": 0,
+    # what the last connect granted (comma list), whose account it is and when
+    # (the /tiktok pipeline adopts factory drafts sent after that moment)
+    "tiktok_scope": "",
+    "tiktok_open_id": "",
+    "tiktok_connected_at": 0,
+    # also ask for video.list + user.info.stats + user.info.profile (views, followers,
+    # @handle). Off by default: a scope the app hasn't added breaks TikTok's consent page.
+    "tiktok_want_stats": False,
     # Instagram Reels (Graph API; reuses the fb app). ig_user_id = IG business
     # account id; ig_access_token = the linked Facebook Page's access token.
     "ig_user_id": "",

@@ -33,7 +33,8 @@ def publish(session, post, job) -> Optional[str]:
     s = ''.join(ch for ch in s if ch.isdigit())
     owner_id = f"-{s}"
     from app.models.models import Brief
-    brief = session.get(Brief, post.brief_id)
+    from app.platforms.common import brief_for_publish
+    brief = brief_for_publish(session, post)
     text = (brief.text_ru or brief.text_en or '') if brief else ''
     # Include hashtags on VK
     if brief and getattr(brief, 'tags_json', None):
@@ -92,7 +93,7 @@ def publish(session, post, job) -> Optional[str]:
                         if att: attachments.append(att)
                     except Exception as _exc:
                         _logger.error(f"vk.photo upload failed: {_exc}", exc_info=True)
-                        raise  # Прокинуть исключение дальше, чтобы сработала проверка had_image
+                        raise  # re-raise so the had_image check fires
                 elif ctype.startswith('video/'):
                     had_video = True
                     try:
@@ -125,10 +126,9 @@ def publish(session, post, job) -> Optional[str]:
                             _logger.error(f"vk.video attach missing video_id owner={owner}")
                     except Exception as _exc:
                         _logger.error(f"vk.video upload failed: {_exc}")
-                        if job is not None:
-                            job.last_error = (job.last_error or '') + f" vk_video_upload_failed: {_exc}"
-                            session.add(job)
-                            session.commit()
+                        raise  # never post the images/text without the video
+                    if not video_id:
+                        raise RuntimeError('vk_video_save_returned_no_video_id')
             attachment = ','.join(attachments) if attachments else None
             # If we intended to post media (image or video) but have no attachments, treat as error to avoid text-only fallback
             if (attachment is None or not attachment.strip()) and (had_video or had_image):
@@ -139,7 +139,7 @@ def publish(session, post, job) -> Optional[str]:
                 job.last_error = f"vk_attach_failed: {exc}"
                 session.add(job)
                 session.commit()
-            # КРИТИЧНО: Если должно было быть медиа, но загрузка не удалась - прерываем весь процесс
+            # CRITICAL: media was expected but the upload failed - abort the whole post
             if had_image or had_video:
                 post.status = PostStatusEnum.error
                 post.error_text = f"VK media upload failed: {exc}"
@@ -151,7 +151,7 @@ def publish(session, post, job) -> Optional[str]:
                     session.add(job)
                 session.commit()
                 return 'error'
-    # Продолжаем только если медиа не требовалось ИЛИ загрузилось успешно
+    # Continue only if no media was needed OR it uploaded fine
     try:
         vk = VKClient(token)
         if attachment:

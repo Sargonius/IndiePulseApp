@@ -1,0 +1,17 @@
+{# Shorts section header: upload ↔ board (the board is where finished shorts live and get reposted) #}
+<div class="sf-tabs-head">
+	<h2>🎞️ Shorts</h2>
+	<nav class="sf-tabs">
+		<a href="/shorts" class="{% if request.url.path == '/shorts' %}on{% endif %}">＋ Upload clips</a>
+		<a href="/shorts/board" class="{% if request.url.path.startswith('/shorts/board') %}on{% endif %}">🎞️ Board · 📣 Cross-post</a>
+		<a href="/guide#checklist" title="Indie marketing playbook: pre-queue checklist">📖 Checklist</a>
+	</nav>
+</div>
+<style>
+.sf-tabs-head { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:6px; }
+.sf-tabs-head h2 { margin:0; }
+.sf-tabs { display:flex; gap:4px; flex-wrap:wrap; background:#f1f5f9; border:1px solid var(--border); border-radius:8px; padding:3px; }
+.sf-tabs a { padding:5px 12px; border-radius:6px; font-size:14px; color:#334155; text-decoration:none; }
+.sf-tabs a:hover { background:#e2e8f0; }
+.sf-tabs a.on { background:#fff; color:#1d4ed8; font-weight:600; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+</style>

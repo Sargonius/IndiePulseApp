@@ -11,6 +11,7 @@
 		<button class="btn" id="reload_table_btn" hx-get="/api/analytics/table" hx-target="#analytics_table" hx-swap="outerHTML">
 			Reload Table
 		</button>
+		<button class="btn" id="expand_all_btn" type="button" onclick="toggleAllGroups()">Expand all</button>
 		<span id="refresh_all_status" class="muted"></span>
 	</div>
 	
@@ -127,7 +128,8 @@ body.page-analytics header .inner {
 .summary-card.danger .value { color: var(--danger); }
 
 /* Hide rows that don't match filter */
-.analytics-row.filtered-out {
+.analytics-row.filtered-out,
+.pub-group.filtered-out {
 	display: none !important;
 }
 </style>
@@ -142,99 +144,154 @@ body.page-analytics header .inner {
 	window.addEventListener('load', set);  // web font changes the height
 })();
 
+// Publications the user opened (brief ids), kept across table reloads and visits
+const OPEN_KEY = 'analytics_open_publications';
+let openGroups = new Set();
+try { openGroups = new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch (e) {}
+
+function saveOpenGroups() {
+	// only what is on the page, so the list doesn't grow forever
+	const onPage = new Set(Array.from(document.querySelectorAll('#analytics_table .pub-group')).map(g => g.dataset.brief));
+	openGroups = new Set([...openGroups].filter(id => onPage.has(id)));
+	try { localStorage.setItem(OPEN_KEY, JSON.stringify([...openGroups])); } catch (e) {}
+}
+
+function toggleGroup(ev, row) {
+	if (ev.target.closest('a, button, img, input, select')) return;
+	const group = row.closest('.pub-group');
+	const open = !group.classList.contains('open');
+	group.classList.toggle('open', open);
+	if (open) openGroups.add(group.dataset.brief); else openGroups.delete(group.dataset.brief);
+	saveOpenGroups();
+	updateExpandAllLabel();
+}
+
+function visibleGroups() {
+	return Array.from(document.querySelectorAll('#analytics_table .pub-group:not(.filtered-out)'));
+}
+
+function toggleAllGroups() {
+	const groups = visibleGroups();
+	const open = !groups.every(g => g.classList.contains('open'));
+	groups.forEach(g => {
+		g.classList.toggle('open', open);
+		if (open) openGroups.add(g.dataset.brief); else openGroups.delete(g.dataset.brief);
+	});
+	saveOpenGroups();
+	updateExpandAllLabel();
+}
+
+function updateExpandAllLabel() {
+	const btn = document.getElementById('expand_all_btn');
+	const groups = visibleGroups();
+	if (btn) btn.textContent = groups.length && groups.every(g => g.classList.contains('open')) ? 'Collapse all' : 'Expand all';
+}
+
+const SUM_KEYS = ['likes', 'reposts', 'comments', 'views'];
+
+function metricHtml(v) {
+	return v === null ? '<span class="metric-pending">—</span>' : `<span class="metric-value">${v}</span>`;
+}
+
 function filterAnalytics() {
 	const platform = document.getElementById('filter_platform').value.toLowerCase();
 	const status = document.getElementById('filter_status').value.toLowerCase();
 	const period = document.getElementById('filter_period').value;
-	
-	const rows = document.querySelectorAll('#analytics_table .analytics-row');
-	let visibleCount = 0;
-	let totalLikes = 0;
-	let totalReposts = 0;
-	let totalComments = 0;
-	let totalViews = 0;
-	let engagedCount = 0;
-	
+
 	const now = new Date();
 	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 	const weekAgo = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
 	const monthAgo = new Date(todayStart.getTime() - 30 * 24 * 60 * 60 * 1000);
-	
-	rows.forEach(row => {
+
+	function passes(row) {
 		const rowPlatform = (row.dataset.platform || '').toLowerCase();
 		const rowStatus = (row.dataset.status || '').toLowerCase();
 		const rowDateStr = row.dataset.published || '';
 		const rowDate = rowDateStr ? new Date(rowDateStr) : null;
-		
-		let show = true;
-		
-		// Platform filter
-		if (platform && !rowPlatform.includes(platform)) {
-			show = false;
-		}
-		
-		// Status filter
-		if (status && rowStatus !== status) {
-			show = false;
-		}
-		
-		// Period filter
+		if (platform && !rowPlatform.includes(platform)) return false;
+		if (status && rowStatus !== status) return false;
 		if (period && rowDate) {
-			if (period === 'today' && rowDate < todayStart) show = false;
-			if (period === 'week' && rowDate < weekAgo) show = false;
-			if (period === 'month' && rowDate < monthAgo) show = false;
+			if (period === 'today' && rowDate < todayStart) return false;
+			if (period === 'week' && rowDate < weekAgo) return false;
+			if (period === 'month' && rowDate < monthAgo) return false;
 		} else if (period && !rowDate && status !== 'queued') {
 			// Hide posts without publish date if filtering by period (except queued)
-			show = false;
+			return false;
 		}
-		
-		if (show) {
-			row.classList.remove('filtered-out');
-			visibleCount++;
+		return true;
+	}
 
-			// Sum metrics
-			const likes = parseInt(row.dataset.likes) || 0;
-			const reposts = parseInt(row.dataset.reposts) || 0;
-			const comments = parseInt(row.dataset.comments) || 0;
-			const views = parseInt(row.dataset.views) || 0;
-			const engagement = parseInt(row.dataset.engagement) || 0;
-			totalLikes += likes;
-			totalReposts += reposts;
-			totalComments += comments;
-			totalViews += views;
-			if (engagement > 0) engagedCount++;
-		} else {
-			row.classList.add('filtered-out');
-		}
+	const totals = { pubs: 0, posts: 0, engaged: 0, likes: 0, reposts: 0, comments: 0, views: 0 };
+
+	document.querySelectorAll('#analytics_table .pub-group').forEach(group => {
+		group.classList.toggle('open', openGroups.has(group.dataset.brief));
+		// sums over the networks that pass the filters (null = no network reports it)
+		const sums = { likes: null, reposts: null, comments: null, views: null };
+		let engagement = 0, has = false, visible = 0;
+		group.querySelectorAll('.analytics-row').forEach(row => {
+			const show = passes(row);
+			row.classList.toggle('filtered-out', !show);
+			const badge = group.querySelector(`.pub-platforms [data-post="${row.dataset.post}"]`);
+			if (badge) badge.classList.toggle('dim', !show);
+			if (!show) return;
+			visible++;
+			SUM_KEYS.forEach(k => {
+				if (row.dataset[k] !== '') sums[k] = (sums[k] || 0) + (parseInt(row.dataset[k]) || 0);
+			});
+			engagement += parseInt(row.dataset.engagement) || 0;
+			has = has || row.dataset.has === '1';
+		});
+		group.classList.toggle('filtered-out', visible === 0);
+		if (!visible) return;
+
+		SUM_KEYS.forEach(k => {
+			const cell = group.querySelector(`.pub-row [data-sum="${k}"]`);
+			if (cell) cell.innerHTML = metricHtml(sums[k]);
+			totals[k] += sums[k] || 0;
+		});
+		const totalCell = group.querySelector('.pub-row [data-sum="total"]');
+		if (totalCell) totalCell.innerHTML = engagement > 0
+			? `<span class="engagement-badge">🔥 ${engagement}</span>`
+			: `<span class="metric-pending">${has ? '0' : '—'}</span>`;
+		group.querySelector('.pub-row').classList.toggle('has-engagement', engagement > 0);
+
+		totals.pubs++;
+		totals.posts += visible;
+		if (engagement > 0) totals.engaged++;
 	});
 
-	updateSummary(visibleCount, totalLikes, totalReposts, totalComments, totalViews, engagedCount);
+	updateSummary(totals);
+	updateExpandAllLabel();
 }
 
-function updateSummary(count, likes, reposts, comments, views, engaged) {
+function updateSummary(t) {
 	document.getElementById('analytics_summary').innerHTML = `
 		<div class="summary-card">
-			<div class="value">${count}</div>
+			<div class="value">${t.pubs}</div>
+			<div class="label">Publications</div>
+		</div>
+		<div class="summary-card">
+			<div class="value">${t.posts}</div>
 			<div class="label">Posts</div>
 		</div>
 		<div class="summary-card success">
-			<div class="value">${engaged}</div>
+			<div class="value">${t.engaged}</div>
 			<div class="label">🔥 Got Reactions</div>
 		</div>
 		<div class="summary-card success">
-			<div class="value">${likes}</div>
+			<div class="value">${t.likes}</div>
 			<div class="label">Total Likes</div>
 		</div>
 		<div class="summary-card">
-			<div class="value">${reposts}</div>
+			<div class="value">${t.reposts}</div>
 			<div class="label">Reposts</div>
 		</div>
 		<div class="summary-card">
-			<div class="value">${comments}</div>
+			<div class="value">${t.comments}</div>
 			<div class="label">Comments</div>
 		</div>
 		<div class="summary-card">
-			<div class="value">${views}</div>
+			<div class="value">${t.views}</div>
 			<div class="label">Views</div>
 		</div>
 	`;
