@@ -307,12 +307,12 @@ namespace IndiePulse
             };
             if (o.Quiet) return Headless(plan(o.DeleteData), log) ? 0 : 1;
 
-            var form = new SetupForm(log, "Uninstall IndiePulse", "Uninstall IndiePulse", "Version " + home.Version + " in " + home.Dir);
+            var form = new SetupForm(log, "Uninstall IndiePulse", "Uninstall IndiePulse", "Version " + home.Version + " · " + Tagline);
             bool ok = false;
             form.ShowConfirm("Remove IndiePulse from this computer?",
-                "This removes the program from " + home.Dir + ", its shortcuts, its entry in Settings → Apps and its " +
+                "This removes the program from " + Short(home.Dir) + ", its shortcuts, its entry in Settings → Apps and its " +
                 "autostart. IndiePulse is closed first; a post being published is finished.",
-                "Also delete my posts, settings and media (" + data + ")",
+                "Also delete my posts, settings and media (" + Short(data) + ")",
                 delegate(bool deleteData)
                 {
                     form.Run("Uninstalling IndiePulse", plan(deleteData), delegate

@@ -102,7 +102,9 @@ namespace IndiePulse
                 k.SetValue("QuietUninstallString", "\"" + home.Exe + "\" --uninstall --quiet");
                 k.SetValue("NoModify", 1, RegistryValueKind.DWord);
                 k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-                k.SetValue("EstimatedSize", (int)Math.Min(int.MaxValue, Files.Size(home.Dir) / 1024), RegistryValueKind.DWord);
+                // the venv's files are hard links into uv's cache: counted once
+                long size = Files.Size(home.Dir) - Files.Size(Path.Combine(home.Runtime, "cache"));
+                k.SetValue("EstimatedSize", (int)Math.Max(0, Math.Min(int.MaxValue, size / 1024)), RegistryValueKind.DWord);
             }
             ctx.Log.Write("shortcuts " + StartMenuLink + ", " + DesktopLink + "; uninstall entry HKCU\\" + UninstallKey);
         }
