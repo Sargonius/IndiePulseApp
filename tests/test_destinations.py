@@ -393,3 +393,22 @@ def test_two_destinations_of_one_platform_are_not_duplicates(session, networks):
     assert _publish(again) == "duplicate"
     assert reload(Post, again[0]).status == PostStatusEnum.canceled
     assert [s[1] for s in networks] == ["-100111", "-100222"]
+
+
+# ── Settings → Languages & destinations ─────────────────────────────────────
+
+def test_the_settings_page_edits_languages_and_destinations(client, set_settings):
+    set_settings(**OWNER)
+    page = client.get("/accounts").text
+    assert 'id="section_languages"' in page and "window.IP_DEST" in page
+    assert "tok-ru" not in page.split("window.IP_DEST", 1)[1].split("</script>", 1)[0]  # page tokens masked
+    data = client.get("/api/destinations").json()
+    items = [dict(d, module=g["module"]) for g in data["groups"] for d in g["destinations"]]
+    items.append({"module": "discord", "lang": "ja", "target": {"webhook": "https://hook/ja"}})
+    r = client.post("/api/destinations/save", json={"languages": ["ru", "en"], "destinations": items})
+    assert r.status_code == 400 and "isn't in the languages list" in r.json()["errors"][0]
+    r = client.post("/api/destinations/save", json={"languages": ["ru", "en", "ja"], "destinations": items})
+    assert r.status_code == 200 and r.json()["ok"]
+    assert "discord-ja" in r.json()["destinations"]
+    cfg = load_settings()
+    assert cfg["languages"] == ["ru", "en", "ja"] and cfg["fb_ru_page_access_token"] == "tok-ru"

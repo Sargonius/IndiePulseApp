@@ -53,6 +53,7 @@ class Kind:
 	fields: tuple = ()                  # what one destination of it targets; () = the account itself
 	account: tuple = ()                 # settings keys its account needs before anything can go out
 	video_only: bool = False            # takes nothing but a video (the post form offers it for a video only)
+	unit: str = ""                      # what one destination of it is called: "channel", "webhook"...
 
 	@property
 	def multi(self) -> bool:
@@ -72,14 +73,15 @@ KINDS: dict[str, Kind] = {k.module: k for k in (
 	Kind("vk", "VK", "vk", account=("vk_access_token", "vk_group_id")),
 	Kind("x", "X / Twitter", "x", account=("x_access_token",)),
 	Kind("discord", "Discord", "discord",
-		 (TargetField("webhook", "Webhook URL", "https://discord.com/api/webhooks/…"),)),
+		 (TargetField("webhook", "Webhook URL", "https://discord.com/api/webhooks/…"),), unit="webhook"),
 	Kind("facebook", "Facebook", "fb_en",
 		 (TargetField("page_id", "Page ID", "1234567890"),
-		  TargetField("page_token", "Page access token", "EAAB…", secret=True))),
+		  TargetField("page_token", "Page access token", "EAAB…", secret=True)), unit="Page"),
 	Kind("bluesky", "Bluesky", "bluesky", account=("bluesky_handle", "bluesky_app_password")),
-	Kind("reddit", "Reddit", "reddit", (TargetField("subreddit", "Subreddit", "gamedev"),), account=_REDDIT_ACCOUNT),
+	Kind("reddit", "Reddit", "reddit", (TargetField("subreddit", "Subreddit", "gamedev"),), account=_REDDIT_ACCOUNT,
+		 unit="subreddit"),
 	Kind("telegram", "Telegram", "tg", (TargetField("chat_id", "Chat ID", "-1001234567890"),),
-		 account=("tg_bot_token",)),
+		 account=("tg_bot_token",), unit="channel"),
 	Kind("youtube", "YouTube", "yt", account=("yt_access_token", "yt_refresh_token"), video_only=True),
 	# without a token these two export the file for a manual upload, so they always "work"
 	Kind("tiktok", "TikTok", "tiktok", video_only=True),
@@ -333,7 +335,8 @@ def editor_context(cfg: Optional[dict] = None) -> dict:
 			rows.append({"id": d["id"], "lang": d["lang"], "label": d["label"], "enabled": d["enabled"],
 						 "skip_without_text": d["skip_without_text"], "target": target,
 						 "linked": sorted(d["linked"].values()), "ready": ready(d, cfg)})
-		groups.append({"module": module, "name": kind.name, "multi": kind.multi, "on": modules.on(module),
+		groups.append({"module": module, "name": kind.name, "multi": kind.multi, "unit": kind.unit,
+					   "on": modules.on(module),
 					   "fields": [{"key": f.key, "label": f.label, "placeholder": f.placeholder, "secret": f.secret}
 								  for f in kind.fields],
 					   "destinations": rows})

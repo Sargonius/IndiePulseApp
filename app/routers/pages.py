@@ -143,6 +143,7 @@ def projects_page(request: Request, session: Session = Depends(get_session)):
 
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
+    from app.services import destinations
     cfg = load_settings()
     token = cfg.get('vk_access_token', '') or ''
     token_hint = ('•••' + token[-4:]) if token else ''
@@ -151,6 +152,7 @@ def accounts(request: Request):
         {
             'request': request,
             'ui_language': cfg.get('ui_language', 'en'),
+            'dest_editor': destinations.editor_context(cfg),
             'discord_webhook': cfg.get('discord_webhook_url', ''),
             'discord_bot_token_hint': (('•••' + (cfg.get('discord_bot_token') or '')[-4:]) if (cfg.get('discord_bot_token') or '') else ''),
             'discord_guild_id': cfg.get('discord_guild_id', ''),
