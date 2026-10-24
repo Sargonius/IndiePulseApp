@@ -1,0 +1,72 @@
+<!-- Settings → Updates (app/routers/api/updates.py, app/services/updates.py); htmx swaps it into #update_panel -->
+<div class="settings-section" id="section_updates">
+	<div class="settings-row">
+		<div class="settings-left">
+			<div class="settings-header">
+				<h3>Updates</h3>
+				<span class="status-badge">IndiePulse {{ version }}{% if git %} · git checkout{% endif %}</span>
+			</div>
+			{% if git %}
+			<div class="info-box" style="margin-bottom:12px;">This is a git checkout: it updates with <code>git pull</code>,
+				never by itself, and doesn't check in the background. «Check now» still says what is released.</div>
+			{% endif %}
+			<form hx-post="/api/updates/save" hx-target="#update_panel" hx-swap="innerHTML">
+				<div class="form-group">
+					<label>When a new version is out</label>
+					<select name="update_mode">
+						<option value="notify" {% if mode == 'notify' %}selected{% endif %}>Tell me (a banner here, a balloon from the tray)</option>
+						<option value="auto" {% if mode == 'auto' %}selected{% endif %}>Install it by itself when nothing is publishing</option>
+						<option value="off" {% if mode == 'off' %}selected{% endif %}>Don't check</option>
+					</select>
+				</div>
+				<div class="form-group">
+					<label>GitHub repository <span class="muted">(owner/name)</span></label>
+					<input type="text" name="update_repo" value="{{ repo }}" placeholder="Sargonius/IndiePulseNew" />
+				</div>
+				<div class="form-group">
+					<label>Access token <span class="muted">(a private repository needs one){% if token_hint %} · saved {{ token_hint }}{% endif %}</span></label>
+					<input type="password" name="update_token" value="" placeholder="github_pat_…" autocomplete="off" />
+					{% if token_hint %}<label class="muted" style="font-size:12px;"><input type="checkbox" name="clear_token" value="1" /> remove the saved token</label>{% endif %}
+				</div>
+				<div class="btn-row">
+					<button type="submit" class="btn btn-primary">Save</button>
+					<button type="button" class="btn" hx-post="/api/updates/check" hx-target="#update_panel" hx-swap="innerHTML"
+						hx-indicator="#update_checking">Check now</button>
+					{% if available and not git and supervised and not (progress.phase in ['requested', 'downloading', 'waiting', 'installing']) %}
+					<button type="button" class="btn" hx-post="/api/updates/install?view=panel" hx-target="#update_panel"
+						hx-swap="innerHTML">Install {{ available.version }}</button>
+					{% endif %}
+					<span id="update_checking" class="htmx-indicator muted">asking GitHub…</span>
+				</div>
+			</form>
+			{% if note %}<div class="status-msg" style="color:{{ '#991b1b' if note_error else '#166534' }};">{{ note }}</div>{% endif %}
+			<div class="muted" style="font-size:13px;margin-top:8px;">
+				{% if checked %}Last check {{ checked }}{% if state.repo %} ({{ state.repo }}){% endif %}:
+					{% if state.error %}<span style="color:#991b1b;">{{ state.error }}</span>
+					{% elif available %}IndiePulse {{ available.version }} is available{% if available.published_at %}, released {{ available.published_at[:10] }}{% endif %}.
+					{% elif latest %}up to date (the latest release is {{ latest.version }}).
+					{% else %}no releases yet.{% endif %}
+				{% else %}Not checked yet.{% endif %}
+				{% if progress.phase %}<br>{{ progress.text }}{% endif %}
+			</div>
+		</div>
+		<div class="settings-right">
+			<div class="instructions">
+				<h4>How updates work</h4>
+				<p>IndiePulse looks for a new release on GitHub 30 seconds after it starts and every 6 hours. Installing
+					downloads the release, checks its checksum, waits until nothing is publishing, then restarts
+					IndiePulse on the new version. If the new version doesn't come up, the previous one is put back by
+					itself. Your settings, posts and media are never touched (they live in the data folder).</p>
+				<h4>Access token (private repository)</h4>
+				<ol>
+					<li>GitHub → <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a></li>
+					<li>Repository access: <b>Only select repositories</b> → the repository above</li>
+					<li>Permissions → Repository → <b>Contents: Read-only</b> (Metadata: read-only comes with it)</li>
+					<li>Pick an expiration, Generate, paste it here, Save, then «Check now»</li>
+				</ol>
+				<div class="info-box">The token can only read that repository. It is kept in this app's settings and never
+					shown in logs. A public repository needs no token.</div>
+			</div>
+		</div>
+	</div>
+</div>

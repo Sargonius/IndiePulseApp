@@ -703,6 +703,9 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Updates from GitHub Releases: its own partial (partials/updates_panel.html), loaded by htmx -->
+	<div id="update_panel" hx-get="/api/updates/panel" hx-trigger="load" hx-swap="innerHTML"></div>
 </div>
 
 <style>

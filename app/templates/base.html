@@ -62,6 +62,8 @@
 			{% if module_on('youtube') %}<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
 			<!-- "X API credits ran out" banner (HTTP 402); empty while X takes requests -->
 			{% if module_on('x') %}<div id="x_alert" hx-get="/api/x/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
+			<!-- "IndiePulse vX is available — What's new · Install", an update under way or how it went (app/routers/api/updates.py) -->
+			<div id="update_alert" hx-get="/api/updates/banner" hx-trigger="load" hx-swap="outerHTML"></div>
 			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>
