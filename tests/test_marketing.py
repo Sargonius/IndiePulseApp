@@ -4,7 +4,7 @@ import json
 import pytest
 from sqlmodel import select
 
-from app.models.models import Brief, Goal, GoalLink, MetricPoint, Project
+from app.models.models import Brief, Goal, GoalLink, MetricPoint
 from app.services import marketing as mk
 from app.services import marketing_collect as mc
 from app.services import steam_partner

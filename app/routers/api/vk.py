@@ -159,7 +159,7 @@ def vk_check_token(token: str = Form("")):
                     scopes_info = f"<br/><span style='color:#ff9800;'>⚠️ Missing permissions: {_e(', '.join(missing))}</span>"
                     scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Current permissions: {_e(', '.join(scope_names) if scope_names else 'no data')}</span>"
                 else:
-                    scopes_info = f"<br/><span style='color:#4caf50;'>✓ All required permissions present</span>"
+                    scopes_info = "<br/><span style='color:#4caf50;'>✓ All required permissions present</span>"
                     scopes_info += f"<br/><span style='font-size:11px; color:#666;'>Permissions: {_e(', '.join(scope_names))}</span>"
             
             return HTMLResponse(f"<span style='color:green'>Token is valid</span>{scopes_info}")

@@ -42,7 +42,7 @@ def _ffmpeg_path() -> str:
                 # Gyan.dev release essentials (versioned; may change over time)
                 "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
             ]
-            import httpx, zipfile, io, shutil
+            import httpx, zipfile, shutil
             data: Optional[bytes] = None
             last_err: Optional[Exception] = None
             for u in urls:
@@ -464,7 +464,7 @@ def render_horizontal_with_music(
     def _probe_duration_seconds(path: str) -> float:
         """Return media duration in seconds using ffprobe; 0.0 on failure."""
         try:
-            import subprocess, json, os as _os
+            import subprocess, os as _os
             if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
                 base_dir = _os.path.dirname(ffmpeg)
                 exe = "ffprobe.exe" if _os.name == "nt" else "ffprobe"
@@ -665,7 +665,7 @@ def render_vertical_with_music(
     def _probe_duration_seconds(path: str) -> float:
         """Return media duration in seconds using ffprobe; 0.0 on failure."""
         try:
-            import subprocess, json, os as _os
+            import subprocess, os as _os
             # Resolve ffprobe in the same directory as ffmpeg when using a full path
             if _os.path.sep in ffmpeg or ("/" in ffmpeg) or ("\\" in ffmpeg):
                 base_dir = _os.path.dirname(ffmpeg)

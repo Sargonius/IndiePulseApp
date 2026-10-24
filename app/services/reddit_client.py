@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import praw
-from typing import Optional, Tuple
+from typing import Tuple
 from loguru import logger
 
 
