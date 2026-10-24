@@ -557,7 +557,6 @@ def submit_news(
         return False
     if platforms:
         # Detect if input media is a video (normal or vertical)
-        has_video: bool = False
         has_vertical_video: bool = False
         has_normal_video: bool = False
         try:
@@ -579,9 +578,7 @@ def submit_news(
             ctn = _ctype(cand_norm)
             has_vertical_video = bool(ctv.startswith('video/'))
             has_normal_video = bool(ctn.startswith('video/'))
-            has_video = bool(ctv.startswith('video/') or ctn.startswith('video/'))
         except Exception:
-            has_video = False
             has_vertical_video = False
             has_normal_video = False
         when_dt: Optional[datetime] = None
@@ -764,7 +761,6 @@ def submit_post(
     tag_brief(session, brief, project_id, goal_id)
 
     created_posts: List[Post] = []
-    cfg = load_settings()
 
     when_dt: Optional[datetime] = None
     if scheduled_at:

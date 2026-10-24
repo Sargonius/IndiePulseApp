@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timedelta
 
-from sqlmodel import select
 
 from app.jobs import tasks
 from app.models.models import Job, JobStatusEnum, Post, PostStatusEnum

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import delete
 from sqlmodel import select
 
-from app.models.models import AudienceSample, Brief, MetricPoint, Post, PostStatusEnum, Project
+from app.models.models import AudienceSample, Brief, MetricPoint, Post, PostStatusEnum
 from app.services import audience
 from app.services import marketing as mk
 from app.services import marketing_collect as mc

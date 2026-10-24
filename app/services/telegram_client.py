@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Callable, Any
+from typing import Optional, Callable
 import os
 import mimetypes
 import requests

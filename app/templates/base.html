@@ -62,14 +62,16 @@
 			{% if module_on('youtube') %}<div id="yt_alert" hx-get="/api/youtube/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
 			<!-- "X API credits ran out" banner (HTTP 402); empty while X takes requests -->
 			{% if module_on('x') %}<div id="x_alert" hx-get="/api/x/alert" hx-trigger="load" hx-swap="outerHTML"></div>{% endif %}
+			<!-- "IndiePulse vX is available — What's new · Install", an update under way or how it went (app/routers/api/updates.py) -->
+			<div id="update_alert" hx-get="/api/updates/banner" hx-trigger="load" hx-swap="outerHTML"></div>
 			<!-- extra toolbar removed per request -->
 			{% block content %}{% endblock %}
 		</div>
 	</main>
     <footer>
 		<div class="container">
-			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '1.0.0' }}</span>
-			<span>Last change: {{ request.app.state.app_last_change if request and request.app and request.app.state and request.app.state.app_last_change else 'Version 1.0.0 - Initial setup' }}</span>
+			<span>App Version: {{ request.app.state.app_version if request and request.app and request.app.state and request.app.state.app_version else '' }}</span>
+			{% if request and request.app and request.app.state and request.app.state.app_last_change %}<span>Last change: {{ request.app.state.app_last_change }}</span>{% endif %}
 		</div>
 	</footer>
 

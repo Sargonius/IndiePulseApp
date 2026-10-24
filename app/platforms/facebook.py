@@ -12,7 +12,6 @@ def publish(session, post, job) -> Optional[str]:
     # Facebook Page posting (separate RU / EN pages)
     from app.services.facebook_client import FacebookClient
     from app.services.settings import load_settings
-    from app.models.models import Brief
     cfg = load_settings()
     from app.platforms.common import brief_for_publish, post_destination, post_text
     brief = brief_for_publish(session, post)

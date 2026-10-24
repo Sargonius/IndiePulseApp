@@ -2,8 +2,9 @@
 
 One icon in the notification area instead of two console windows. Its colour is the
 app state (green ok / amber starting or restarting / red broken), the menu opens the UI,
-restarts, shows logs, and "Quit" stops the server and worker (the worker finishes the
-task in progress first). Launching again while it runs just opens the browser.
+restarts, shows logs, checks for and installs updates (app/desktop/updater.py), and "Quit"
+stops the server and worker (the worker finishes the task in progress first). Launching
+again while it runs just opens the browser.
 """
 from __future__ import annotations
 
@@ -73,6 +74,9 @@ def run(background: bool) -> None:
 
 	sup = Supervisor(_local_host(), config.APP_PORT, on_change=refresh, on_ready=on_ready,
 					 on_stopped=lambda: icon.stop(), notify=notify)
+	# checks GitHub 30 s after start and every 6 h; installs by handing over to apply_update.py and quitting
+	from app.desktop.updater import TrayUpdater
+	updater = TrayUpdater(sup, notify=notify, refresh=lambda: icon.update_menu(), base_url=url)
 
 	def open_ui() -> None:
 		if sup.server.state == "running":
@@ -139,12 +143,14 @@ def run(background: bool) -> None:
 		menu=Menu(
 			Item("Open IndiePulse", open_ui, default=True),
 			Item(lambda _: youtube_label() or "YouTube", reconnect_youtube, visible=lambda _: bool(youtube_label())),
+			Item(lambda _: updater.install_label(), updater.install, visible=lambda _: updater.can_install()),
 			Menu.SEPARATOR,
 			Item(lambda _: sup.child_line(sup.server), None, enabled=False),
 			Item(lambda _: sup.child_line(sup.worker), None, enabled=False),
 			Menu.SEPARATOR,
 			Item("Restart", sup.restart, enabled=lambda _: sup.phase in ("running",)),
 			Item("Open logs folder", open_logs),
+			Item("Check for updates", updater.check_now),
 			Item("Start at Windows sign-in", toggle_autostart, checked=lambda _: winapi.autostart_enabled(),
 				 visible=lambda _: trusted or winapi.autostart_enabled()),  # left on: still can be turned off
 			Item("Create shortcuts (desktop, Start menu)", make_shortcuts, visible=lambda _: trusted),
@@ -157,6 +163,7 @@ def run(background: bool) -> None:
 		ic.visible = True
 		sup.start()
 		threading.Thread(target=youtube_watch, name="youtube-reminder", daemon=True).start()
+		updater.start()
 		if not _SHORTCUTS_MARKER.exists() and trusted:
 			make_shortcuts()  # first run: behave like an installed program — not on a club computer the drive visits
 

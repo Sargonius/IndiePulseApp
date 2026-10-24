@@ -32,7 +32,6 @@ def publish(session, post, job) -> Optional[str]:
         s = s[1:]
     s = ''.join(ch for ch in s if ch.isdigit())
     owner_id = f"-{s}"
-    from app.models.models import Brief
     from app.platforms.common import brief_for_publish, post_text
     brief = brief_for_publish(session, post)
     text = post_text(brief, post, ('ru', 'en'), cfg)

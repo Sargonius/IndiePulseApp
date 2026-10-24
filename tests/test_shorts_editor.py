@@ -407,7 +407,6 @@ def test_overlay_preview_endpoint(client):
 # ── factory submit + render wiring ───────────────────────────────────────────
 
 def test_submit_shorts_stores_trim_and_overlays(client, session, tmp_path, monkeypatch):
-    from sqlmodel import select
     from app.jobs import tasks
     from app.models.models import Brief
     scheduled = []

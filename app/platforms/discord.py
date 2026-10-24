@@ -13,7 +13,6 @@ def publish(session, post, job) -> Optional[str]:
     import os
     settings = load_settings()
     # Compose per-language messages and target webhooks
-    from app.models.models import Brief
     from app.platforms.common import brief_for_publish, post_destination, post_text
     brief = brief_for_publish(session, post)
     dest = post_destination(post, settings)

@@ -42,6 +42,9 @@ logs/
 .autoreload
 # the data folder of a portable copy (app/core/paths.py)
 data/
+# the updater's downloads, the previous version and its state (app/services/updates.py)
+/updates/
+/.updates/
 queue.db
 *.db
 *.db-shm

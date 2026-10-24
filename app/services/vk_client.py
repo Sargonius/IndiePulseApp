@@ -65,8 +65,6 @@ class VKClient:
         return _retry(_do, on=_CONNECT_ONLY)
 
     def upload_photo_to_wall(self, group_id: str, file_path: str, token_override: str | None = None) -> str:
-        owner_id = f"-{group_id}"
-
         if not os.path.exists(file_path):
             logger.error(f"vk.upload_photo_to_wall file not found: {file_path}")
             raise RuntimeError(f"File not found: {file_path}")

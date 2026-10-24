@@ -4,7 +4,6 @@ the "fits the platform?" report, and the Create Post / Create Video forms."""
 import io
 import json
 import os
-import shutil
 import subprocess
 import time
 import uuid
@@ -18,7 +17,7 @@ from app.models.models import Brief, Job, Post
 from app.services import music_library as ml
 from app.services import text_overlay as to
 from app.services import video_edit as ve
-from app.services.video_editor import MB, compression_plan, max_fit_duration
+from app.services.video_editor import compression_plan, max_fit_duration
 
 
 def _ffmpeg():

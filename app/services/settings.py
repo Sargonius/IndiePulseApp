@@ -136,6 +136,11 @@ DEFAULTS: Dict[str, Any] = {
     "anthropic_model": "claude-opus-5-5",
     # DeepL for machine translation (app.services.machine_translate); empty = the free public translators
     "deepl_api_key": "",
+    # Updates from GitHub Releases (app/services/updates.py): "off" | "notify" | "auto" (installs when nothing is
+    # publishing); the repo; for a private one a fine-grained token, Contents: read-only (redact.py masks *token*)
+    "update_mode": "notify",
+    "update_repo": "Sargonius/IndiePulseNew",
+    "update_token": "",
     # Local music directory (Windows default path)
     "music_dir": "E:\\SynthSocial\\Music",
     # Modules turned off on the 🧩 Modules page (app.core.modules); empty = all on
