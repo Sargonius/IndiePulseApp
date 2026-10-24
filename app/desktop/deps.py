@@ -58,7 +58,9 @@ def _repair_python(log_path: Path) -> bool:
 	"""uv's Python lost its python.exe — Kaspersky took the drive's one for a trojan once (2026-10-24) and deleted it
 	at reboot: uv puts it back from its cache."""
 	exe = uv()
-	return bool(exe) and _call([exe, *_INSTALL_PYTHON, "--reinstall", PYTHON_VERSION], log_path, uv_env())
+	ok = bool(exe) and _call([exe, *_INSTALL_PYTHON, "--reinstall", PYTHON_VERSION], log_path, uv_env())
+	_drop_temp_cache()
+	return ok
 
 
 def uv() -> str | None:
@@ -82,6 +84,16 @@ def uv_cache() -> Path:
 		return own
 	from app.desktop.apply_update import instance_key
 	return Path(tempfile.gettempdir()).resolve() / f"IndiePulse-uv-{instance_key(RUNTIME.parent)[:8]}"
+
+
+def _drop_temp_cache() -> None:
+	"""uv_cache()'s short one in %TEMP%, once a step that may have used it is done: the venv has what it needs (a copy
+	or a hard link of each file), and nothing of a portable copy stays on the computer."""
+	if KIT.is_dir() or not RUNTIME.is_dir():
+		return
+	cache = uv_cache()
+	if RUNTIME not in cache.parents:
+		shutil.rmtree(cache, ignore_errors=True)
 
 
 def uv_env() -> dict[str, str]:
@@ -132,11 +144,9 @@ def install_requirements(log_path: Path) -> bool:
 	"""requirements.lock into the venv: with uv (its cache on the drive or in runtime\\, seconds) or pip."""
 	exe, listed = uv(), str(_installed_list())
 	if exe:
-		env = uv_env()
-		ok = _call([exe, "pip", "install", "--python", str(venv_python()), "-r", listed], log_path, env)
-		temp_cache = Path(env.get("UV_CACHE_DIR") or RUNTIME / "cache")
-		if ok and not KIT.is_dir() and RUNTIME.is_dir() and RUNTIME not in temp_cache.parents:
-			shutil.rmtree(temp_cache, ignore_errors=True)  # uv_cache()'s short one in %TEMP%: done with
+		ok = _call([exe, "pip", "install", "--python", str(venv_python()), "-r", listed], log_path, uv_env())
+		if ok:
+			_drop_temp_cache()
 	else:
 		ok = _call([str(venv_python()), "-m", "pip", "install", "--disable-pip-version-check", "-r", listed], log_path)
 	if ok:
@@ -158,11 +168,12 @@ def ensure_venv(log_path: Path) -> bool:
 	exe = uv()
 	if exe:  # --seed: pip too, for when there is no uv next time; --clear: whatever rmtree couldn't remove
 		cmd = [exe, "venv", "--seed", "--clear", "--python", PYTHON_VERSION, str(VENV)]
-		if _call(cmd, log_path, uv_env()):
-			return True
 		# no Python 3.12 of uv's yet, or its python.exe is gone: installed the way IndiePulse.exe does it
-		return (_call([exe, *_INSTALL_PYTHON, PYTHON_VERSION], log_path, uv_env()) or _repair_python(log_path)) \
-			and _call(cmd, log_path, uv_env())
+		ok = _call(cmd, log_path, uv_env()) or (
+			(_call([exe, *_INSTALL_PYTHON, PYTHON_VERSION], log_path, uv_env()) or _repair_python(log_path))
+			and _call(cmd, log_path, uv_env()))
+		_drop_temp_cache()
+		return ok
 	# sys.executable is pythonw under pyw.exe; venv needs a real interpreter either way
 	base = Path(sys.executable)
 	py = base.with_name("python.exe") if base.name.lower() == "pythonw.exe" else base

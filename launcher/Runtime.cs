@@ -203,6 +203,7 @@ namespace IndiePulse
             ctx.Detail("Downloading Python " + PythonVersion + "…");
             // a venv whose Python lost its python.exe (an antivirus took it): put back from uv's cache
             RunUv(InstallPython(home.PythonDamaged()), "Python " + PythonVersion, ctx);
+            DropTempCache(ctx);
         }
 
         void MakeVenv(StepContext ctx)
@@ -226,6 +227,7 @@ namespace IndiePulse
             if (!home.VenvAlive())
                 throw new StepFailed("The environment was made but its Python isn't there: an antivirus may have taken " +
                     "python.exe. See the log, then Retry.");
+            DropTempCache(ctx);
         }
 
         void InstallPackages(StepContext ctx)
@@ -245,12 +247,16 @@ namespace IndiePulse
                 if (code != 0) throw new StepFailed("Couldn't install the packages (pip said code " + code + "). See the log, then Retry.");
             }
             File.WriteAllText(home.Stamp, home.RequirementsHash(), Encoding.ASCII);
-            if (!home.KitPresent && !Home.Inside(Cache, home.Runtime))
-            {
-                // the short cache in %TEMP%: the venv has what it needs (a copy or a hard link of each file)
-                try { Files.DeleteTree(Cache); }
-                catch (IOException ex) { ctx.Log.Write("the temporary cache stays", ex); }
-            }
+            DropTempCache(ctx);
+        }
+
+        // The short cache in %TEMP% (Cache), once a step that may have used it is done: the venv has what it needs
+        // (a copy or a hard link of each file), and nothing of a portable copy stays behind on the computer
+        void DropTempCache(StepContext ctx)
+        {
+            if (home.KitPresent || Home.Inside(Cache, home.Runtime) || !Directory.Exists(Cache)) return;
+            try { Files.DeleteTree(Cache); }
+            catch (IOException ex) { ctx.Log.Write("the temporary cache stays", ex); }
         }
 
         // ── starting ─────────────────────────────────────────────────────────

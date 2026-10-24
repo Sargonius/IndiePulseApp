@@ -73,6 +73,33 @@ def test_a_release_keeps_uv_and_python_in_its_runtime(monkeypatch, tmp_path):
     assert deps.uv_cache().name.startswith("IndiePulse-uv-")
 
 
+def test_a_short_cache_in_temp_goes_once_used(monkeypatch, tmp_path):
+    """A portable copy in a deep folder leaves nothing in %TEMP% after a repair or an install."""
+    runtime = tmp_path.joinpath(*["a-rather-long-folder-name"] * 3) / "IndiePulse" / "runtime"
+    (runtime / "uv").mkdir(parents=True)
+    (runtime / "uv" / "uv.exe").write_bytes(b"")
+    temp = tmp_path / "temp"
+    monkeypatch.setattr(deps, "KIT", tmp_path / "no-kit")
+    monkeypatch.setattr(deps, "RUNTIME", runtime)
+    monkeypatch.setattr(deps.tempfile, "gettempdir", lambda: str(temp))
+    monkeypatch.setattr(deps, "_STAMP", tmp_path / "stamp")
+    cache = deps.uv_cache()
+    assert cache.parent == temp.resolve()
+
+    def fake_call(cmd, log, env=None):
+        assert env["UV_CACHE_DIR"] == str(cache)
+        cache.mkdir(parents=True, exist_ok=True)  # what uv does with it
+        return True
+    monkeypatch.setattr(deps, "_call", fake_call)
+    assert deps.install_requirements(tmp_path / "pip.log") and not cache.exists()
+    assert deps._repair_python(tmp_path / "venv.log") and not cache.exists()
+    monkeypatch.setattr(deps, "RUNTIME", tmp_path / "IndiePulse" / "runtime")  # a shallow one keeps its own cache
+    own = deps.uv_cache()
+    own.mkdir(parents=True)
+    deps._drop_temp_cache()
+    assert own.exists()
+
+
 def test_a_release_has_its_code_in_lib(tmp_path):
     """IndiePulse.exe, README, LICENSE at the top; lib\\ the code (paths.ROOT); runtime\\venv its venv. A checkout is
     its own code folder with its .venv."""
