@@ -157,3 +157,239 @@ def test_an_old_brief_without_texts_json_reads_from_its_columns(session):
 @pytest.mark.parametrize("code,ok", [("ja", "ja"), ("JA", "ja"), ("pt_BR", "pt-br"), ("j", None), ("日本", None)])
 def test_language_codes(code, ok):
     assert languages.normalize_code(code) == ok
+
+
+# ── publishing by destination ───────────────────────────────────────────────
+
+SENT: list = []
+
+
+class _Rec:
+    """One fake for every network client: records (network, target, text)."""
+
+    def __init__(self, *args, **kw):
+        self.args = args
+        self.last_channel_id = "c"
+        self.last_message_id = None
+        self.reddit = self
+
+    # Telegram: send_message(chat_id, text); Discord: send_message(content, file_paths=...)
+    def send_message(self, *args, **kw):
+        if len(args) == 2:
+            SENT.append(("tg", args[0], args[1]))
+            return {"result": {"message_id": len(SENT)}}
+        SENT.append(("discord", self.args[0], args[0]))
+        self.last_message_id = str(len(SENT))
+        return self.last_message_id, None
+
+    # Facebook
+    def create_post(self, page_id, message):
+        SENT.append(("fb", (page_id, self.args[0]), message))
+        return {"id": f"{page_id}_1"}
+
+    def get_permalink(self, post_id):
+        return f"https://facebook.com/{post_id}"
+
+    # Reddit
+    def submit_text(self, sub, title, text):
+        SENT.append(("reddit", sub, title))
+        return "abc", "https://reddit.com/abc"
+
+    def submission(self, id):
+        return type("S", (), {"permalink": f"/r/x/comments/{id}"})()
+
+    # VK
+    def wall_post(self, owner_id, message):
+        SENT.append(("vk", owner_id, message))
+        return {"post_id": 1}
+
+    # Bluesky
+    def post_thread(self, text, hashtags="", image_paths=None, langs=None, video_path=None):
+        SENT.append(("bluesky", tuple(langs or ()), text))
+        return "at://x/1", "https://bsky.app/x/1"
+
+
+@pytest.fixture
+def networks(monkeypatch, set_settings):
+    from app.services import (bluesky_client, discord_client, facebook_client, reddit_client, telegram_client,
+                              vk_client)
+    for mod, name in ((telegram_client, "TelegramClient"), (discord_client, "DiscordClient"),
+                      (facebook_client, "FacebookClient"), (reddit_client, "RedditClient"),
+                      (vk_client, "VKClient"), (bluesky_client, "BlueskyClient")):
+        monkeypatch.setattr(mod, name, _Rec)
+    set_settings(**OWNER, vk_access_token="vk", vk_group_id="club42", bluesky_handle="me.bsky.social",
+                 bluesky_app_password="pw", reddit_client_id="id", reddit_client_secret="s",
+                 reddit_username="u", reddit_password="p")
+    SENT.clear()
+    return SENT
+
+
+def _post(session, platform, destination_id=None, **texts):
+    """A queued post of a new brief with these texts ({lang: text}) and its publish job → (post id, job id).
+    The tests reuse texts in one DB: the duplicate guard is let through except where it is the point."""
+    brief = Brief(user_id=1, type="post")
+    languages.set_brief_texts(brief, texts)
+    session.add(brief)
+    session.commit()
+    return _post_of(session, brief.id, platform, destination_id, allow_duplicate=True)
+
+
+def _post_of(session, brief_id, platform, destination_id=None, allow_duplicate=False):
+    from app.models.models import Job, JobKindEnum, Post
+    from app.services import duplicates
+    post = Post(user_id=1, brief_id=brief_id, platform=platform, destination_id=destination_id)
+    session.add(post)
+    session.commit()
+    payload = {"post_id": post.id, **({duplicates.ALLOW: True} if allow_duplicate else {})}
+    job = Job(kind=JobKindEnum.publish, payload_json=json.dumps(payload))
+    session.add(job)
+    session.commit()
+    return post.id, job.id
+
+
+def _publish(ids):
+    from app.jobs import tasks
+    return tasks._publish_news_post_impl(ids[1], ids[0])
+
+
+def _with_ja(**changes):
+    """The owner's destinations plus Japanese: a JA Telegram channel, Discord webhook, Facebook page, subreddit.
+    `changes`: {destination id: {field: value}} applied on top."""
+    destinations.migrate_settings()
+    items = [{"id": d["id"], "module": d["module"], "lang": d["lang"], "enabled": d["enabled"],
+              "skip_without_text": d["skip_without_text"]} for d in destinations.stored(load_settings())]
+    items += [
+        {"module": "telegram", "lang": "ja", "target": {"chat_id": "-100222"}},
+        {"module": "discord", "lang": "ja", "target": {"webhook": "https://hook/ja"}},
+        {"module": "facebook", "lang": "ja", "target": {"page_id": "33", "page_token": "tok-ja"}},
+        {"module": "reddit", "lang": "ja", "target": {"subreddit": "IndieGamesJP"}},
+    ]
+    for it in items:
+        it.update(changes.get(it.get("id") or f"{it['module']}-{it['lang']}", {}))
+    res = destinations.save(["ru", "en", "ja"], items)
+    assert res["ok"], res
+
+
+TEXTS = dict(ru="Привет", en="Hello", ja="こんにちは")
+
+
+@pytest.mark.parametrize("platform, dest, expected", [
+    ("tg", "telegram-ja", ("tg", "-100222", "こんにちは")),
+    ("tg", "telegram-ru", ("tg", "-100111", "Привет")),
+    ("discord", "discord-ja", ("discord", "https://hook/ja", "こんにちは")),
+    ("discord", "discord-en", ("discord", "https://hook/en", "Hello")),
+    ("fb_en", "facebook-ja", ("fb", ("33", "tok-ja"), "こんにちは")),
+    ("fb_ru", "facebook-ru", ("fb", ("11", "tok-ru"), "Привет")),
+    ("reddit", "reddit-ja", ("reddit", "IndieGamesJP", "こんにちは")),
+])
+def test_a_post_to_a_destination_goes_there_in_its_language(session, networks, platform, dest, expected):
+    _with_ja()
+    assert _publish(_post(session, platform, dest, **TEXTS)) == "ok"
+    assert networks == [expected]
+
+
+def test_single_account_networks_take_their_destinations_language(session, networks):
+    from app.models.models import Post
+    from app.platforms import x as xp
+    _with_ja(vk={"lang": "ja"}, bluesky={"lang": "ja"})
+    assert _publish(_post(session, "vk", "vk", **TEXTS)) == "ok"
+    assert _publish(_post(session, "bluesky", "bluesky", **TEXTS)) == "ok"
+    assert networks == [("vk", "-42", "こんにちは"), ("bluesky", ("ja",), "こんにちは")]
+    post = Post(user_id=1, brief_id=1, platform="x", destination_id="x")
+    b = Brief(user_id=1, type="post")
+    languages.set_brief_texts(b, TEXTS)
+    assert xp.compose(b, post)[0] == "Hello"
+    _with_ja(x={"lang": "ja"})
+    assert xp.compose(b, post)[0] == "こんにちは"
+    assert xp.compose(b)[0] == "Hello"  # no post, so no destination: EN first, as before
+
+
+def test_fallback_its_language_then_the_first_then_any(session, networks):
+    _with_ja()
+    # no JA text: the first language's (RU) goes to the JA channel
+    assert _publish(_post(session, "tg", "telegram-ja", ru="Привет", en="Hello")) == "ok"
+    # no JA, no RU: any text there is
+    assert _publish(_post(session, "tg", "telegram-ja", en="Hello only")) == "ok"
+    assert [s[2] for s in networks] == ["Привет", "Hello only"]
+    assert _publish(_post(session, "bluesky", "bluesky", ru="Только русский")) == "ok"
+    assert networks[-1] == ("bluesky", ("ru",), "Только русский")  # tagged with the language it really is
+
+
+def test_a_destination_for_its_own_language_only_gets_nothing_without_it(session, networks):
+    from app.models.models import Post, PostStatusEnum
+    _with_ja()
+    ids = _post(session, "discord", "discord-en", ru="Только RU")
+    assert _publish(ids) == "no_text"
+    post = reload(Post, ids[0])
+    assert post.status == PostStatusEnum.canceled and "no_text_in_language" in post.error_text
+    assert networks == []
+
+
+def test_per_post_overrides_work_per_language(session, networks):
+    from app.models.models import Post
+    _with_ja()
+    pid, jid = _post(session, "tg", "telegram-ja", **TEXTS)
+    with Session(engine) as s:
+        p = s.get(Post, pid)
+        p.overrides_json = json.dumps({"text_ja": "上書き"}, ensure_ascii=False)
+        s.add(p)
+        s.commit()
+    assert _publish((pid, jid)) == "ok"
+    assert networks == [("tg", "-100222", "上書き")]
+
+
+def test_posts_without_a_destination_publish_exactly_as_before(session, networks):
+    """Queued before destinations (or by a path that names none): the old keys, the old text order —
+    even after the destinations were changed."""
+    _with_ja(**{"telegram-ru": {"lang": "ja"}, "x": {"lang": "ja"}})
+    assert _publish(_post(session, "tg", None, **TEXTS)) == "ok"            # RU text → tg_chat_id_ru
+    assert _publish(_post(session, "discord", None, **TEXTS)) == "ok"       # one post → the RU and EN webhooks
+    assert _publish(_post(session, "fb_en", None, **TEXTS)) == "ok"         # the EN page, EN text
+    assert _publish(_post(session, "reddit", None, **TEXTS)) == "ok"        # the EN subreddit, EN text
+    assert _publish(_post(session, "vk", None, en="Hello")) == "ok"         # RU first, else EN
+    assert networks == [
+        ("tg", "-100111", "Привет"),
+        ("discord", "https://hook/ru", "Привет"), ("discord", "https://hook/en", "Hello"),
+        ("fb", ("22", "tok-en"), "Hello"),
+        ("reddit", "gamedev", "Hello"),
+        ("vk", "-42", "Hello"),
+    ]
+
+
+def test_a_removed_or_turned_off_destination_is_never_replaced_by_another(session, networks):
+    from app.models.models import Post, PostStatusEnum
+    _with_ja(**{"telegram-ja": {"enabled": False}})
+    ids = _post(session, "tg", "telegram-ja", **TEXTS)
+    assert _publish(ids) == "destination_off"
+    assert "turned off" in reload(Post, ids[0]).error_text
+    ids = _post(session, "tg", "telegram-gone", **TEXTS)
+    assert _publish(ids) == "destination_off"
+    post = reload(Post, ids[0])
+    assert post.status == PostStatusEnum.error and "removed" in post.error_text
+    assert networks == []
+
+
+def test_destinations_of_a_module_that_is_off_are_hidden_and_skipped(session, networks, set_settings):
+    _with_ja()
+    set_settings(modules_disabled=["telegram"])
+    modules_in_form = [g["module"] for g in destinations.for_form("post")]
+    assert "telegram" not in modules_in_form and "discord" in modules_in_form
+    usable, skipped = destinations.chosen(["telegram-ja", "discord-ja"])
+    assert [d["id"] for d in usable] == ["discord-ja"] and skipped == ["telegram-ja"]
+    assert _publish(_post(session, "tg", "telegram-ja", **TEXTS)) == "module_off"
+    assert networks == []
+
+
+def test_two_destinations_of_one_platform_are_not_duplicates(session, networks):
+    from app.models.models import Post, PostStatusEnum
+    _with_ja()
+    first = _post(session, "tg", "telegram-ru", ru="Один раз", en="Once")
+    assert _publish(first) == "ok"
+    brief_id = reload(Post, first[0]).brief_id
+    # the same publication to a second channel is not a twin of the first...
+    assert _publish(_post_of(session, brief_id, "tg", "telegram-ja")) == "ok"
+    # ...the same channel again is
+    again = _post_of(session, brief_id, "tg", "telegram-ja")
+    assert _publish(again) == "duplicate"
+    assert reload(Post, again[0]).status == PostStatusEnum.canceled
+    assert [s[1] for s in networks] == ["-100111", "-100222"]

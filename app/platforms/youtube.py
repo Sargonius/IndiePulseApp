@@ -59,10 +59,13 @@ def publish(session, post, job) -> Optional[str]:
             title = override_title
     except Exception:
         pass
+    # the text in the destination's language (EN first for a post without one)
+    from app.platforms.common import post_text
+    body = post_text(brief, post, ('en', 'ru'), cfg)
     if not title:
-        title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'IndiePulse Short')[:90]
-    # For YouTube, include English description and hashtags
-    desc = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'Uploaded via IndiePulse')
+        title = (getattr(brief, 'title', None) or body or 'IndiePulse Short')[:90]
+    # Description with hashtags
+    desc = (body or 'Uploaded via IndiePulse')
     if brief and getattr(brief, 'tags_json', None):
         try:
             desc = (desc + '\n' + brief.tags_json).strip()

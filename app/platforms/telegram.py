@@ -1,4 +1,4 @@
-"""Telegram channel (RU)."""
+"""Telegram channels (one per destination; a post without one goes to tg_chat_id_ru)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -15,13 +15,14 @@ def publish(session, post, job) -> Optional[str]:
         from app.models.models import Brief
         cfg = load_settings()
         bot = (cfg.get('tg_bot_token') or '').strip()
-        chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
-        from app.platforms.common import brief_for_publish
+        from app.platforms.common import brief_for_publish, post_destination, post_text
+        dest = post_destination(post, cfg)
+        chat_id = ((dest['target'].get('chat_id') if dest else cfg.get('tg_chat_id_ru')) or '').strip()
         brief = brief_for_publish(session, post)
         if not (bot and chat_id and brief):
             raise RuntimeError('tg_not_configured')
         # No hashtags on Telegram — post the body text as-is, keeping its formatting.
-        text = (brief.text_ru or brief.text_en or '')
+        text = post_text(brief, post, ('ru', 'en'), cfg)
         client = TelegramClient(bot)
         # Prefer image/video if available (use normal/horizontal media)
         media_rel = getattr(brief, 'media_normal_path', None) or getattr(brief, 'media_path', None)
@@ -74,6 +75,16 @@ def publish(session, post, job) -> Optional[str]:
         return 'error'
 
 
+def chat_of(post, cfg) -> str:
+    """The chat a post went to: its destination's, or the original channel."""
+    from app.platforms.common import post_destination
+    try:
+        dest = post_destination(post, cfg)
+    except RuntimeError:
+        return ''  # destination removed since: nothing to read
+    return ((dest['target'].get('chat_id') if dest else cfg.get('tg_chat_id_ru')) or '').strip()
+
+
 def fetch_metrics(post) -> dict:
     """Engagement counters for a published post; may raise (caller records the error)."""
     from app.services.settings import load_settings
@@ -81,7 +92,7 @@ def fetch_metrics(post) -> dict:
     # Bot API exposes no stats; for public channels we parse views from the t.me embed page
     cfg = load_settings()
     bot = (cfg.get('tg_bot_token') or '').strip()
-    chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+    chat_id = chat_of(post, cfg)
     views = None
     try:
         if bot and chat_id:

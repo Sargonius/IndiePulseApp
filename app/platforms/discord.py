@@ -14,8 +14,9 @@ def publish(session, post, job) -> Optional[str]:
     settings = load_settings()
     # Compose per-language messages and target webhooks
     from app.models.models import Brief
-    from app.platforms.common import brief_for_publish
+    from app.platforms.common import brief_for_publish, post_destination, post_text
     brief = brief_for_publish(session, post)
+    dest = post_destination(post, settings)
     text_ru = (brief.text_ru or '').strip() if brief else ''
     text_en = (brief.text_en or '').strip() if brief else ''
     # Build gallery list for Discord; prefer payload.gallery, else single media (use normal/horizontal)
@@ -68,12 +69,27 @@ def publish(session, post, job) -> Optional[str]:
     attachments = [chosen_video] if chosen_video else abs_files[:10]
 
     targets = []
-    if text_ru and settings.get('discord_webhook_ru'):
+    if dest is not None:
+        # one destination = one webhook, with the text in its language
+        if not dest['target'].get('webhook'):
+            post.status = PostStatusEnum.error
+            post.error_text = f"discord_not_configured: no webhook for {dest['id']}"
+            if job is not None:
+                job.status = JobStatusEnum.error
+                job.last_error = post.error_text
+                session.add(job)
+            session.add(post)
+            session.commit()
+            return 'error'
+        targets.append((dest['id'], dest['target']['webhook'],
+                        post_text(brief, post, cfg=settings).strip() or '[IndiePulse] New post'))
+    # A post without a destination (queued before them): the old RU + EN webhooks of one post
+    elif text_ru and settings.get('discord_webhook_ru'):
         targets.append(('ru', settings.get('discord_webhook_ru'), text_ru))
-    if text_en and settings.get('discord_webhook_en'):
+    if dest is None and text_en and settings.get('discord_webhook_en'):
         targets.append(('en', settings.get('discord_webhook_en'), text_en))
     # Fallback: if no specific webhooks configured, use default once with whichever text available
-    if not targets and settings.get('discord_webhook_url'):
+    if dest is None and not targets and settings.get('discord_webhook_url'):
         fallback_text = text_en or text_ru or '[IndiePulse] New post'
         targets.append(('default', settings.get('discord_webhook_url'), fallback_text))
 

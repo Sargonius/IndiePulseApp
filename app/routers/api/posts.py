@@ -319,8 +319,8 @@ def delete_post_remote(post_id: int, session: Session = Depends(get_session)):
                 error = str(e)
         
         elif platform in ('fb_ru', 'fb_en', 'PlatformEnum.fb_ru', 'PlatformEnum.fb_en') and post.platform_post_id:
-            is_ru = 'ru' in platform
-            page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+            from app.platforms.facebook import page_of
+            page_token = page_of(post, cfg)[1]  # its destination's page, else the RU / EN one
             if page_token:
                 with httpx.Client(timeout=15) as client:
                     r = client.delete(
@@ -349,8 +349,9 @@ def delete_post_remote(post_id: int, session: Session = Depends(get_session)):
                 error = str(e)
         
         elif platform.endswith('tg') and post.platform_post_id:
+            from app.platforms.telegram import chat_of
             token = (cfg.get('tg_bot_token') or '').strip()
-            chat_id = (cfg.get('tg_chat_id_ru') or '').strip()
+            chat_id = chat_of(post, cfg)  # its destination's chat, else the original channel
             if token and chat_id and post.platform_post_id:
                 try:
                     from app.services.telegram_client import TelegramClient
