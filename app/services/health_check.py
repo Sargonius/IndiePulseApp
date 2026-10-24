@@ -546,6 +546,58 @@ def check_openai(cfg: dict, r: _Result) -> None:
         r.warn(f"HTTP {resp.status_code}: {e.get('message') or _short(d)}")
 
 
+def check_claude(cfg: dict, r: _Result) -> None:
+    from app.services import anthropic_client
+    key, model = _s(cfg, "anthropic_api_key"), _s(cfg, "anthropic_model") or anthropic_client.DEFAULT_MODEL
+    if not key:
+        r.status = "off"
+        r.summary = "not configured"
+        return
+    # a tiny request, like OpenAI's: an empty credit balance only shows on a real one
+    try:
+        _text, model = anthropic_client.chat([{"role": "user", "content": "ping"}], max_tokens=64, model=model,
+                                             api_key=key, timeout=TIMEOUT)
+    except anthropic_client.ClaudeError as exc:
+        msg = str(exc)
+        if "credit balance" in msg.lower():
+            r.summary = "out of credits"
+            r.err(f"balance ran out: {_short(msg, 120)}",
+                  "Top up at platform.claude.com → Billing. Until then, translation uses machine translation.")
+        elif "401" in msg:
+            r.err("key rejected (401)", "Create a new key at platform.claude.com → API keys.")
+        elif "404" in msg:
+            r.err(f"model {model} unavailable",
+                  f"Change the Claude model in Settings (e.g. {anthropic_client.DEFAULT_MODEL}).")
+        else:
+            r.warn(_short(msg, 200))
+        return
+    r.ok(f"key and balance OK, model {model}")
+    r.summary = model
+
+
+def check_deepl(cfg: dict, r: _Result) -> None:
+    key = _s(cfg, "deepl_api_key")
+    if not key:
+        r.status = "off"
+        r.summary = "not configured (free public translators)"
+        return
+    host = "https://api-free.deepl.com" if key.endswith(":fx") else "https://api.deepl.com"
+    resp = httpx.get(f"{host}/v2/usage", headers={"Authorization": f"DeepL-Auth-Key {key}"}, timeout=TIMEOUT)
+    if resp.status_code == 403:
+        r.err("key rejected (403)", "Copy the key again from deepl.com → Account → API keys.")
+        return
+    if resp.status_code >= 400:
+        r.warn(f"HTTP {resp.status_code}: {_short(resp.text, 160)}")
+        return
+    d = _json(resp)
+    used, limit = int(d.get("character_count") or 0), int(d.get("character_limit") or 0)
+    r.summary = f"{used:,} / {limit:,} characters" if limit else f"{used:,} characters"
+    if limit and used >= limit:
+        r.err("this month's characters are used up", "Wait for the next month or upgrade at deepl.com.")
+    else:
+        r.ok(f"key OK, {r.summary} this month")
+
+
 def check_steam(cfg: dict, r: _Result) -> None:
     """Steamworks Financial API key: yesterday's wishlist report for every game."""
     key = _s(cfg, "steam_financial_api_key")
@@ -638,6 +690,8 @@ CHECKS: list[tuple[str, str, Callable[[dict, _Result], None]]] = [
     ("tiktok", "TikTok", check_tiktok),
     ("bluesky", "Bluesky", check_bluesky),
     ("openai", "OpenAI", check_openai),
+    ("claude", "Claude", check_claude),
+    ("deepl", "DeepL", check_deepl),
     ("steam", "Steam: wishlists & sales", check_steam),
     ("local", "Local: ffmpeg / worker / disk", check_local),
 ]

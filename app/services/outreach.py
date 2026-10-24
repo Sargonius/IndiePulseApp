@@ -710,9 +710,10 @@ def fallback_letter(f: dict) -> tuple[str, str]:
 
 
 def generate_letter(session: Session, contact: OutreachContact) -> dict:
-    """Draft subject + body (OpenAI when configured, otherwise a template), put the
-    contact's key in place of {KEY}, save it on the contact and return it."""
-    from app.services import openai_client
+    """Draft subject + body (the AI from Settings — OpenAI or Claude — when configured,
+    otherwise a template), put the contact's key in place of {KEY}, save it on the
+    contact and return it."""
+    from app.services import llm
 
     facts = letter_facts(session, contact)
     warnings: list[str] = []
@@ -724,24 +725,22 @@ def generate_letter(session: Session, contact: OutreachContact) -> dict:
                         "Add what’s new in Letter settings.")
     if facts["signature"] == "the developer":
         warnings.append("No signature yet — set one in Letter settings.")
-    api_key, _ = openai_client.settings()
     subject = body = ""
     model = None
-    if api_key:
+    if llm.provider():
         try:
-            resp, model = openai_client.chat_completion(
+            answer, model = llm.chat(
                 [{"role": "system", "content": _SYSTEM_PROMPT},
                  {"role": "user", "content": f"Write the email in {facts['language']}.\n\n"
                                              + json.dumps(facts, ensure_ascii=False, indent=1)}],
-                temperature=0.7, max_completion_tokens=900, timeout=60)
-            if resp.status_code == 200:
-                subject, body = parse_letter(openai_client.content_of(resp))
-            else:
-                warnings.append(f"OpenAI answered HTTP {resp.status_code} — used the plain template.")
+                temperature=0.7, max_tokens=900, timeout=60)
+            subject, body = parse_letter(answer)
+        except llm.LLMError as exc:
+            warnings.append(f"The AI failed ({exc}) — used the plain template.")
         except Exception as exc:  # network down etc.
-            warnings.append(f"OpenAI failed ({type(exc).__name__}) — used the plain template.")
+            warnings.append(f"The AI failed ({type(exc).__name__}) — used the plain template.")
     else:
-        warnings.append("No OpenAI key in Settings — used the plain template.")
+        warnings.append("No AI key in Settings (OpenAI or Claude) — used the plain template.")
     if not body:
         subject, body = fallback_letter(facts)
     if facts["include_key"]:

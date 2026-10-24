@@ -264,6 +264,7 @@ class Supervisor:
 		self._stop_all()
 		for c in (self.server, self.worker):
 			c.crashes.clear()
+		self._sync_requirements()  # new code may need new packages (Restart after an update), not just a new tray
 		self._start_all()
 		self.phase = "running"
 		self._changed()

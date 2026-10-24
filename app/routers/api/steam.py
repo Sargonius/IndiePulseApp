@@ -4,7 +4,6 @@ import io
 import os
 import time
 from app.core.config import STEAM_APP_ID
-from app.services import openai_client
 from fastapi import APIRouter
 from fastapi import File
 from fastapi import Form
@@ -220,79 +219,37 @@ def steam_translate_text(
     }
     provider = ""
     out = {"title_en": "", "subtitle_en": "", "short_desc_en": "", "body_en": ""}
+    from app.services import llm, machine_translate
+    system = (
+        "You are a professional localization translator for Steam Partner Events. "
+        "Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is in the 'body'. "
+        "Return ONLY a compact JSON object with keys: title_en, subtitle_en, short_desc_en, body_en."
+    )
+    user = (
+        f"title: {src['title']}\n"
+        f"subtitle: {src['subtitle']}\n"
+        f"short_desc: {src['short_desc']}\n"
+        f"body: {src['body']}\n"
+        "Translate all fields to English."
+    )
     try:
-        api_key, model = openai_client.settings()
-        if api_key and model:
-            system = (
-                "You are a professional localization translator for Steam Partner Events. "
-                "Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is in the 'body'. "
-                "Return ONLY a compact JSON object with keys: title_en, subtitle_en, short_desc_en, body_en."
-            )
-            user = (
-                f"title: {src['title']}\n"
-                f"subtitle: {src['subtitle']}\n"
-                f"short_desc: {src['short_desc']}\n"
-                f"body: {src['body']}\n"
-                "Translate all fields to English."
-            )
-            r, model = openai_client.chat_completion([
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ], temperature=0.2, timeout=90)
-            if r.status_code < 400:
-                content = openai_client.content_of(r)
-                import json as _json
-                try:
-                    parsed = _json.loads(content)
-                    out.update({
-                        "title_en": (parsed.get("title_en") or "").strip(),
-                        "subtitle_en": (parsed.get("subtitle_en") or "").strip(),
-                        "short_desc_en": (parsed.get("short_desc_en") or "").strip(),
-                        "body_en": (parsed.get("body_en") or "").strip(),
-                    })
-                    provider = f"openai:{model}"
-                except Exception:
-                    logger.warning(f"steam_translate parse_json_failed raw={content[:400]}")
-            else:
-                logger.warning(f"openai_http_error steam status={r.status_code} model={model} body={r.text[:400]}")
-    except Exception as exc:
-        try:
-            logger.warning("steam_translate openai_error: %s", str(exc))
-        except Exception:
-            pass
-    # Fallbacks if any field missing
-    def contains_cyrillic(s: str) -> bool:
-        return any('а' <= ch <= 'я' or 'А' <= ch <= 'Я' for ch in s)
-    if not all(out.values()) or any(contains_cyrillic(v) for v in out.values()):
-        try:
-            from deep_translator import GoogleTranslator, MyMemoryTranslator, LibreTranslator
-            def tr(s: str) -> str:
-                if not s: return ""
-                for host in ('https://libretranslate.de','https://translate.astian.org'):
-                    try:
-                        v = LibreTranslator(source='ru', target='en', host=host).translate(s) or ""
-                        if v and not contains_cyrillic(v):
-                            return v
-                    except Exception: pass
-                try:
-                    v = GoogleTranslator(source='ru', target='en').translate(s) or ""
-                    if v and not contains_cyrillic(v):
-                        return v
-                except Exception: pass
-                try:
-                    v = MyMemoryTranslator(source='ru', target='en').translate(s) or ""
-                    if v and not contains_cyrillic(v):
-                        return v
-                except Exception: pass
-                return s
-            if not out["title_en"] or contains_cyrillic(out["title_en"]): out["title_en"] = tr(src['title'])
-            if not out["subtitle_en"] or contains_cyrillic(out["subtitle_en"]): out["subtitle_en"] = tr(src['subtitle'])
-            if not out["short_desc_en"] or contains_cyrillic(out["short_desc_en"]): out["short_desc_en"] = tr(src['short_desc'])
-            if not out["body_en"] or contains_cyrillic(out["body_en"]): out["body_en"] = tr(src['body'])
-            if not provider:
-                provider = "fallback"
-        except Exception as exc:
-            provider = provider or "fallback"
+        content, provider = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
+                                     temperature=0.2, timeout=90)
+        parsed = llm.json_object(content)
+        if parsed is None:
+            provider = ""
+            logger.warning(f"steam_translate parse_json_failed raw={content[:400]}")
+        else:
+            out.update({k: str(parsed.get(k) or "").strip() for k in out})
+    except llm.LLMError as exc:
+        logger.warning(f"steam_translate ai: {exc}")
+    # Fallbacks for the fields the AI didn't translate
+    for field, key in (("title", "title_en"), ("subtitle", "subtitle_en"), ("short_desc", "short_desc_en"),
+                       ("body", "body_en")):
+        if src[field] and not machine_translate.looks_translated(src[field], out[key], "en"):
+            text, used = machine_translate.translate(src[field], "en", "ru")
+            out[key] = text or src[field]
+            provider = provider or used or "fallback"
     try:
         logger.info(f"steam_translate provider={provider} tlen={len(src['title'])} blen={len(src['body'])}")
     except Exception:

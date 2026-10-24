@@ -122,9 +122,14 @@ DEFAULTS: Dict[str, Any] = {
     "oauth_state_x": "",
     "oauth_state_tiktok": "",
     "oauth_state_youtube": "",
-    # OpenAI (optional for translation)
+    # AI for translation and outreach letters (app.services.llm): "auto" = OpenAI if it has a key, else Claude
+    "llm_provider": "auto",
     "openai_api_key": "",
     "openai_model": "gpt-6-luna",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-opus-5-5",
+    # DeepL for machine translation (app.services.machine_translate); empty = the free public translators
+    "deepl_api_key": "",
     # Local music directory (Windows default path)
     "music_dir": "E:\\SynthSocial\\Music",
     # Modules turned off on the 🧩 Modules page (app.core.modules); empty = all on

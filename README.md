@@ -47,6 +47,14 @@ and platform checkboxes; the worker neither publishes there nor collects its num
 lives in `app/core/modules.py` (which platforms, URLs and requirements belong to each); what's off is
 `modules_disabled` in the settings.
 
+## AI & translation
+
+⚙️ Settings → AI & translation: your own key for OpenAI or Claude (pick one, or "auto"), plus an optional DeepL key.
+Every translate button (posts, Steam events, Shorts and reposts, TikTok frame text) and the outreach letters ask the
+AI picked there (`app/services/llm.py`; Claude through the official `anthropic` SDK, `anthropic_client.py`); without
+a key or when it fails, machine translation (`machine_translate.py`): DeepL with a key, otherwise the free public
+translators. 🩺 checks the keys (and the balance).
+
 ## Checking the integrations
 
 The 🩺 page (`/status`) checks every configured platform in one click without posting

@@ -186,7 +186,7 @@ class _Resp:
         return {"choices": [{"message": {"content": self._content}}]}
 
 
-def test_translate_with_openai(monkeypatch):
+def test_translate_with_openai(monkeypatch, set_settings):
     from app.services import openai_client
     seen = {}
 
@@ -196,7 +196,7 @@ def test_translate_with_openai(monkeypatch):
         answer = '```json\n{"title": "夜のドライブ", "desc": "ネオンの街 {steam}", "tags": "#インディーゲーム, ゲーム開発"}\n```'
         return _Resp(200, answer), "gpt-test"
 
-    monkeypatch.setattr(openai_client, "settings", lambda: ("key", "gpt-test"))
+    set_settings(openai_api_key="key", openai_model="gpt-test")
     monkeypatch.setattr(openai_client, "chat_completion", fake_chat)
     out = repost.translate({"title": "Night drive", "desc": "Neon city {steam}", "tags": "#indiegame #gamedev"}, "ja")
     assert out == {"title": "夜のドライブ", "desc": "ネオンの街 {steam}", "tags": "#インディーゲーム #ゲーム開発",
@@ -205,9 +205,9 @@ def test_translate_with_openai(monkeypatch):
     assert seen["user"]["title"] == "Night drive"
 
 
-def test_translate_keeps_empty_fields_empty(monkeypatch):
+def test_translate_keeps_empty_fields_empty(monkeypatch, set_settings):
     from app.services import openai_client
-    monkeypatch.setattr(openai_client, "settings", lambda: ("key", "m"))
+    set_settings(openai_api_key="key")
     monkeypatch.setattr(openai_client, "chat_completion",
                         lambda *a, **kw: (_Resp(200, '{"title": "Привет", "desc": "лишнее", "tags": "#x"}'), "m"))
     out = repost.translate({"title": "Hi", "desc": "", "tags": ""}, "ru")
@@ -217,7 +217,6 @@ def test_translate_keeps_empty_fields_empty(monkeypatch):
 
 def test_translate_falls_back_to_google(monkeypatch):
     import deep_translator
-    from app.services import openai_client
 
     class FakeGoogle:
         def __init__(self, source, target):
@@ -226,13 +225,12 @@ def test_translate_falls_back_to_google(monkeypatch):
         def translate(self, text):
             return f"[{self.target}] {text}"
 
-    monkeypatch.setattr(openai_client, "settings", lambda: ("", "m"))
-    monkeypatch.setattr(deep_translator, "GoogleTranslator", FakeGoogle)
+    monkeypatch.setattr(deep_translator, "GoogleTranslator", FakeGoogle)  # no AI key in the settings
     out = repost.translate({"title": "Hi", "desc": "Text", "tags": "#indiegame"}, "ru")
     assert out == {"title": "[ru] Hi", "desc": "[ru] Text", "tags": "#indiegame", "provider": "google"}
 
 
-def test_translate_error_when_nothing_works(monkeypatch):
+def test_translate_error_when_nothing_works(monkeypatch, set_settings):
     import deep_translator
     from app.services import openai_client
 
@@ -240,7 +238,7 @@ def test_translate_error_when_nothing_works(monkeypatch):
         def __init__(self, *a, **kw):
             raise RuntimeError("offline")
 
-    monkeypatch.setattr(openai_client, "settings", lambda: ("key", "m"))
+    set_settings(openai_api_key="key")
     monkeypatch.setattr(openai_client, "chat_completion", lambda *a, **kw: (_Resp(500, text="boom"), "m"))
     monkeypatch.setattr(deep_translator, "GoogleTranslator", Broken)
     with pytest.raises(repost.TranslateError):

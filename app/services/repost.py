@@ -274,21 +274,6 @@ _SYSTEM = (
 )
 
 
-def _parse_json_object(content: str) -> Optional[dict]:
-    raw = (content or "").strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
-    for candidate in (raw, (re.search(r"\{.*\}", raw, re.S) or [None])[0]):
-        if not candidate:
-            continue
-        try:
-            data = json.loads(candidate)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(data, dict):
-            return data
-    return None
-
-
 def normalize_tags(tags: str) -> str:
     """'#a, b  #c' → '#a #b #c' (hashtags can't hold spaces or commas)."""
     out = []
@@ -305,53 +290,38 @@ def normalize_tags(tags: str) -> str:
 def translate(fields: dict, target: str) -> dict:
     """{title, desc, tags} → the same in `target` ('en' | 'ja' | 'ru') + provider.
 
-    OpenAI first (settings model); without a key or on failure, Google Translate for
-    the title and description (hashtags stay as they are). Raises TranslateError when
-    neither works.
+    The AI from Settings first (OpenAI or Claude); without a key or on failure, machine
+    translation (DeepL or Google) for the title and description (hashtags stay as they
+    are). Raises TranslateError when neither works.
     """
-    from app.services import openai_client
+    from app.services import llm, machine_translate
     if target not in LANGS:
         raise ValueError(f"unknown language: {target}")
     src = {k: str(fields.get(k) or "").strip() for k in ("title", "desc", "tags")}
     if not any(src.values()):
         return {**src, "provider": ""}
     lang = LANG_NAMES[target]
-    problem = ""
     try:
-        key, _ = openai_client.settings()
-        if key:
-            user = json.dumps(src, ensure_ascii=False)
-            resp, model = openai_client.chat_completion(
-                [{"role": "system", "content": _SYSTEM.format(lang=lang)},
-                 {"role": "user", "content": user}],
-                temperature=0.3, timeout=60)
-            if resp.status_code < 400:
-                data = _parse_json_object(openai_client.content_of(resp))
-                if data is not None:
-                    return {
-                        "title": str(data.get("title") or "").strip() if src["title"] else "",
-                        "desc": str(data.get("desc") or "").strip() if src["desc"] else "",
-                        "tags": normalize_tags(str(data.get("tags") or "")) if src["tags"] else "",
-                        "provider": f"openai:{model}",
-                    }
-                problem = "openai: not a JSON answer"
-            else:
-                problem = f"openai: HTTP {resp.status_code}"
-                logger.warning(f"repost translate openai status={resp.status_code} body={resp.text[:300]}")
-        else:
-            problem = "no OpenAI key"
-    except Exception as exc:
-        problem = f"openai: {exc}"
-        logger.warning(f"repost translate openai error: {exc}")
-    try:
-        from deep_translator import GoogleTranslator
-        gt = GoogleTranslator(source="auto", target=target)
-        return {
-            "title": (gt.translate(src["title"]) or "").strip() if src["title"] else "",
-            "desc": (gt.translate(src["desc"]) or "").strip() if src["desc"] else "",
-            "tags": src["tags"],
-            "provider": "google",
-        }
-    except Exception as exc:
-        logger.warning(f"repost translate fallback error: {exc}")
-        raise TranslateError(f"translation failed ({problem}; google: {exc})")
+        content, provider = llm.chat(
+            [{"role": "system", "content": _SYSTEM.format(lang=lang)},
+             {"role": "user", "content": json.dumps(src, ensure_ascii=False)}],
+            temperature=0.3, timeout=60)
+        data = llm.json_object(content)
+        if data is not None:
+            return {
+                "title": str(data.get("title") or "").strip() if src["title"] else "",
+                "desc": str(data.get("desc") or "").strip() if src["desc"] else "",
+                "tags": normalize_tags(str(data.get("tags") or "")) if src["tags"] else "",
+                "provider": provider,
+            }
+        problem = f"{provider}: not a JSON answer"
+    except llm.LLMError as exc:
+        problem = str(exc)
+        logger.warning(f"repost translate ai: {exc}")
+    out, used = {"tags": src["tags"]}, ""
+    for field in ("title", "desc"):
+        out[field], name = machine_translate.translate(src[field], target) if src[field] else ("", "")
+        used = used or name
+        if src[field] and not out[field]:
+            raise TranslateError(f"translation failed ({problem}; machine translation: nothing worked)")
+    return {**out, "provider": used}

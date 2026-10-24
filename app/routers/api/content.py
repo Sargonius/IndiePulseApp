@@ -74,77 +74,53 @@ def test_openai(openai_model: Optional[str] = None):
         return {"ok": False, "error": str(exc)}
 
 
+@router.get("/translate/test_claude")
+def test_claude(anthropic_model: Optional[str] = None):
+    """Settings → AI → Claude → Test; tries the model typed in the form (before saving)."""
+    from app.services import anthropic_client
+    try:
+        text, model = anthropic_client.chat([
+            {"role": "system", "content": "You translate RU to EN. Answer with the translation only."},
+            {"role": "user", "content": "Привет мир"},
+        ], max_tokens=2000, model=(anthropic_model or "").strip() or None, timeout=60)
+        return {"ok": bool(text), "response": {"model": model, "translation": text}}
+    except anthropic_client.ClaudeError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/translate/test_deepl")
+def test_deepl():
+    """Settings → AI → DeepL → Test."""
+    from app.services import machine_translate
+    try:
+        return {"ok": True, "response": {"translation": machine_translate.deepl("Привет мир", "en", "ru")}}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @router.post("/translate")
 def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form(None)):
+    """RU → EN for the post forms: the AI from Settings (OpenAI or Claude), then machine translation (DeepL or the
+    free translators), then the source marked "EN:" so the post still goes out."""
+    from app.services import llm, machine_translate
     src = (ru_text or text_ru or "").strip()
     if not src:
         return HTMLResponse("<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\"></textarea>")
-    def contains_cyrillic(s: str) -> bool:
-        return any('а' <= ch <= 'я' or 'А' <= ch <= 'Я' for ch in s)
-    en = ""
-    err = None
-    provider = ""
-    # 1) Try OpenAI if configured
+    en, provider = "", ""
     try:
-        api_key, model = openai_client.settings()
-        if api_key and model:
-            r, model = openai_client.chat_completion([
-                {"role": "system", "content": "You are a professional localization translator. Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is. Do not add commentary; return only the translated text."},
-                {"role": "user", "content": f"Translate to English, preserving markup:\n\n{src}"},
-            ], temperature=0.2, timeout=60)
-            if r.status_code < 400:
-                en = openai_client.content_of(r)
-                if en:
-                    provider = f"openai:{model}"
-                else:
-                    logger.warning(f"openai_empty_response model={model} raw={r.text[:400]}")
-            else:
-                logger.warning(f"openai_http_error status={r.status_code} model={model} body={r.text[:400]}")
-    except Exception as e_oa:
-        err = e_oa
-    # 2) Fallback chain via deep_translator
-    if not en or contains_cyrillic(en):
-        try:
-            from deep_translator import GoogleTranslator, MyMemoryTranslator, LibreTranslator
-            for host in (
-                'https://libretranslate.de',
-                'https://translate.astian.org',
-            ):
-                try:
-                    en = LibreTranslator(source='ru', target='en', host=host).translate(src) or ""
-                    if en and not contains_cyrillic(en):
-                        provider = f"libre:{host}"
-                        break
-                except Exception as e_lt:
-                    err = e_lt
-            if not en or contains_cyrillic(en):
-                try:
-                    en = GoogleTranslator(source='ru', target='en').translate(src) or ""
-                    if en and not contains_cyrillic(en):
-                        provider = "google"
-                except Exception as e1:
-                    err = e1
-            if not en or contains_cyrillic(en):
-                try:
-                    en = MyMemoryTranslator(source='ru', target='en').translate(src) or ""
-                    if en and not contains_cyrillic(en):
-                        provider = "mymemory"
-                except Exception as e2:
-                    err = e2
-        except Exception as e:
-            err = e
-    # 3) Final fallback: echo with EN: prefix
-    if not en or contains_cyrillic(en):
-        en = f"EN: {src}"
-        if not provider:
-            provider = "fallback"
+        en, provider = llm.chat([
+            {"role": "system", "content": "You are a professional localization translator. Translate Russian to natural, idiomatic English. Preserve Steam markup tags (e.g., [h1], [b], [url], [list]) exactly as-is. Do not add commentary; return only the translated text."},
+            {"role": "user", "content": "Translate to English, preserving markup:\n\n" + src},
+        ], temperature=0.2, timeout=60)
+    except llm.LLMError as exc:
+        logger.warning(f"translate ai: {exc}")
+    if not machine_translate.looks_translated(src, en, "en"):
+        en, provider = machine_translate.translate(src, "en", "ru")
+    if not en:
+        en, provider = f"EN: {src}", "fallback"
     save_draft({"text_ru": src, "text_en": en})
-    info = provider or ("fallback" if en.startswith("EN: ") else "ok")
-    try:
-        logger.info(f"translate provider={info} in_len={len(src)} out_len={len(en)}")
-    except Exception:
-        pass
-    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\" data-translator=\"{_e(info)}\">{_e(en)}</textarea><!-- provider: {_e(info)} -->"
+    logger.info(f"translate provider={provider} in_len={len(src)} out_len={len(en)}")
+    html = f"<textarea id=\"text_en\" name=\"text_en\" rows=\"6\" cols=\"80\" data-translator=\"{_e(provider)}\">{_e(en)}</textarea><!-- provider: {_e(provider)} -->"
     return HTMLResponse(html)
 
 

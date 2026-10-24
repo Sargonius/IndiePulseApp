@@ -111,9 +111,13 @@ def save_settings_endpoint(
 	reddit_username: str = Form(""),
 	reddit_password: str = Form(""),
 	reddit_subreddit_en: str = Form(""),
-	# OpenAI
+	# AI for translation and letters: OpenAI or Claude; DeepL for machine translation
+	llm_provider: str = Form(""),
 	openai_api_key: str = Form(""),
 	openai_model: str = Form(""),
+	anthropic_api_key: str = Form(""),
+	anthropic_model: str = Form(""),
+	deepl_api_key: str = Form(""),
 	# Telegram
 	tg_bot_token: str = Form(""),
 	tg_chat_id_ru: str = Form(""),
@@ -209,6 +213,14 @@ def save_settings_endpoint(
 		updates["openai_api_key"] = openai_api_key.strip()
 	if openai_model.strip():
 		updates["openai_model"] = openai_model.strip()
+	if llm_provider.strip() in ("auto", "openai", "anthropic"):
+		updates["llm_provider"] = llm_provider.strip()
+	if anthropic_api_key.strip():
+		updates["anthropic_api_key"] = anthropic_api_key.strip()
+	if anthropic_model.strip():
+		updates["anthropic_model"] = anthropic_model.strip()
+	if deepl_api_key.strip():
+		updates["deepl_api_key"] = deepl_api_key.strip()
 	if tg_bot_token.strip():
 		updates["tg_bot_token"] = tg_bot_token.strip()
 	if tg_chat_id_ru.strip():
@@ -343,10 +355,16 @@ def settings_status():
         return {'status': 'configured', 'message': 'API access configured'}
     
     def check_openai():
-        key = (cfg.get('openai_api_key') or '').strip()
-        if not key:
-            return {'status': 'not_configured', 'message': 'No API key'}
-        return {'status': 'configured', 'message': 'API key set'}
+        # the "AI & translation" section: which AI the translate buttons use, and DeepL
+        from app.services import llm
+        which = llm.provider(cfg)
+        if which:
+            model = cfg.get(f'{which}_model') or ''
+            extra = ' + DeepL' if (cfg.get('deepl_api_key') or '').strip() else ''
+            return {'status': 'configured', 'message': f'{llm.PROVIDERS[which]} {model}{extra}'.strip()}
+        if (cfg.get('openai_api_key') or cfg.get('anthropic_api_key') or '').strip():
+            return {'status': 'partial', 'message': 'The AI picked has no key'}
+        return {'status': 'not_configured', 'message': 'No AI key: free translators only'}
 
     def check_bluesky():
         handle = (cfg.get('bluesky_handle') or '').strip()

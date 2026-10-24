@@ -822,3 +822,6 @@ input.or-saved { border-color: var(--success) !important; }
 .module-card.module-off { opacity: .6; }
 .module-note { font-size: 12px; }
 .module-warn { color: #b45309; }
+
+/* ⚙️ AI & translation */
+.ai-sub { margin: 14px 0 6px; font-size: 14px; }
