@@ -70,7 +70,7 @@ def _contains_name(text: str, name: str) -> bool:
 
 def _strip_common(text: str, project_name: str) -> str:
     """Drop the game name and the Steam call-to-action before comparing
-    scripts: 'Project Apocalypse — Wishlist on Steam' is fine on any clip."""
+    scripts: '<Your game> — Wishlist on Steam' is fine on any clip."""
     t = text or ""
     if project_name:
         t = re.sub(re.escape(project_name), " ", t, flags=re.I)

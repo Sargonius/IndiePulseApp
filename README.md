@@ -25,14 +25,8 @@ doesn't come up within 4 minutes, the previous one is put back by itself and the
 `logs\update.log`). The previous version stays in `updates\previous` of the data folder until the next update.
 
 ⚙️ Settings → **Updates**: *Tell me* (the default) / *Install it by itself when nothing is publishing* / *Don't
-check*; the repository releases come from; the access token; **Check now**. The tray menu has **Check for updates**.
-
-**Access token.** The releases are in a private repository, so the update check needs a token that can read it:
-GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token; *Repository access*: Only
-select repositories → `Sargonius/IndiePulseNew`; *Permissions* → Repository → **Contents: Read-only**; pick an
-expiration. Paste it in Settings → Updates, Save, Check now. Without one the check says *set an access token* instead
-of pretending there is nothing new; an expired token says so too. The token is only sent to api.github.com and is
-masked in the logs.
+check*; **Check now**. The tray menu has **Check for updates**. (Running your own build from a private fork? Point
+*Repository* at it and add a fine-grained GitHub token with Contents: Read-only.)
 
 An update replaces the code — `app\`, the launchers, `requirements.*`, `README.md` — and nothing else: not `.venv`,
 `.env`, `portable.txt` or the data. A **git checkout** is never updated in place and doesn't check by itself (Check now
@@ -49,13 +43,11 @@ time, each of which can be skipped:
 3. **Accounts**: the Settings sections of the networks you picked (keys, connect buttons, their instructions), and a
    channel / webhook / Page / subreddit per language if you have several.
 4. **AI & translation**: optional OpenAI / Claude / DeepL keys.
-5. **Updates**: how to handle a new version, and the access token while the repository is private.
+5. **Updates**: how to handle a new version.
 
 The step reached is remembered, so a restart in the middle comes back to it. **Skip setup** leaves it for good;
 ⚙️ Settings → **Run setup again** goes through it again (without taking over the home page). An install that already
-has settings is never sent there: its first start of a version with the wizard marks it set up, and writes into its
-settings the values it used to get from built-in defaults that new installs no longer have (a music folder, a
-YouTube playlist, the Steam game of the store-news export, the hashtags of *Suggest*), so it works exactly as before.
+has settings is never sent there: its first start of a version with the wizard marks it set up.
 
 **Where settings live.** Everything you enter in ⚙️ Settings or the wizard is in `.settings.json` in the data folder,
 next to the databases: `%LOCALAPPDATA%\IndiePulse`, `data\` of a portable copy, or the IndiePulse folder itself for
@@ -81,7 +73,7 @@ profile or on the drive under another letter) is recognised by `pyvenv.cfg` and 
 uv it is built on the Python on the drive, packages come from uv's cache there: seconds, and on any computer with
 the same drive letter it then just works. With ClubKit next to it, shortcuts and the "Start at Windows sign-in"
 item exist only on a trusted computer (`ClubKit\data\trusted-pcs.txt`) — a club computer gets nothing left behind.
-Paths saved where the drive had another letter (`E:\SynthSocial\Music` in the settings, music of presets and
+Paths saved where the drive had another letter (`E:\Music` in the settings, music of presets and
 clips) are found under this one. Scheduled posts go out only while IndiePulse runs: one that is more than 2 hours
 late (the drive was unplugged) isn't published on the next start but marked `missed_schedule` — Retry publishes it.
 Dependencies: `requirements.txt` says what the app needs, `requirements.lock` the exact tested versions (what gets
@@ -214,7 +206,7 @@ The tag starts `.github/workflows/release.yml`: it fails unless the tag is `v` +
 tests, builds `IndiePulse-2.1.0.zip` and `latest.json` with `tools/build_release.py` (only git-tracked files: `app/`,
 the launchers, requirements, README, `.env.example`, a LICENSE if there is one — no tests, tools or `.github`), and
 creates the GitHub Release with both attached, using only `GITHUB_TOKEN`. Installed copies see it at their next check
-(with their access token: Install / update above). To look at a build first:
+(Install / update above). To look at a build first:
 `python tools\build_release.py --tag v<version> --out dist` (the version must match).
 
 A broken release: release a fixed, higher version. Installs that took the broken one went back by themselves only if

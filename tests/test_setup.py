@@ -1,5 +1,4 @@
-"""First run: a fresh install gets the setup wizard; an install with settings never does, and keeps what it had
-from the built-in defaults that are gone now (app/services/setup.py)."""
+"""First run: a fresh install gets the setup wizard; an install with settings never does (app/services/setup.py)."""
 import json
 
 import pytest
@@ -9,9 +8,9 @@ from app.services import setup
 from app.services.settings import DEFAULTS, load_settings
 from tests.conftest import FRESH_SETTINGS
 
-# what the settings of the install IndiePulse was written for look like, before this version
-OWNER = {"tg_bot_token": "123:abc", "tg_chat_id_ru": "-100", "music_dir": "E:\\SynthSocial\\Music",
-         "yt_playlist_title": "Synthetica", "languages": ["ru", "en"], "update_mode": "notify"}
+# the settings of an install that has been in use, before this version
+OWNER = {"tg_bot_token": "123:abc", "tg_chat_id_ru": "-100", "music_dir": "E:\\Music",
+         "yt_playlist_title": "My game", "languages": ["ru", "en"], "update_mode": "notify"}
 
 
 @pytest.fixture(autouse=True)
@@ -26,16 +25,15 @@ def test_clubkits_steam_app_id_is_not_indiepulses(monkeypatch):
     and its store-news export opened that game. Only its own INDIEPULSE_STEAM_APP_ID counts now."""
     import importlib
     from app.core import config
-    from app.services import setup
+    from app.services import steam_links
     monkeypatch.setenv("STEAM_APP_ID", "2962320")
     monkeypatch.delenv("INDIEPULSE_STEAM_APP_ID", raising=False)
     try:
         importlib.reload(config)
-        assert config.STEAM_APP_ID == ""
-        assert setup.legacy_values({})["steam_app_id"] == setup.LEGACY_STEAM_APP_ID
-        monkeypatch.setenv("INDIEPULSE_STEAM_APP_ID", "1156500")
+        assert config.STEAM_APP_ID == "" and steam_links.app_id({}) == ""
+        monkeypatch.setenv("INDIEPULSE_STEAM_APP_ID", "480")
         importlib.reload(config)
-        assert setup.legacy_values({})["steam_app_id"] == "1156500"
+        assert steam_links.app_id({}) == "480" and steam_links.app_id({"steam_app_id": "730"}) == "730"
     finally:
         monkeypatch.undo()
         importlib.reload(config)
@@ -58,37 +56,17 @@ def existing(settings_file):
 
 
 def test_new_installs_get_neutral_defaults():
-    for key, value in DEFAULTS.items():
-        text = json.dumps(value)
-        for personal in ("Synthetica", "SynthSocial", "2847510", "Project Apocalypse"):
-            assert personal not in text, key
     assert DEFAULTS["music_dir"] == DEFAULTS["yt_playlist_title"] == DEFAULTS["steam_app_id"] == ""
     assert DEFAULTS["default_hashtags"] == ""
 
 
-def test_an_existing_install_is_set_up_and_keeps_its_old_defaults(existing):
+def test_an_existing_install_is_set_up_and_keeps_its_values(existing):
     assert setup.on_start() == "existing"
     cfg = stored(existing)
     assert cfg["setup_state"]["done"] is True and cfg["setup_state"]["fresh"] is False
-    assert cfg["steam_app_id"] == "2847510"
-    assert cfg["default_hashtags"] == "#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie"
-    # what its settings held stays as it was
-    assert (cfg["music_dir"], cfg["yt_playlist_title"], cfg["tg_bot_token"]) == \
-        ("E:\\SynthSocial\\Music", "Synthetica", "123:abc")
+    assert (cfg["music_dir"], cfg["yt_playlist_title"], cfg["tg_bot_token"]) == ("E:\\Music", "My game", "123:abc")
     assert setup.on_start() == ""  # once
     assert stored(existing) == cfg
-
-
-def test_an_old_default_it_never_saved_is_written_down(settings_file, monkeypatch):
-    from app.core import config
-    monkeypatch.setattr(config, "STEAM_APP_ID", "1156500")  # set in its .env
-    settings_file.write_text(json.dumps({"tg_bot_token": "1:x", "yt_playlist_title": "",
-                                         "default_hashtags": "#mine"}), encoding="utf-8")
-    assert setup.on_start() == "existing"
-    cfg = stored(settings_file)
-    # the old code fell back to these when the settings had none
-    assert cfg["music_dir"] == "E:\\SynthSocial\\Music" and cfg["yt_playlist_title"] == "Synthetica"
-    assert cfg["steam_app_id"] == "1156500" and cfg["default_hashtags"] == "#mine"
 
 
 def test_an_install_that_chose_no_music_keeps_none(settings_file):
@@ -128,13 +106,13 @@ def test_the_server_start_decides_before_the_destinations_are_built(fresh):
     assert cfg["setup_state"]["fresh"] is True and isinstance(cfg["destinations"], list)
 
 
-def test_the_owners_hashtags_playlist_and_steam_game_still_work(existing, client):
+def test_an_installs_own_hashtags_and_steam_game_are_used(existing, client, set_settings):
     from app.services import steam_links
     assert load_settings()["setup_state"]["done"]  # the server's start did it
-    html = client.post("/api/hashtags/suggest", data={"text": "x"}).text
-    assert 'value="#Synthetica #UnrealEngine #Tycoon #Strategy #Gamedev #Indie"' in html
-    assert steam_links.events_url() == "https://steamcommunity.com/games/2847510/partnerevents/create"
-    assert "games/2847510/partnerevents" in client.get("/steam").text
+    set_settings(default_hashtags="#mygame #indiedev", steam_app_id="480")
+    assert 'value="#mygame #indiedev"' in client.post("/api/hashtags/suggest", data={"text": "x"}).text
+    assert steam_links.events_url() == "https://steamcommunity.com/games/480/partnerevents/create"
+    assert "games/480/partnerevents" in client.get("/steam").text
 
 
 def test_a_new_install_suggests_its_own_hashtags(client, set_settings):

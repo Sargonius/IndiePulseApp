@@ -46,7 +46,7 @@ def enter_data_dir() -> Path:
 
 def on_this_drive(path: str) -> str:
 	"""`path` as is when it exists or isn't on a lettered drive; otherwise the same path on IndiePulse's own drive, when
-	it is there (E:\\SynthSocial\\Music saved at home → F:\\SynthSocial\\Music in the club)."""
+	it is there (E:\\Music saved at home → F:\\Music on a computer where the drive got the letter F:)."""
 	if not path or os.path.exists(path):
 		return path
 	drive, rest = os.path.splitdrive(path)
