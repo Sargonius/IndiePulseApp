@@ -4,11 +4,13 @@ from __future__ import annotations
 from typing import Optional
 
 
-def compose(brief) -> tuple[str, str]:
-    """(body, hashtags) of the tweet for a brief."""
+def compose(brief, post=None) -> tuple[str, str]:
+    """(body, hashtags) of the tweet for a brief: in the language of the post's destination,
+    or EN first for a post without one."""
     if not brief:
         return '', ''
-    return (brief.text_en or brief.text_ru or ''), (getattr(brief, 'tags_json', None) or '').strip()
+    from app.platforms.common import post_text
+    return post_text(brief, post, ('en', 'ru')), (getattr(brief, 'tags_json', None) or '').strip()
 
 
 def thread_parts(body: str, tags: str) -> list[str]:
@@ -48,7 +50,7 @@ def publish(session, post, job) -> Optional[str]:
     from app.models.models import Brief
     from app.platforms.common import brief_for_publish
     brief = brief_for_publish(session, post)
-    base_text, hashtags = compose(brief)
+    base_text, hashtags = compose(brief, post)
     media_ids: list[str] = []
     # Media from the job payload (gallery, else media_rel), else the brief's own file
     files: list[str] = []

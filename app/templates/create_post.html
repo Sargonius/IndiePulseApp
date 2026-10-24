@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Create Post</h2>
-<p class="muted">Post images, video and text to VK, X/Twitter, Discord, Facebook, Reddit, Telegram</p>
+<p class="muted">Post images, video and text to VK, X/Twitter, Discord, Facebook, Reddit, Telegram — each destination in its language (<a href="/accounts#section_languages">Languages &amp; destinations</a>)</p>
 
 <form method="post" action="/create/post" enctype="multipart/form-data" id="post_form">
 	<div class="post-layout">
@@ -26,21 +26,20 @@
 
 		<!-- Right: Text and Settings -->
 		<div class="post-content">
-			<div class="form-group">
-				<label>Text (RU)</label>
-				<textarea name="text_ru" id="text_ru" rows="5" required>{{ draft.text_ru if draft else '' }}</textarea>
+			<!-- one field per language of Settings → Languages; the first is the one you write in -->
+			{% for lang in langs %}
+			<div class="form-group lang-text" data-lang="{{ lang.code }}">
+				<label>Text ({{ lang.code | upper }}){% if loop.first %} <span class="muted" style="font-weight:400;">— {{ lang.name }}, the one you write in</span>{% else %} <span class="muted" style="font-weight:400;">— {{ lang.name }}</span>{% endif %}</label>
+				<textarea name="text_{{ lang.code }}" id="text_{{ lang.code }}" class="lang-textarea" data-lang="{{ lang.code }}" rows="{{ 5 if loop.first else 4 }}"{% if loop.first %} required{% endif %}>{{ lang.text }}</textarea>
 			</div>
-			
+			{% if loop.first and langs | length > 1 %}
 			<div class="btn-row" style="margin-bottom:12px;">
-				<button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML" hx-indicator="#tr_status">Translate to EN</button>
-				<span id="tr_status" class="htmx-indicator muted">Translating...</span>
+				<button type="button" class="btn" id="translate_missing_btn" title="Fills every empty language from the text you wrote (the AI from Settings, else DeepL / free translators). Filled fields stay as they are.">Translate missing</button>
+				<span id="tr_status" class="muted"></span>
 			</div>
-			
-			<div class="form-group">
-				<label>Text (EN)</label>
-				<textarea id="text_en" name="text_en" rows="5">{{ draft.text_en if draft else '' }}</textarea>
-				<div id="x_counter" class="counter">X: 0/280</div>
-			</div>
+			{% endif %}
+			{% endfor %}
+			<div id="x_counter" class="counter">X: 0/280</div>
 
 			<div class="form-group">
 				<label>Project</label>
@@ -58,32 +57,35 @@
 				<label>Hashtags</label>
 				<div class="row">
 					<input id="tags_input" type="text" name="tags" value="{{ draft.tags if draft else '' }}" placeholder="#Gamedev #Indie #UnrealEngine" style="flex:1;" />
-					<button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_ru" hx-target="#tags_input" hx-swap="outerHTML">Suggest</button>
+					<button type="button" class="btn" hx-post="/api/hashtags/suggest" hx-include="#text_{{ langs[0].code }}" hx-target="#tags_input" hx-swap="outerHTML">Suggest</button>
 				</div>
 			</div>
 			<div id="platform_warnings" class="warnings-panel" style="display:none;"></div>
 		</div>
 	</div>
 
-	<!-- Platforms -->
+	<!-- Destinations (Settings → Languages & destinations), grouped by network: each gets the text in its language.
+	     The checkboxes keep the "pf" class and carry their platform in data-platform: the page scripts, the video
+	     size check and base.html's module hiding go by it. Modules that are off aren't rendered at all. -->
 	<div class="platforms-section">
-		<label>Platforms</label>
+		<label>Destinations</label>
 		<button type="button" class="btn btn-sm" id="toggle_all_btn">Toggle All</button>
+		<a href="/accounts#section_languages" class="muted" style="font-size:12px;margin-left:8px;">add a channel / language</a>
+		<input type="hidden" name="destinations" value="" />
 		<div class="platforms-grid">
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="vk" checked /> VK</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="x" checked /> X / Twitter</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="discord" checked /> Discord</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="fb_ru" checked /> Facebook (RU)</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="fb_en" checked /> Facebook (EN)</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="bluesky" checked /> Bluesky</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="reddit" checked /> Reddit</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="tg" checked /> Telegram</label>
-			<!-- video-only targets: shown while the main media is a video -->
-			<label class="platform-option pf-video-opt" hidden><input class="pf pf-video" type="checkbox" name="platforms" value="yt" /> YouTube</label>
-			<label class="platform-option pf-video-opt" hidden title="Draft in the TikTok app — finish it there"><input class="pf pf-video" type="checkbox" name="platforms" value="tiktok" /> TikTok (draft)</label>
+			{% for g in dest_groups %}
+			<div class="dest-group{% if g.video_only %} pf-video-opt{% endif %}" data-module="{{ g.module }}"{% if g.video_only %} hidden{% endif %}>
+				<span class="dest-group-name">{{ g.name }}</span>
+				{% for d in g.destinations %}
+				<label class="platform-option{% if not d.ready %} not-ready{% endif %}" title="{{ d.title }}{% if not d.ready %} — not set up yet in Settings{% endif %}{% if g.module == 'tiktok' %} — a draft in the TikTok app, finish it there{% endif %}"><input class="pf{% if g.video_only %} pf-video{% endif %}" type="checkbox" name="destinations" value="{{ d.id }}" data-platform="{{ d.platform }}" data-lang="{{ d.lang }}"{% if d.own_only %} data-own-only="1"{% endif %}{% if d.checked %} checked{% endif %} /> {{ d.label }} <span class="lang-badge">{{ d.lang | upper }}</span>{% if not d.ready %} <span class="muted" style="font-size:11px;">not set up</span>{% endif %}</label>
+				{% endfor %}
+			</div>
+			{% else %}
+			<span class="muted">No destinations — add them in <a href="/accounts#section_languages">Settings → Languages &amp; destinations</a>.</span>
+			{% endfor %}
 		</div>
 		<div id="yt_title_row" class="form-group" style="margin-top:10px;" hidden>
-			<label>Video title <span class="muted" style="font-weight:400;">(YouTube; empty — start of the EN text, up to 90 chars)</span></label>
+			<label>Video title <span class="muted" style="font-weight:400;">(YouTube; empty — start of its text, up to 90 chars)</span></label>
 			<input type="text" name="yt_title" id="yt_title" maxlength="100" style="width:100%;" placeholder="Hook + game name…" />
 		</div>
 	</div>
@@ -314,6 +316,19 @@
 	border-color: var(--primary);
 }
 
+.dest-group {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px 4px 4px;
+	border-right: 1px solid var(--border);
+}
+.dest-group[hidden] { display: none; }
+.dest-group-name { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.lang-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #e2e8f0; color: #334155; }
+.platform-option.not-ready { opacity: .7; }
+
 .options-section,
 .schedule-section {
 	margin-bottom: 16px;
@@ -379,6 +394,22 @@
 <script src="/static/video_editor.js?v={{ request.app.state.asset_version }}"></script>
 <script>
 const form = document.getElementById('post_form');
+// Languages of Settings → Languages, in order (the first is the one you write in)
+const LANGS = Array.from(document.querySelectorAll('textarea.lang-textarea')).map(t => t.dataset.lang);
+const langText = (lang) => (document.getElementById('text_' + lang) || {}).value || '';
+// The text a destination of this language gets: its own, else the first language's, else any (as the publishers do)
+function textFor(lang) {
+	for (const l of [lang, ...LANGS]) { const t = langText(l); if (t.trim()) return t; }
+	return '';
+}
+const destBoxes = () => Array.from(document.querySelectorAll('input.pf[name="destinations"]'));
+const checkedDests = () => destBoxes().filter(b => b.checked && !b.disabled);
+// the language of the first ticked (else any) destination of a platform: what its preview shows
+function langOf(platform) {
+	const boxes = destBoxes().filter(b => b.dataset.platform === platform);
+	const b = boxes.find(x => x.checked) || boxes[0];
+	return b ? b.dataset.lang : (LANGS[0] || 'en');
+}
 const hiddenN = document.getElementById('media_normal_hidden');
 const galleryOrderHidden = document.getElementById('gallery_order_hidden');
 const xCounter = document.getElementById('x_counter');
@@ -390,12 +421,11 @@ function queueSave() {
 	clearTimeout(saveTimer);
 	saveTimer = setTimeout(() => {
 		const fd = new FormData();
-		fd.append('text_ru', document.getElementById('text_ru').value);
-		fd.append('text_en', document.getElementById('text_en').value);
+		LANGS.forEach(l => fd.append('text_' + l, langText(l)));
 		fd.append('tags', form.querySelector('[name="tags"]').value);
 		fd.append('scheduled_at', form.querySelector('[name="scheduled_at"]').value);
-		const plats = Array.from(form.querySelectorAll('input[name="platforms"]:checked')).map(x => x.value);
-		plats.forEach(p => fd.append('platforms', p));
+		fd.append('destinations', '');  // so "nothing ticked" is saved too
+		checkedDests().forEach(b => fd.append('destinations', b.value));
 		fd.append('reddit_sentences', document.getElementById('rd_sentences').value);
 		fetch('/api/draft/news', { method: 'POST', body: fd });
 	}, 400);
@@ -430,7 +460,7 @@ async function probeVideo(rel) {
 }
 const mmss = s => { s = Math.round(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 function selectedPlatforms() {
-	return Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value);
+	return [...new Set(checkedDests().map(x => x.dataset.platform))];
 }
 function openVideoEditor(rel) {
 	const pid = document.getElementById('project_id_hidden').value;
@@ -458,7 +488,7 @@ function updateVideoPanel() {
 	const videoMain = !!shots.length && isVideoRel(shots[0]);
 	document.querySelectorAll('.pf-video-opt').forEach(l => {
 		l.hidden = !videoMain;
-		if (!videoMain) l.querySelector('input').checked = false;
+		if (!videoMain) l.querySelectorAll('input').forEach(i => { i.checked = false; });
 	});
 	updateYtTitle();
 	clearTimeout(fitTimer);
@@ -487,8 +517,8 @@ function updateVideoPanel() {
 	}, 250);
 }
 function updateYtTitle() {
-	const yt = document.querySelector('input.pf-video[value="yt"]');
-	document.getElementById('yt_title_row').hidden = !(yt && yt.checked);
+	const yt = document.querySelectorAll('input.pf-video[data-platform="yt"]');
+	document.getElementById('yt_title_row').hidden = !Array.from(yt).some(b => b.checked);
 }
 
 function renderShots() {
@@ -592,20 +622,18 @@ form.addEventListener('submit', (e) => {
 
 // Text previews
 function updatePreviews() {
-	const ru = document.getElementById('text_ru').value;
-	const en = document.getElementById('text_en').value;
 	const tags = document.getElementById('tags_input')?.value || '';
 	const xSplit = document.getElementById('x_split')?.checked;
-	
-	// X preview
-	const xText = en + (tags ? '\n' + tags : '');
+
+	// X preview (in the language of the X destination)
+	const xText = textFor(langOf('x')) + (tags ? '\n' + tags : '');
 	document.getElementById('x_preview_text').textContent = xText.slice(0, 280);
-	
+
 	// VK preview
-	document.getElementById('vk_preview_text').textContent = ru + (tags ? '\n' + tags : '');
-	
+	document.getElementById('vk_preview_text').textContent = textFor(langOf('vk')) + (tags ? '\n' + tags : '');
+
 	// Reddit preview
-	const sentences = (en || ru).match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+	const sentences = textFor(langOf('reddit')).match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
 	const rdCount = parseInt(document.getElementById('rd_sentences')?.value) || 2;
 	document.getElementById('rd_title').textContent = sentences.slice(0, rdCount).join(' ').slice(0, 290);
 	document.getElementById('rd_comment').textContent = sentences.slice(rdCount).join(' ');
@@ -643,30 +671,39 @@ function updatePreviews() {
 
 function updateWarnings() {
 	if (!warningBox) return;
-	const ru = document.getElementById('text_ru').value || '';
-	const en = document.getElementById('text_en').value || '';
 	const tags = (document.getElementById('tags_input')?.value || '').trim();
 	const xSplit = document.getElementById('x_split')?.checked;
-	const tgText = (ru + (tags ? '\n' + tags : '')).trim();
-	const xText = (en + (tags ? '\n' + tags : '')).trim();
-	const ruLen = [...ru].length;
-	const enLen = [...en].length;
-	const tgLen = [...tgText].length;
+	const xText = (textFor(langOf('x')) + (tags ? '\n' + tags : '')).trim();
 	const xLen = [...xText].length;
-	const selected = new Set(Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value));
+	const bskyLen = [...(textFor(langOf('bluesky')) + (tags ? '\n' + tags : '')).trim()].length;
+	const checked = checkedDests();
+	const selected = new Set(checked.map(x => x.dataset.platform));
 	const warnings = [];
+	const name = b => b.closest('label').textContent.replace(/\s+/g, ' ').trim();
 
-	if (selected.has('discord')) {
-		if (ruLen > 2000) warnings.push(`Discord RU: ${ruLen}/2000 → split into ${Math.ceil(ruLen / 2000)} messages`);
-		if (enLen > 2000) warnings.push(`Discord EN: ${enLen}/2000 → split into ${Math.ceil(enLen / 2000)} messages`);
-	}
-	if (selected.has('tg')) {
+	// per destination: each gets the text of its language
+	checked.filter(b => b.dataset.platform === 'discord').forEach(b => {
+		const len = [...textFor(b.dataset.lang)].length;
+		if (len > 2000) warnings.push(`${name(b)}: ${len}/2000 → split into ${Math.ceil(len / 2000)} messages`);
+	});
+	checked.filter(b => b.dataset.platform === 'tg').forEach(b => {
+		const tgLen = [...textFor(b.dataset.lang).trim()].length;
 		const hasMedia = !!hiddenN.value || (galleryOrderHidden.value && galleryOrderHidden.value.split(',').filter(Boolean).length > 0);
 		const limit = hasMedia ? 1024 : 4096;
 		if (tgLen > limit) {
 			const note = hasMedia ? 'caption limit 1024 with media' : 'message limit 4096';
-			warnings.push(`Telegram: ${tgLen}/${limit} → split into ${Math.ceil(tgLen / limit)} messages (${note})`);
+			warnings.push(`${name(b)}: ${tgLen}/${limit} → split into ${Math.ceil(tgLen / limit)} messages (${note})`);
 		}
+	});
+	// a destination whose language has no text gets the first language's — or nothing, when it takes only its own
+	const noText = checked.filter(b => !langText(b.dataset.lang).trim());
+	const fallback = [...new Set(noText.filter(b => !b.dataset.ownOnly).map(b => b.dataset.lang))];
+	const nothing = noText.filter(b => b.dataset.ownOnly).map(name);
+	if (fallback.length && langText(LANGS[0]).trim()) {
+		warnings.push(`No ${fallback.map(l => l.toUpperCase()).join(', ')} text: those destinations get the ${LANGS[0].toUpperCase()} one — “Translate missing” fills them`);
+	}
+	if (nothing.length) {
+		warnings.push(`${nothing.join(', ')}: only its own language, no text in it — nothing goes there`);
 	}
 	if (selected.has('x') && xLen > 280) {
 		if (xSplit) {
@@ -675,8 +712,8 @@ function updateWarnings() {
 			warnings.push(`X: ${xLen}/280 → will be truncated (enable thread split)`);
 		}
 	}
-	if (selected.has('bluesky') && xLen > 300) {
-		warnings.push(`Bluesky: ${xLen}/300 → split into thread (${Math.ceil(xLen / 300)} posts)`);
+	if (selected.has('bluesky') && bskyLen > 300) {
+		warnings.push(`Bluesky: ${bskyLen}/300 → split into thread (${Math.ceil(bskyLen / 300)} posts)`);
 	}
 
 	if (warnings.length) {
@@ -688,13 +725,44 @@ function updateWarnings() {
 	}
 }
 
-['text_ru', 'text_en', 'tags_input', 'rd_sentences'].forEach(id => {
+[...LANGS.map(l => 'text_' + l), 'tags_input', 'rd_sentences'].forEach(id => {
 	document.getElementById(id)?.addEventListener('input', updatePreviews);
 });
 document.getElementById('x_split')?.addEventListener('change', updatePreviews);
-document.querySelectorAll('input.pf[name="platforms"]').forEach(el => {
-	el.addEventListener('change', updateWarnings);
+destBoxes().forEach(el => {
+	el.addEventListener('change', updatePreviews);
 	el.addEventListener('change', updateVideoPanel);  // size check depends on the platforms
+	el.addEventListener('change', updateYtTitle);
+});
+
+// "Translate missing": every empty language from the first one with a text
+document.getElementById('translate_missing_btn')?.addEventListener('click', async () => {
+	const btn = document.getElementById('translate_missing_btn');
+	const st = document.getElementById('tr_status');
+	const empty = LANGS.filter(l => !langText(l).trim());
+	if (!empty.length) { st.textContent = 'Every language has a text.'; return; }
+	if (!LANGS.some(l => langText(l).trim())) { st.textContent = 'Write the text first.'; return; }
+	const fd = new FormData();
+	LANGS.forEach(l => fd.append('text_' + l, langText(l)));
+	btn.disabled = true;
+	st.textContent = `Translating to ${empty.map(l => l.toUpperCase()).join(', ')}…`;
+	try {
+		const r = await fetch('/api/translate/missing', { method: 'POST', body: fd });
+		const j = await r.json();
+		Object.entries(j.texts || {}).forEach(([l, t]) => {
+			const el = document.getElementById('text_' + l);
+			if (el && !el.value.trim()) { el.value = t; el.dataset.translator = j.providers[l] || ''; }
+		});
+		const done = Object.keys(j.texts || {}).map(l => `${l.toUpperCase()} (${j.providers[l] || '?'})`);
+		st.textContent = (done.length ? 'Translated: ' + done.join(', ') + '. ' : '')
+			+ ((j.failed || []).length ? `Failed: ${j.failed.map(l => l.toUpperCase()).join(', ')} — check AI & translation in Settings, or write them yourself.` : '');
+		updatePreviews();
+		queueSave();
+	} catch (e) {
+		st.textContent = 'Translation failed: ' + e;
+	} finally {
+		btn.disabled = false;
+	}
 });
 
 // Toggle all platforms (the hidden video-only ones stay off)
@@ -708,8 +776,7 @@ document.getElementById('toggle_all_btn').addEventListener('click', () => {
 
 // Clear draft
 document.getElementById('clear_draft_btn').addEventListener('click', async () => {
-	document.getElementById('text_ru').value = '';
-	document.getElementById('text_en').value = '';
+	LANGS.forEach(l => { document.getElementById('text_' + l).value = ''; });
 	document.getElementById('tags_input').value = '';
 	document.getElementById('scheduled_at').value = '';
 	shots = [];
@@ -794,12 +861,11 @@ document.addEventListener('DOMContentLoaded', () => {
 	renderShots();
 	updatePreviews();
 	updateVideoPanel();
-	document.querySelector('input.pf-video[value="yt"]').addEventListener('change', updateYtTitle);
 });
 
 // HTMX handlers
 document.addEventListener('htmx:afterSwap', (e) => {
-	if (e.target.id === 'text_en' || e.target.id === 'tags_input') {
+	if (e.target.id === 'tags_input') {
 		updatePreviews();
 	}
 });

@@ -28,11 +28,14 @@ def publish(session, post, job) -> Optional[str]:
             session.add(job)
         session.commit()
         return 'error'
-    from app.platforms.common import brief_for_publish
+    from app.platforms.common import brief_for_publish, post_text_lang
     brief = brief_for_publish(session, post)
-    base_text = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
+    base_text, text_lang = post_text_lang(brief, post, ('en', 'ru'), cfg)
     hashtags = (getattr(brief, 'tags_json', None) or '').strip() if brief else ''
-    langs = ['en'] if (brief and (getattr(brief, 'text_en', None) or '').strip()) else ['ru']
+    if getattr(post, 'destination_id', None):
+        langs = [text_lang or 'en']  # the language the text really is in (after a fallback too)
+    else:
+        langs = ['en'] if (brief and (getattr(brief, 'text_en', None) or '').strip()) else ['ru']
     # Collect image candidates: gallery first, then override, then brief media
     candidates: list[str] = []
     try:

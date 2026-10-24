@@ -81,7 +81,8 @@ def publish(session, post, job) -> Optional[str]:
         # Use TikTok API
         try:
             from app.services.tiktok_client import TikTokClient
-            title = (getattr(brief, 'title', None) or getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or 'New Video')[:150]
+            from app.platforms.common import post_text
+            title = (getattr(brief, 'title', None) or post_text(brief, post, ('en', 'ru'), cfg) or 'New Video')[:150]
 
             client = TikTokClient(access_token)
             # Draft/inbox upload: the clip lands in the creator's TikTok

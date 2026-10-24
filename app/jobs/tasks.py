@@ -41,7 +41,7 @@ def _maybe_retry_publish(job_id: int, post_id: int, result: str) -> None:
         from app.services.video_editor import TOO_LARGE
         if TOO_LARGE in (post.error_text or ''):
             return  # compression already failed; a rerun would fail the same way
-        if MISSED in (post.error_text or '') or MODULE_OFF in (post.error_text or ''):
+        if any(m in (post.error_text or '') for m in (MISSED, MODULE_OFF, DESTINATION_OFF)):
             return  # not a failure: waits for the user's Retry
         payload = {}
         if job is not None and job.payload_json:
@@ -130,6 +130,38 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
             session.add(post)
             session.commit()
             return 'module_off'
+
+        if getattr(post, 'destination_id', None):
+            # its destination was removed or turned off in Settings → Languages & destinations after the post
+            # was queued: never fall back to some other channel
+            from app.services import destinations
+            why = destinations.unavailable(post.destination_id)
+            if why is not None:
+                post.status = PostStatusEnum.error
+                post.error_text = (f"{DESTINATION_OFF}: {post.destination_id} was "
+                                   f"{'removed' if why == 'removed' else 'turned off'} in Settings → Languages & "
+                                   f"destinations — {'add it back' if why == 'removed' else 'turn it on'}, then Retry")
+                if job is not None:
+                    job.status = JobStatusEnum.error
+                    job.last_error = post.error_text
+                    session.add(job)
+                session.add(post)
+                session.commit()
+                return 'destination_off'
+            # a destination that takes only its own language, and the post has no text in it
+            from app.platforms.common import brief_for_publish
+            dest = destinations.get(post.destination_id)
+            if destinations.lacks_own_text(dest, brief_for_publish(session, post)):
+                post.status = PostStatusEnum.canceled
+                post.error_text = (f"{NO_TEXT}: no {dest['lang'].upper()} text for {destinations.title(dest)}, "
+                                   f"which takes only its own language — nothing sent there")
+                if job is not None:
+                    job.status = JobStatusEnum.done
+                    job.last_error = post.error_text
+                    session.add(job)
+                session.add(post)
+                session.commit()
+                return 'no_text'
 
         # Never send the same publication twice (a re-submitted form, a second Shorts batch...)
         import json as _json
@@ -260,6 +292,8 @@ LOST_QUEUED_MIN = 15     # a due post whose queued job hasn't started in this lo
 MISSED_AFTER_MIN = 120   # a scheduled post this late isn't published by itself any more (see _missed)
 MISSED = "missed_schedule"
 MODULE_OFF = "module_off"
+DESTINATION_OFF = "destination_off"
+NO_TEXT = "no_text_in_language"
 
 
 def _missed(post, now=None) -> bool:

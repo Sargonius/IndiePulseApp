@@ -114,6 +114,10 @@ class Brief(SQLModel, table=True):
     text_ru: Optional[str] = None
     title: Optional[str] = None
     text_en: Optional[str] = None
+    # The text in every language of Settings → Languages ({"ru": ..., "en": ..., "ja": ...}).
+    # text_ru / text_en stay as mirrors of its "ru" / "en": read and write texts through
+    # app.services.languages (brief_texts / set_brief_texts), which keeps them in step.
+    texts_json: Optional[str] = None
     tags_json: Optional[str] = None
     media_path: Optional[str] = None
     media_normal_path: Optional[str] = None  # Horizontal/normal video (16:9)
@@ -151,8 +155,12 @@ class Post(SQLModel, table=True):
     metrics_json: Optional[str] = None
     error_text: Optional[str] = None
     # Per-post texts that replace the Brief's at publish time (a short reposted
-    # with its own caption/language per network): {title, text_ru, text_en, tags_json}
+    # with its own caption/language per network): {title, text_ru, text_en, text_<lang>..., tags_json}
     overrides_json: Optional[str] = None
+    # The destination (Settings → Languages & destinations) this post goes to: which channel,
+    # page or webhook, and the language of its text. None = a post from before destinations
+    # (or a path that doesn't pick one): it publishes to the platform's original target.
+    destination_id: Optional[str] = None
     created_at: datetime = Field(default_factory=now_ts)
     updated_at: datetime = Field(default_factory=now_ts)
 
@@ -423,6 +431,14 @@ def _scrub_errors(target, field: str) -> None:
 def _post_before_write(mapper, connection, target) -> None:
     target.updated_at = now_ts()
     _scrub_errors(target, "error_text")
+
+
+@_event.listens_for(Brief, "before_insert")
+@_event.listens_for(Brief, "before_update")
+def _brief_before_write(mapper, connection, target) -> None:
+    # code that still writes text_ru / text_en directly: texts_json follows
+    from app.services.languages import sync_mirrors
+    sync_mirrors(target)
 
 
 @_event.listens_for(Job, "before_insert")

@@ -1,4 +1,4 @@
-"""Facebook Pages (RU / EN)."""
+"""Facebook Pages (one per destination; a post without one: fb_ru / fb_en → the RU / EN page)."""
 from __future__ import annotations
 
 from typing import Optional
@@ -14,11 +14,11 @@ def publish(session, post, job) -> Optional[str]:
     from app.services.settings import load_settings
     from app.models.models import Brief
     cfg = load_settings()
-    from app.platforms.common import brief_for_publish
+    from app.platforms.common import brief_for_publish, post_destination, post_text
     brief = brief_for_publish(session, post)
     is_ru = str(post.platform).endswith('fb_ru') or str(post.platform) == 'fb_ru'
-    page_id = (cfg.get('fb_ru_page_id') if is_ru else cfg.get('fb_en_page_id')) or ''
-    page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+    dest = post_destination(post, cfg)
+    page_id, page_token = page_of(post, cfg, dest)
     if not page_id or not page_token:
         post.status = PostStatusEnum.error
         post.error_text = 'fb_missing_page_or_token'
@@ -30,10 +30,14 @@ def publish(session, post, job) -> Optional[str]:
             session.add(job)
         session.commit()
         return 'error'
-    # RU page gets RU text, EN page gets EN text (with fallback to the other)
-    primary = ((getattr(brief, 'text_ru', None) if is_ru else getattr(brief, 'text_en', None)) or '') if brief else ''
-    fallback = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
-    message = (primary or fallback).strip()
+    if dest is not None:
+        # the destination's language, then the first language, then any
+        message = post_text(brief, post, cfg=cfg).strip()
+    else:
+        # RU page gets RU text, EN page gets EN text (with fallback to the other)
+        primary = ((getattr(brief, 'text_ru', None) if is_ru else getattr(brief, 'text_en', None)) or '') if brief else ''
+        fallback = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '') if brief else ''
+        message = (primary or fallback).strip()
     if brief and getattr(brief, 'tags_json', None):
         try:
             message = (message + '\n' + brief.tags_json).strip()
@@ -106,16 +110,29 @@ def publish(session, post, job) -> Optional[str]:
         return 'error'
 
 
+def page_of(post, cfg, dest=None) -> tuple[str, str]:
+    """(page id, page token) a post goes / went to: its destination's page, else the RU or EN page by platform."""
+    if dest is None and getattr(post, 'destination_id', None):
+        from app.platforms.common import post_destination
+        try:
+            dest = post_destination(post, cfg)
+        except RuntimeError:
+            return '', ''  # destination removed since
+    if dest is not None:
+        return dest['target'].get('page_id') or '', dest['target'].get('page_token') or ''
+    is_ru = str(post.platform).endswith('fb_ru') or str(post.platform) == 'fb_ru'
+    return ((cfg.get('fb_ru_page_id') if is_ru else cfg.get('fb_en_page_id')) or '',
+            (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or '')
+
+
 def fetch_metrics(post) -> dict:
     """Engagement counters for a published post; may raise (caller records the error)."""
     from app.services.settings import load_settings
     import httpx
-    platform = str(post.platform)
     metrics: dict = {}
     # Facebook Page post insights: use summary counts for reactions and comments; shares via 'shares' field
     cfg = load_settings()
-    is_ru = platform.endswith('fb_ru') or platform == 'fb_ru'
-    page_token = (cfg.get('fb_ru_page_access_token') if is_ru else cfg.get('fb_en_page_access_token')) or ''
+    page_token = page_of(post, cfg)[1]
     if not (post.platform_post_id and page_token):
         metrics = {"error": "fb_not_configured"}
     else:
