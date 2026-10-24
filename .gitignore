@@ -40,6 +40,8 @@ logs/
 .draft_news.json
 .locks/
 .autoreload
+# the data folder of a portable copy (app/core/paths.py)
+data/
 queue.db
 *.db
 *.db-shm
