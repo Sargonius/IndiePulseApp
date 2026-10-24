@@ -299,12 +299,13 @@ def shorts_lint(data: Optional[dict] = Body(None), session: Session = Depends(ge
 # ---- Shorts: translation + repost to more networks ----------------------------
 @router.post("/shorts/translate")
 def shorts_translate(data: Optional[dict] = Body(None)):
-    """{title, desc, tags, target: en|ja|ru} → the same fields translated (no side effects)."""
-    from app.services import repost
+    """{title, desc, tags, target: a language code (ja, de, pt-br...)} → the same fields translated (no side
+    effects)."""
+    from app.services import languages, repost
     data = data or {}
-    target = str(data.get("target") or "")
-    if target not in repost.LANGS:
-        raise HTTPException(status_code=400, detail="target must be one of en, ja, ru")
+    target = languages.normalize_code(data.get("target"))
+    if target is None:
+        raise HTTPException(status_code=400, detail="target must be a language code, like ja or de")
     try:
         return repost.translate(data, target)
     except repost.TranslateError as exc:

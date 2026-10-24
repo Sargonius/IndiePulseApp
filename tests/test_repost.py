@@ -265,8 +265,8 @@ def test_detect_lang():
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 def test_translate_endpoint(client, monkeypatch):
-    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "de"}).status_code == 400
     monkeypatch.setattr(repost, "translate", lambda data, target: {"title": f"{target}:{data['title']}"})
+    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "not a language"}).status_code == 400
     assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "ja"}).json() == {"title": "ja:Hi"}
 
     def fail(data, target):

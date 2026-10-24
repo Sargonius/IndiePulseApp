@@ -460,6 +460,28 @@ def _render_short_file(brief, src_abs: str, out_abs: str, music_abs, edit: dict)
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _short_targets(brief, dest_ids: list, texts: dict) -> list:
+    """The posts a rendered short gets: [(platform, destination id, overrides)] for the destinations its card
+    ticked. The description per language is on the brief; a destination in another language than the one the
+    brief's title and hashtags are in gets its language's own as the post's texts (none written: the brief's).
+    A destination turned off or removed since the submit is left out."""
+    from loguru import logger
+    from app.services import destinations
+    chosen, off = destinations.chosen(dest_ids, 'shorts')
+    if off:
+        logger.warning(f"render_short brief={brief.id}: left out (turned off or removed since): {off}")
+    out = []
+    for d in chosen:
+        own = texts.get(d['lang']) if isinstance(texts.get(d['lang']), dict) else {}
+        overrides = {}
+        if (own.get('title') or '').strip() and own['title'].strip() != (brief.title or ''):
+            overrides['title'] = own['title'].strip()
+        if (own.get('tags') or '').strip() and own['tags'].strip() != (brief.tags_json or ''):
+            overrides['tags_json'] = own['tags'].strip()
+        out.append((destinations.post_platform(d, 'shorts'), d['id'], overrides))
+    return out
+
+
 @huey.task()
 def render_short(job_id: int, brief_id: int) -> str:
     """Render a batched short (9:16 vertical + poster frame), then create the
@@ -485,10 +507,15 @@ def render_short(job_id: int, brief_id: int) -> str:
             return 'not_found'
 
         platforms: list = []
+        dest_ids = None   # the factory since destinations; a render queued before them has platforms
+        texts: dict = {}
         scheduled_iso = None
         try:
             payload = json.loads(job.payload_json) if (job and job.payload_json) else {}
             platforms = payload.get('platforms') or []
+            if isinstance(payload.get('destinations'), list):
+                dest_ids = payload['destinations']
+                texts = payload.get('texts') if isinstance(payload.get('texts'), dict) else {}
             scheduled_iso = payload.get('scheduled_at')
         except Exception:
             platforms = []
@@ -568,14 +595,17 @@ def render_short(job_id: int, brief_id: int) -> str:
             except Exception:
                 when_dt = None
         made = 0
-        for plat in platforms:
+        targets = _short_targets(brief, dest_ids, texts) if dest_ids is not None \
+            else [(plat, None, None) for plat in platforms]
+        for plat, dest_id, overrides in targets:
             try:
                 pf = PlatformEnum(plat)
             except Exception:
                 logger.warning(f"render_short: unknown platform {plat}")
                 continue
             try:
-                post = Post(user_id=1, brief_id=brief.id, platform=pf,
+                post = Post(user_id=1, brief_id=brief.id, platform=pf, destination_id=dest_id,
+                            overrides_json=json.dumps(overrides, ensure_ascii=False) if overrides else None,
                             status=PostStatusEnum.queued, scheduled_at=when_dt)
                 session.add(post)
                 session.commit()

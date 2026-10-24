@@ -35,7 +35,7 @@
 		<p class="sf-inherit muted">Description, hashtags and music from here fill every clip where the field is empty or hasn’t been edited by hand. Text you wrote in a clip is never overwritten.</p>
 
 		<div class="form-group">
-			<label>Description <span class="muted" style="font-weight:400;">— default for clips</span></label>
+			<label>Description <span class="muted" style="font-weight:400;">— default for clips, in {{ langs[0].name }} (the language you write in; “Translate missing” on a clip fills the others)</span></label>
 			<textarea id="g_desc" rows="2" placeholder="Wasteland Courier — a freelancer life sim in the wasteland. Wishlist on Steam: {steam}" style="width:100%; resize:vertical;"></textarea>
 			<div class="sf-field-note muted" id="g_desc_note"></div>
 		</div>
@@ -54,17 +54,18 @@
 			</div>
 		</div>
 
+		<!-- Destinations (Settings → Languages & destinations): class "pf" + data-platform as on the post forms;
+		     each takes the clip's title, description and hashtags in its language -->
 		<div class="form-group">
-			<label>Networks</label>
+			<label>Destinations <span class="muted" style="font-weight:400;">— each gets the clip’s texts in its language (none written: the first language’s)</span></label>
 			<div class="platforms-grid" id="g_platforms">
-				<label class="platform-option"><input class="pf" type="checkbox" value="yt" checked /> YouTube Shorts</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="tiktok" checked /> TikTok <span class="muted" style="font-size:11px;">(draft)</span></label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="ig_reels" checked /> Instagram Reels</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="vk_video" /> VK Video</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="tg" /> Telegram</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="x" /> X</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="reddit" /> Reddit</label>
-				<label class="platform-option"><input class="pf" type="checkbox" value="discord" /> Discord</label>
+				{% for g in dest_groups %}
+				{% for d in g.destinations %}
+				<label class="platform-option" title="{{ d.title }}{% if d.own_only %} — only its own language{% endif %}{% if not d.ready %} — not set up yet in Settings{% endif %}"><input class="pf" type="checkbox" value="{{ d.id }}" data-platform="{{ d.platform }}" data-lang="{{ d.lang }}"{% if d.checked %} checked{% endif %} /> {{ g.name }}{% if g.module == 'youtube' %} Shorts{% elif g.module == 'vk' %} Video{% endif %}{% if d.label != g.name %} · {{ d.label }}{% endif %} <span class="lang-badge">{{ d.lang | upper }}</span>{% if g.module == 'tiktok' %} <span class="muted" style="font-size:11px;">(draft)</span>{% endif %}</label>
+				{% endfor %}
+				{% else %}
+				<span class="muted">No destinations — add them in <a href="/accounts#section_languages">Settings → Languages &amp; destinations</a>.</span>
+				{% endfor %}
 			</div>
 		</div>
 
@@ -185,8 +186,10 @@
 	<div id="bulk_bar" class="bulk-bar" style="display:none;">
 		<span class="muted"><b id="bulk_count">0</b> selected — apply preset:</span>
 		<div id="bulk_preset_chips" class="preset-manager" style="margin:0;"></div>
-		<span class="muted">· translate:</span>
-		<span class="sf-lang" id="bulk_lang"></span>
+		{% if langs | length > 1 %}
+		<span class="muted">·</span>
+		<span class="sf-lang"><button type="button" class="sf-tr" id="bulk_translate" title="Every empty language of the selected clips, from the text written in them">🌐 Translate missing</button></span>
+		{% endif %}
 	</div>
 
 	<!-- Cards -->
@@ -267,7 +270,9 @@
 .sf-card-chips:empty { display:none; }
 .sf-lang { display:flex; align-items:center; gap:4px; font-size:12px; flex-wrap:wrap; }
 .sf-lang button { border:1px solid var(--border); background:#fff; border-radius:5px; padding:1px 8px; font-size:12px; cursor:pointer; color:#475569; }
-.sf-lang button.sf-lang-on { background:#2563eb; border-color:#2563eb; color:#fff; }
+.sf-lang button[data-l]:not(.sf-lang-has) { color:#94a3b8; border-style:dashed; }
+.sf-lang button.sf-lang-on { background:#2563eb; border-color:#2563eb; color:#fff; border-style:solid; }
+.lang-badge { font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; background:#e2e8f0; color:#334155; }
 .sf-lang button:disabled { opacity:.5; cursor:wait; }
 .sf-lang-st { color:#64748b; font-size:11px; }
 .sf-lang-st.err { color:#dc2626; }
@@ -367,85 +372,109 @@ function musicName(path) {
 	return t ? t.name : String(path).split(/[\\/]/).pop();
 }
 
+// ---- Languages: a title, description and hashtags per language of Settings → Languages ----
+// card.texts[lang] = {title, desc, tags}; the card's inputs show card.lang. The first language is the one you
+// write in: the shared description / hashtags fill it, and a destination in a language without texts gets it.
+// card.auto = languages "Translate missing" filled and nobody edited since: new source text makes them stale.
+const SF_LANGS = {{ langs | tojson }};
+const LANG_CODES = SF_LANGS.map(l => l.code);
+const SRC = LANG_CODES[0];
+const LANG_LABEL = l => String(l).toUpperCase();
+const LANG_BTNS = SF_LANGS.map(l => `<button type="button" data-l="${l.code}" title="${escAttr(l.name)}">${LANG_LABEL(l.code)}</button>`).join('')
+	+ (SF_LANGS.length > 1 ? '<button type="button" class="sf-tr" title="Fills every empty language from the text written in this clip (the AI from Settings, else DeepL / free translators)">🌐 Translate missing</button>' : '');
+const EMPTY = () => ({ title: '', desc: '', tags: '' });
+const hasText = f => !!f && !!(f.title + f.desc + f.tags).trim();
+function cardFields(c) { return { title: c.titleEl.value, desc: c.descEl.value, tags: c.tagsEl.value }; }
+function setCardFields(c, f) { c.titleEl.value = f.title || ''; c.descEl.value = f.desc || ''; c.tagsEl.value = f.tags || ''; }
+function markCardLang(c) {
+	c.root.querySelectorAll('.sf-lang button[data-l]').forEach(b => {
+		b.classList.toggle('sf-lang-on', b.dataset.l === c.lang);
+		b.classList.toggle('sf-lang-has', hasText(c.texts[b.dataset.l]));
+	});
+}
+function cardLangStatus(c, text, err) { c.langStEl.className = 'sf-lang-st' + (err ? ' err' : ''); c.langStEl.textContent = text || ''; }
+// what is typed goes into the language shown
+function syncCardText(c) { c.texts[c.lang] = cardFields(c); c.auto.delete(c.lang); markCardLang(c); }
+function showLang(c, lang) {
+	c.lang = lang;
+	setCardFields(c, c.texts[lang] || EMPTY());
+	markCardLang(c);
+	updatePreview();
+}
+// a field of the language written in (the shared fields and "Overwrite in all clips" set these)
+function srcField(c, f) { return (c.texts[SRC] || EMPTY())[f] || ''; }
+function setSrcField(c, f, value) {
+	c.texts[SRC] = { ...(c.texts[SRC] || EMPTY()), [f]: value };
+	if (c.lang === SRC) setCardFields(c, c.texts[SRC]);
+}
+// new text in the language written in: the translations made from the old one go
+function dropTranslations(c) {
+	c.auto.forEach(l => { c.texts[l] = EMPTY(); });
+	c.auto.clear();
+	if (c.lang !== SRC && !hasText(c.texts[c.lang])) setCardFields(c, EMPTY());
+	cardLangStatus(c, '');
+	markCardLang(c);
+}
+
+async function translateMissing(card) {
+	syncCardText(card);
+	const from = LANG_CODES.find(l => hasText(card.texts[l]));
+	if (!from) { cardLangStatus(card, 'nothing to translate', true); return; }
+	const todo = LANG_CODES.filter(l => !hasText(card.texts[l]));
+	if (!todo.length) { cardLangStatus(card, 'every language has its texts'); return; }
+	const locked = [...card.root.querySelectorAll('.sf-lang button'), card.titleEl, card.descEl, card.tagsEl];
+	locked.forEach(el => el.disabled = true);
+	cardLangStatus(card, `translating to ${todo.map(LANG_LABEL).join(', ')}…`);
+	const src = card.texts[from];
+	const failed = [], notes = [];
+	await Promise.all(todo.map(async lang => {
+		try {
+			const r = await fetch('/api/shorts/translate', {
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ...src, target: lang }),
+			});
+			const j = await r.json().catch(() => ({}));
+			if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+			if (hasText(card.texts[lang])) return;  // typed in meanwhile
+			card.texts[lang] = { title: j.title || '', desc: j.desc || '', tags: j.tags || '' };
+			card.auto.add(lang);
+			if (j.provider && !/^(openai|anthropic|claude)/.test(j.provider)) notes.push(`${LANG_LABEL(lang)} via ${j.provider}`);
+		} catch (e) {
+			failed.push(`${LANG_LABEL(lang)}: ${e.message}`);
+		}
+	}));
+	locked.forEach(el => el.disabled = false);
+	if (card.lang !== from && card.auto.has(card.lang)) setCardFields(card, card.texts[card.lang]);
+	markCardLang(card);
+	cardLangStatus(card, failed.length ? '⚠ ' + failed.join('; ') : (notes.length ? notes.join(', ') + ' — hashtags not translated' : ''), failed.length > 0);
+	updatePreview();
+}
+
 // ---- Global fields follow into the cards -------------------------------------------
-// A card's description / hashtags / music that is empty, or still the value the
-// global field had before, follows the global field; anything typed in the card stays.
+// A card's description / hashtags (in the language written in) / music that is empty, or
+// still the value the global field had before, follows the global field; anything typed
+// in the card stays.
 const GLOBAL_IDS = ['g_desc', 'g_tags', 'g_music'];
+const GLOBAL_FIELD = { g_desc: 'desc', g_tags: 'tags' };
 const lastGlobal = {};
 GLOBAL_IDS.forEach(id => { lastGlobal[id] = document.getElementById(id).value || ''; });
-function cardFieldFor(c, id) { return id === 'g_desc' ? c.descEl : (id === 'g_tags' ? c.tagsEl : c.musicEl); }
 function propagateGlobal(id) {
 	const val = document.getElementById(id).value || '';
 	const prev = lastGlobal[id];
 	lastGlobal[id] = val;
 	if (val === prev) return;
 	cards.forEach(c => {
-		const cur = cardFieldFor(c, id).value || '';
+		if (id === 'g_music') {
+			const cur = c.musicEl.value || '';
+			if (!(cur.trim() && cur !== prev)) setCardMusic(c, val);
+			return;
+		}
+		const cur = srcField(c, GLOBAL_FIELD[id]);
 		if (cur.trim() && cur !== prev) return;  // written by hand
-		if (id === 'g_music') setCardMusic(c, val);
-		else cardFieldFor(c, id).value = val;
+		setSrcField(c, GLOBAL_FIELD[id], val);
+		dropTranslations(c);
 	});
 	updatePreview();
-}
-
-// ---- Per-clip language: EN / JA / RU translate title + description + hashtags ----
-// card.langCache[lang] = {f: fields, from: source lang | null, sig: source fields when translated}.
-// Coming back to a language restores its version (with your edits); if its source
-// text changed since, it is translated again.
-const LANG_LABELS = { en: 'EN', ja: 'JA', ru: 'RU' };
-const LANG_BTNS = ['en', 'ja', 'ru'].map(l => `<button type="button" data-l="${l}">${LANG_LABELS[l]}</button>`).join('');
-function detectLang(s) {
-	if (/[぀-ヿ㐀-䶿一-鿿]/.test(s)) return 'ja';
-	const cyr = (s.match(/[Ѐ-ӿ]/g) || []).length, lat = (s.match(/[A-Za-z]/g) || []).length;
-	if (!cyr && !lat) return null;
-	return cyr >= lat ? 'ru' : 'en';
-}
-const fieldsSig = f => JSON.stringify([f.title, f.desc, f.tags]);
-function cardFields(c) { return { title: c.titleEl.value, desc: c.descEl.value, tags: c.tagsEl.value }; }
-function setCardFields(c, f) { c.titleEl.value = f.title || ''; c.descEl.value = f.desc || ''; c.tagsEl.value = f.tags || ''; }
-function markCardLang(c) {
-	c.root.querySelectorAll('.sf-lang button').forEach(b => b.classList.toggle('sf-lang-on', b.dataset.l === c.lang));
-}
-function cardLangStatus(c, text, err) { c.langStEl.className = 'sf-lang-st' + (err ? ' err' : ''); c.langStEl.textContent = text || ''; }
-function resetCardLang(c) { c.lang = null; c.origin = null; c.langCache = {}; cardLangStatus(c, ''); markCardLang(c); }
-
-async function translateCard(card, lang) {
-	const cur = card.lang || detectLang(`${card.titleEl.value}\n${card.descEl.value}`) || 'en';
-	if (!card.origin) card.origin = cur;
-	const prev = card.langCache[cur];
-	card.langCache[cur] = { f: cardFields(card), from: prev ? prev.from : null, sig: prev ? prev.sig : null };
-	if (lang === cur) { card.lang = cur; markCardLang(card); return; }
-	const hit = card.langCache[lang];
-	const srcOfHit = hit && hit.from ? card.langCache[hit.from] : null;
-	if (hit && (!hit.from || (srcOfHit && fieldsSig(srcOfHit.f) === hit.sig))) {
-		setCardFields(card, hit.f);
-		card.lang = lang; markCardLang(card); cardLangStatus(card, '');
-		updatePreview();
-		return;
-	}
-	const src = card.langCache[cur].f;
-	if (!(src.title + src.desc + src.tags).trim()) { cardLangStatus(card, 'nothing to translate', true); return; }
-	const locked = [...card.root.querySelectorAll('.sf-lang button'), card.titleEl, card.descEl, card.tagsEl];
-	locked.forEach(el => el.disabled = true);
-	cardLangStatus(card, `translating to ${LANG_LABELS[lang]}…`);
-	try {
-		const r = await fetch('/api/shorts/translate', {
-			method: 'POST', headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ ...src, target: lang }),
-		});
-		const j = await r.json().catch(() => ({}));
-		if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
-		const f = { title: j.title || '', desc: j.desc || '', tags: j.tags || '' };
-		card.langCache[lang] = { f, from: cur, sig: fieldsSig(src) };
-		setCardFields(card, f);
-		card.lang = lang; markCardLang(card);
-		cardLangStatus(card, (j.provider || '').startsWith('openai') ? '' : `via ${j.provider || '?'} — hashtags not translated`);
-	} catch (e) {
-		cardLangStatus(card, '⚠ ' + e.message, true);
-	} finally {
-		locked.forEach(el => el.disabled = false);
-		updatePreview();
-	}
 }
 
 // ---- Live platform preview (mirrors what tasks.py actually sends) ----
@@ -480,7 +509,7 @@ function updatePreview() {
 	const desc = (first ? first.descEl.value : globalDesc()).trim();
 	const music = first ? first.musicEl.value : globalMusic();
 	document.getElementById('pv_source').textContent = cards.length
-		? '— from the first clip' : '— example (add clips to see yours)';
+		? `— from the first clip, ${LANG_LABEL(first.lang)}` : '— example (add clips to see yours)';
 	// Music is baked into the render → shown on the YouTube card only. TikTok
 	// gets its sound added in-app when the creator publishes the draft.
 	document.getElementById('pv_yt_music').innerHTML = music
@@ -551,8 +580,8 @@ function addFiles(fileList) {
 			<div class="sf-summary"></div>
 			<div class="sf-card-chips"></div>
 			<div class="sf-applied"></div>
-			<div class="sf-lang" title="Language of the title, description and hashtags: click to translate (OpenAI); earlier versions are kept">
-				<span>🌐</span>${LANG_BTNS}<span class="sf-lang-st"></span>
+			<div class="sf-lang" title="The title, description and hashtags in each language of Settings → Languages: click a language to write or check it">
+				${LANG_BTNS}<span class="sf-lang-st"></span>
 			</div>
 			${FL('Title', '— shown in the player', 'The only text shown in the Shorts player: one line, ~40 Latin / ~20 Japanese characters. Hook + game name.')}
 			<input type="text" class="sf-title" placeholder="Hook + game name" />
@@ -580,13 +609,17 @@ function addFiles(fileList) {
 			appliedEl: root.querySelector('.sf-applied'),
 			langStEl: root.querySelector('.sf-lang-st'),
 			selected: false,
-			lang: null, origin: null, langCache: {},  // see translateCard
+			lang: SRC, texts: Object.fromEntries(LANG_CODES.map(l => [l, EMPTY()])), auto: new Set(),
 		};
-		root.querySelectorAll('.sf-lang button').forEach(b =>
-			b.addEventListener('click', () => translateCard(card, b.dataset.l)));
+		root.querySelectorAll('.sf-lang button[data-l]').forEach(b =>
+			b.addEventListener('click', () => { syncCardText(card); showLang(card, b.dataset.l); }));
+		const tr = root.querySelector('.sf-lang .sf-tr');
+		if (tr) tr.addEventListener('click', () => translateMissing(card));
+		[card.titleEl, card.descEl, card.tagsEl].forEach(el => el.addEventListener('input', () => syncCardText(card)));
 		// Seed the card from the global defaults (they keep following until edited here).
-		card.tagsEl.value = globalTags();
-		card.descEl.value = globalDesc();
+		card.texts[SRC] = { title: '', desc: globalDesc(), tags: globalTags() };
+		setCardFields(card, card.texts[SRC]);
+		markCardLang(card);
 		card.musicEl.innerHTML = musicOptionsHtml(globalMusic());
 		root.querySelector('.sf-remove').addEventListener('click', () => {
 			SFEditor.forget(card);
@@ -649,22 +682,21 @@ document.getElementById('clear_all').addEventListener('click', () => {
 // Force the global description + hashtags + music into every card
 document.getElementById('apply_meta').addEventListener('click', () => {
 	cards.forEach(c => {
-		c.tagsEl.value = globalTags();
-		c.descEl.value = globalDesc();
+		setSrcField(c, 'tags', globalTags());
+		setSrcField(c, 'desc', globalDesc());
 		setCardMusic(c, globalMusic());
-		resetCardLang(c);
+		dropTranslations(c);
 	});
 	updatePreview();
 });
 
-// Bulk: translate every selected card (3 at a time)
-document.getElementById('bulk_lang').innerHTML = LANG_BTNS;
-document.querySelectorAll('#bulk_lang button').forEach(b => b.addEventListener('click', async () => {
+// Bulk: fill the empty languages of every selected card (3 at a time)
+document.getElementById('bulk_translate')?.addEventListener('click', async () => {
 	const sel = cards.filter(c => c.selected);
 	for (let i = 0; i < sel.length; i += 3) {
-		await Promise.all(sel.slice(i, i + 3).map(c => translateCard(c, b.dataset.l)));
+		await Promise.all(sel.slice(i, i + 3).map(c => translateMissing(c)));
 	}
-}));
+});
 
 // Multi-select controls
 function setAllSelected(v) {
@@ -737,8 +769,12 @@ document.getElementById('schedule_after_queue').addEventListener('click', async 
 	}
 });
 
-function selectedPlatforms() {
+// the ticked destinations; their platforms for the checklist (shorts_editor.js) and the project defaults
+function selectedDestinations() {
 	return [...document.querySelectorAll('#g_platforms .pf:checked')].map(el => el.value);
+}
+function selectedPlatforms() {
+	return [...new Set([...document.querySelectorAll('#g_platforms .pf:checked')].map(el => el.dataset.platform))];
 }
 
 // Apply a project's render preset (crop/zoom/music/fades) + default platforms
@@ -754,8 +790,9 @@ function applyPreset(p) {
 	};
 	if (p.platforms_csv) {
 		const want = p.platforms_csv.split(',').map(s => s.trim()).filter(Boolean);
+		// the project names platforms: every destination of a named one
 		document.querySelectorAll('#g_platforms .pf').forEach(el => {
-			if (!el.disabled) el.checked = want.includes(el.value);
+			if (!el.disabled) el.checked = want.includes(el.dataset.platform);
 		});
 	}
 	if (p.music_path) {
@@ -841,13 +878,17 @@ IPGoals.load(document.getElementById('g_goal'), '');
 // ---- Clip-type presets: apply / manage --------------------------------------
 // Apply a preset to one card. Only non-empty preset fields overwrite the card,
 // so a partial preset (e.g. just title+tags) won't wipe the card's other fields.
+// The texts go into the language the card shows.
 function applyPresetToCard(card, p) {
 	if (p.title) card.titleEl.value = p.title;
 	if (p.text_en) card.descEl.value = p.text_en;
 	if (p.tags) card.tagsEl.value = p.tags;
 	if (p.music_path) setCardMusic(card, p.music_path);
 	card.appliedEl.textContent = '✓ ' + p.name;
-	if (p.title || p.text_en || p.tags) resetCardLang(card);  // new text: old translations are stale
+	if (p.title || p.text_en || p.tags) {
+		syncCardText(card);
+		dropTranslations(card);  // new text: old translations are stale
+	}
 	updatePreview();
 }
 
@@ -950,8 +991,8 @@ async function loadPresets() {
 document.getElementById('shorts_form').addEventListener('submit', async (e) => {
 	e.preventDefault();
 	if (!cards.length) return;
-	const platforms = selectedPlatforms();
-	if (!platforms.length) { alert('Pick at least one network'); return; }
+	const dests = selectedDestinations();
+	if (!dests.length) { alert('Pick at least one destination'); return; }
 	const status = document.getElementById('submit_status');
 	submitBtn.disabled = true;
 	if (SFEditor.pendingUploads()) status.textContent = 'Finishing uploads…';
@@ -968,11 +1009,10 @@ document.getElementById('shorts_form').addEventListener('submit', async (e) => {
 	const goalId = document.getElementById('g_goal').value || null;
 	const meta = cards.map(c => {
 		const m = SFEditor.metaFor(c);  // src_rel + spec (crop, trim, sound, music, text)
+		syncCardText(c);
 		return {
-			title: c.titleEl.value || '',
-			tags: c.tagsEl.value || '',
-			text_en: c.descEl.value || '',
-			platforms: platforms,
+			texts: c.texts,  // {lang: {title, desc, tags}}
+			destinations: dests,
 			scheduled_at: c.schedEl.value || null,
 			music_path: (m.spec.music && m.spec.music.path) || '',
 			project_id: selectedProjectId, goal_id: goalId,

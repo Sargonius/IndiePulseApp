@@ -88,10 +88,25 @@ KINDS: dict[str, Kind] = {k.module: k for k in (
 	Kind("instagram", "Instagram Reels", "ig_reels", video_only=True),
 )}
 
-# What each post form offers. The video form publishes VK as a video (vk_video).
+# What each post form offers. The video forms publish VK as a video (vk_video): the video form, the Shorts
+# factory (in the order its networks were listed) and the cross-post page of a short (YouTube is where the short
+# already is; TikTok has its own pipeline, /tiktok).
 FORMS = {
 	"post": ("vk", "x", "discord", "facebook", "bluesky", "reddit", "telegram", "youtube", "tiktok"),
 	"video": ("youtube", "tiktok", "vk"),
+	"shorts": ("youtube", "tiktok", "instagram", "vk", "telegram", "x", "reddit", "discord"),
+	"repost": ("instagram", "x", "bluesky", "reddit", "facebook", "vk", "telegram", "discord"),
+}
+VIDEO_FORMS = ("video", "shorts", "repost")
+
+# Where a post without a destination goes by the platform's old rules, as the settings keys it reads: the
+# destinations linked to them are "the same place" for such a post (an earlier repost, a follower count).
+LEGACY_KEYS = {
+	"tg": ("tg_chat_id_ru",),
+	"discord": ("discord_webhook_ru", "discord_webhook_en", "discord_webhook_url"),
+	"fb_ru": ("fb_ru_page_id",),
+	"fb_en": ("fb_en_page_id",),
+	"reddit": ("reddit_subreddit_en",),
 }
 
 
@@ -256,10 +271,21 @@ def title(dest: dict) -> str:
 
 
 def post_platform(dest: dict, form: str = "post") -> str:
-	"""The Post.platform of a post to this destination (VK from the video form = a VK video)."""
-	if dest["module"] == "vk" and form == "video":
+	"""The Post.platform of a post to this destination (VK from a video form = a VK video)."""
+	if dest["module"] == "vk" and form in VIDEO_FORMS:
 		return "vk_video"
 	return dest.get("platform") or KINDS[dest["module"]].platform_for(dest["lang"])
+
+
+def takes_legacy(dest: dict, platform: str) -> bool:
+	"""A post to `platform` without a destination (the old rules) went where this destination goes: the
+	network's one account, or the old settings key this destination is linked to."""
+	kind = KINDS.get(dest.get("module") or "")
+	if kind is None or platform not in (post_platform(dest, "post"), post_platform(dest, "video")):
+		return False
+	if not kind.multi:
+		return True
+	return bool(set(dest.get("linked", {}).values()) & set(LEGACY_KEYS.get(platform, ())))
 
 
 def lacks_own_text(dest: dict, brief) -> bool:
@@ -288,7 +314,8 @@ def for_form(form: str = "post", cfg: Optional[dict] = None) -> list[dict]:
 	for d in sorted(dests, key=lambda d: order.index(d["module"])):
 		kind = KINDS[d["module"]]
 		group = groups.setdefault(d["module"], {"module": d["module"], "name": kind.name,
-												"video_only": kind.video_only and form == "post", "destinations": []})
+												"video_only": kind.video_only and form not in VIDEO_FORMS,
+												"destinations": []})
 		group["destinations"].append({"id": d["id"], "label": label(d), "lang": d["lang"], "title": title(d),
 									  "platform": post_platform(d, form), "ready": ready(d, cfg),
 									  "own_only": d["skip_without_text"]})

@@ -288,19 +288,21 @@ def normalize_tags(tags: str) -> str:
 
 
 def translate(fields: dict, target: str) -> dict:
-    """{title, desc, tags} → the same in `target` ('en' | 'ja' | 'ru') + provider.
+    """{title, desc, tags} → the same in `target` (any language code: 'ja', 'de', 'pt-br'...) + provider.
 
     The AI from Settings first (OpenAI or Claude); without a key or on failure, machine
     translation (DeepL or Google) for the title and description (hashtags stay as they
     are). Raises TranslateError when neither works.
     """
-    from app.services import llm, machine_translate
-    if target not in LANGS:
+    from app.services import languages, llm, machine_translate
+    code = languages.normalize_code(target)
+    if code is None:
         raise ValueError(f"unknown language: {target}")
+    target = code
     src = {k: str(fields.get(k) or "").strip() for k in ("title", "desc", "tags")}
     if not any(src.values()):
         return {**src, "provider": ""}
-    lang = LANG_NAMES[target]
+    lang = languages.name(target)
     try:
         content, provider = llm.chat(
             [{"role": "system", "content": _SYSTEM.format(lang=lang)},

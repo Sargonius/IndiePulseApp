@@ -1,0 +1,149 @@
+"""Languages & destinations beyond the post forms: the Shorts factory, its cross-post page, the TikTok pipeline,
+the post-edit API, the health check, follower counts, the old /news page and a fresh install."""
+import json
+import os
+
+import pytest
+from sqlmodel import select
+
+from app.models.models import Brief, Job, JobKindEnum, Post
+from app.platforms.common import brief_for_publish, post_text_lang
+from app.services import destinations, languages
+from tests.conftest import reload
+from tests.test_destinations import OWNER, _publish, _with_ja, networks  # noqa: F401  (networks: a fixture)
+
+
+@pytest.fixture
+def scheduled(monkeypatch):
+    """Publish and render jobs are recorded, never run."""
+    from app.jobs import tasks
+    calls = {"publish": [], "render": []}
+    monkeypatch.setattr(tasks.publish_news_post, "schedule", lambda args, delay=0: calls["publish"].append(args))
+    monkeypatch.setattr(tasks.render_short, "schedule", lambda args, delay=0: calls["render"].append(args))
+    return calls
+
+
+# ── the Shorts factory ───────────────────────────────────────────────────────
+
+def test_the_factory_offers_destinations_and_every_language(networks, client):
+    _with_ja()
+    page = client.get("/shorts").text
+    for dest in ("telegram-ja", "telegram-ru", "discord-ja", "youtube", "tiktok", "instagram", "vk"):
+        assert f'value="{dest}"' in page
+    assert 'data-platform="vk_video"' in page and 'data-platform="ig_reels"' in page
+    assert 'value="facebook-ja"' not in page  # not a network the factory posts to
+    assert '"code": "ja"' in page  # a title, description and hashtags per language
+    assert 'value="yt"' not in page  # no platform checkboxes any more
+    # the defaults stay: YouTube, TikTok and Instagram ticked, the rest not
+    tiktok = page.split('value="tiktok"', 1)[1].split(">", 1)[0]
+    telegram = page.split('value="telegram-ja"', 1)[1].split(">", 1)[0]
+    assert "checked" in tiktok and "checked" not in telegram
+
+
+def _render(session, monkeypatch, tmp_path, brief_id):
+    """Run render_short for the factory's render job of this brief, without ffmpeg."""
+    from app.jobs import tasks
+    from app.services import video_edit, video_editor
+    job = next(j for j in session.exec(select(Job).where(Job.kind == JobKindEnum.render)).all()
+               if json.loads(j.payload_json)["brief_id"] == brief_id)
+    monkeypatch.setattr(video_edit, "render_file", lambda src, out, spec, info=None, **kw: open(out, "wb").write(b"v"))
+    monkeypatch.setattr(video_editor, "extract_poster_frame", lambda *a, **k: None)
+    return job, tasks.render_short.call_local(job.id, brief_id)
+
+
+def _factory_submit(client, monkeypatch, tmp_path, **card):
+    from app.services import video_edit
+    from tests.test_shorts_editor import FAKE_INFO
+    monkeypatch.setattr(video_edit, "probe", lambda path: dict(FAKE_INFO))
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("media", exist_ok=True)
+    (tmp_path / "media" / "short_abc_clip.mp4").write_bytes(b"src")
+    meta = [{"src_rel": "short_abc_clip.mp4", "spec": {"format": "vertical"}, **card}]
+    return client.post("/shorts", data={"meta": json.dumps(meta)}, follow_redirects=False)
+
+
+def test_a_factory_clip_goes_to_each_destination_in_its_language(networks, client, session, monkeypatch,
+                                                                 tmp_path, scheduled):
+    _with_ja()
+    texts = {"ru": {"title": "Ночной рейд", "desc": "Рейдеры у каравана {steam}", "tags": "#инди"},
+             "en": {"title": "Night raid", "desc": "Raiders hit the caravan", "tags": "#indiegame"},
+             "ja": {"title": "夜の襲撃", "desc": "キャラバンを襲う", "tags": "#インディーゲーム"}}
+    r = _factory_submit(client, monkeypatch, tmp_path, texts=texts,
+                        destinations=["youtube", "telegram-ja", "telegram-ru", "vk", "gone"])
+    assert r.status_code == 303 and r.headers["location"].startswith("/shorts/board?skipped=gone")
+    brief_id = scheduled["render"][0][1]
+    brief = reload(Brief, brief_id)
+    # the brief: the title and hashtags of the language written in (RU, the first), a description per language
+    assert (brief.title, brief.tags_json) == ("Ночной рейд", "#инди")
+    assert languages.brief_texts(brief) == {"ru": "Рейдеры у каравана {steam}", "en": "Raiders hit the caravan",
+                                           "ja": "キャラバンを襲う"}
+    job, result = _render(session, monkeypatch, tmp_path, brief_id)
+    assert result.endswith("posts=4")
+    assert json.loads(job.payload_json)["destinations"] == ["youtube", "telegram-ja", "telegram-ru", "vk"]
+    posts = session.exec(select(Post).where(Post.brief_id == brief_id).order_by(Post.id)).all()
+    assert [(p.platform.value, p.destination_id) for p in posts] == [
+        ("yt", "youtube"), ("tg", "telegram-ja"), ("tg", "telegram-ru"), ("vk_video", "vk")]
+    got = {}
+    for p in posts:
+        b = brief_for_publish(session, p)
+        got[p.destination_id] = (b.title, post_text_lang(b, p)[0], b.tags_json)
+    assert got == {
+        "youtube": ("Night raid", "Raiders hit the caravan", "#indiegame"),       # YouTube is EN
+        "telegram-ja": ("夜の襲撃", "キャラバンを襲う", "#インディーゲーム"),
+        "telegram-ru": ("Ночной рейд", "Рейдеры у каравана", "#инди"),        # {steam}: no app id, removed
+        "vk": ("Ночной рейд", "Рейдеры у каравана", "#инди"),
+    }
+    assert posts[2].overrides_json is None  # the brief's own language: nothing of its own
+    for job_id, post_id in scheduled["publish"]:
+        assert json.loads(reload(Job, job_id).payload_json)["media_rel"] == reload(Brief, brief_id).media_vertical_path
+
+
+def test_a_language_without_texts_falls_back_and_own_only_destinations_are_left_out(networks, client, session,
+                                                                                     monkeypatch, tmp_path, scheduled):
+    _with_ja()
+    r = _factory_submit(client, monkeypatch, tmp_path,
+                        texts={"ru": {"title": "Рейд", "desc": "Только по-русски", "tags": ""}, "ja": {}},
+                        destinations=["telegram-ja", "discord-en"])
+    board = client.get(r.headers["location"]).text
+    assert "Left out of this batch" in board and "no EN text" in board
+    brief_id = scheduled["render"][0][1]
+    _render(session, monkeypatch, tmp_path, brief_id)
+    post = session.exec(select(Post).where(Post.brief_id == brief_id)).one()
+    b = brief_for_publish(session, post)
+    assert post.destination_id == "telegram-ja" and (b.title, post_text_lang(b, post)) == \
+        ("Рейд", ("Только по-русски", "ru"))
+
+
+def test_a_destination_turned_off_before_the_render_gets_no_post(networks, client, session, monkeypatch,
+                                                                  tmp_path, scheduled):
+    _with_ja()
+    _factory_submit(client, monkeypatch, tmp_path, texts={"en": {"title": "Clip", "desc": "d", "tags": ""}},
+                    destinations=["telegram-ja", "tiktok"])
+    items = [dict(d, module=g["module"]) for g in destinations.editor_context()["groups"] for d in g["destinations"]]
+    for it in items:
+        it["enabled"] = it["id"] != "telegram-ja"
+    assert destinations.save(["ru", "en", "ja"], items)["ok"]
+    brief_id = scheduled["render"][0][1]
+    _render(session, monkeypatch, tmp_path, brief_id)
+    assert [p.destination_id for p in session.exec(select(Post).where(Post.brief_id == brief_id))] == ["tiktok"]
+
+
+def test_an_old_tab_or_a_render_queued_before_destinations_still_uses_platforms(networks, client, session,
+                                                                               monkeypatch, tmp_path, scheduled):
+    _with_ja()
+    _factory_submit(client, monkeypatch, tmp_path, title="Old tab", text_en="Old text", tags="#a",
+                    platforms=["yt", "tg"])
+    brief_id = scheduled["render"][0][1]
+    brief = reload(Brief, brief_id)
+    assert (brief.title, brief.text_en, brief.tags_json) == ("Old tab", "Old text", "#a")
+    _render(session, monkeypatch, tmp_path, brief_id)
+    posts = session.exec(select(Post).where(Post.brief_id == brief_id).order_by(Post.id)).all()
+    assert [(p.platform.value, p.destination_id, p.overrides_json) for p in posts] == [("yt", None, None),
+                                                                                      ("tg", None, None)]
+
+
+def test_translate_takes_any_configured_language(client, monkeypatch):
+    from app.services import repost
+    monkeypatch.setattr(repost, "translate", lambda data, target: {"title": f"{target}:{data['title']}"})
+    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "日本"}).status_code == 400
+    assert client.post("/api/shorts/translate", json={"title": "Hi", "target": "DE"}).json() == {"title": "de:Hi"}
