@@ -1,7 +1,11 @@
 """Test isolation: a throwaway SQLite DB, Huey queue and settings file per session.
 
 Env vars must be set before any `app.*` import (config reads them at import time).
-The working directory stays at the project root so templates/static resolve.
+The working directory is a throwaway data folder (INDIEPULSE_DATA, app.core.paths), never the project root: the
+app opens its data by relative paths, and run from the owner's checkout — where the real .settings.json, DBs, logs
+and the live app's .locks sit — anything not yet redirected would land there. Before this, a module-scoped
+TestClient started the app (its startup migration saves the settings) before the per-test settings file was
+patched in, and wrote the real .settings.json (2026-10-24). Templates and static are found from the code folder.
 """
 import itertools
 import json
@@ -15,9 +19,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TMP = tempfile.mkdtemp(prefix="indiepulse-tests-")
 os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(_TMP, "test.db").replace("\\", "/")
 os.environ["QUEUE_DB"] = os.path.join(_TMP, "queue.db")
+os.environ["INDIEPULSE_DATA"] = _TMP
 os.environ.setdefault("APP_HOST", "127.0.0.1")
-os.chdir(ROOT)
+os.chdir(_TMP)
 sys.path.insert(0, ROOT)
+# the video tests need ffmpeg: the one in the checkout's vendor/ (the app looks there relative to its data folder)
+if os.path.isfile(os.path.join(ROOT, "vendor", "ffmpeg", "ffmpeg.exe")):
+    os.environ["PATH"] = os.path.join(ROOT, "vendor", "ffmpeg") + os.pathsep + os.environ.get("PATH", "")
 
 from app.db.session import create_db_and_tables, engine  # noqa: E402
 import app.models.models  # noqa: E402,F401  (registers tables before create_all)
