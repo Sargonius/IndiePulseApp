@@ -414,3 +414,17 @@ def test_a_publication_counts_the_channels_it_went_to(set_settings):
     assert went(("tg", "telegram-ru")) == {"tg"} == went(("tg", None))  # the RU channel, as before
     assert went(("fb_en", "facebook-ja")) == {"facebook:facebook-ja"}  # not the EN Page
     assert went(("fb_en", "facebook-en"), ("vk", None)) == {"fb_en", "vk"}
+
+
+# ── the old /news page ───────────────────────────────────────────────────────
+
+def test_the_old_news_page_redirects_and_its_form_still_posts(client, session, set_settings, scheduled):
+    r = client.get("/news", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/create/post"
+    set_settings(tg_bot_token="1:a", tg_chat_id_ru="-100111")
+    r = client.post("/news", data={"text_ru": "Старая вкладка", "text_en": "Old tab", "platforms": ["tg"]},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/published/")
+    brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
+    post = session.exec(select(Post).where(Post.brief_id == brief_id)).one()
+    assert (post.platform.value, post.destination_id) == ("tg", None) and len(scheduled["publish"]) == 1

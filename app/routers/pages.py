@@ -101,23 +101,12 @@ def _enrich_posts(posts):
     _s.close()
     return enriched
 
-@router.get('/news', response_class=HTMLResponse)
+@router.get('/news')
 def news_form(request: Request):
-    draft = load_draft()
-    cfg = load_settings()
-    platforms_ready = {
-        'discord': bool((cfg.get('discord_webhook_ru') or cfg.get('discord_webhook_en') or cfg.get('discord_webhook_url') or '').strip()),
-        'x': bool((cfg.get('x_access_token') or '').strip()),
-        'vk': bool(((cfg.get('vk_access_token') or '').strip()) and ((cfg.get('vk_group_id') or '').strip())),
-        'yt': bool(((cfg.get('yt_access_token') or '').strip()) and ((cfg.get('yt_refresh_token') or '').strip())),
-        'fb_ru': bool(((cfg.get('fb_ru_page_id') or '').strip()) and ((cfg.get('fb_ru_page_access_token') or '').strip())),
-        'fb_en': bool(((cfg.get('fb_en_page_id') or '').strip()) and ((cfg.get('fb_en_page_access_token') or '').strip())),
-        'reddit': bool(((cfg.get('reddit_client_id') or '').strip()) and ((cfg.get('reddit_client_secret') or '').strip()) and ((cfg.get('reddit_username') or '').strip()) and ((cfg.get('reddit_password') or '').strip()) and ((cfg.get('reddit_subreddit_en') or '').strip())),
-        'tg': bool(((cfg.get('tg_bot_token') or '').strip()) and ((cfg.get('tg_chat_id_ru') or '').strip())),
-        'bluesky': bool(((cfg.get('bluesky_handle') or '').strip()) and ((cfg.get('bluesky_app_password') or '').strip())),
-        'tiktok': True,
-    }
-    return templates.TemplateResponse('news.html', {'request': request, 'draft': draft, 'platforms_ready': platforms_ready, 'ui_language': cfg.get('ui_language', 'en')})
+    """The old all-in-one post page: nothing links to it any more, /create/post replaced it (a text per
+    language, destinations). A bookmark lands there; the POST below still takes a tab left open."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('/create/post', status_code=303)
 
 @router.get('/steam', response_class=HTMLResponse)
 def steam_export_page(request: Request):
@@ -444,6 +433,8 @@ def published_page(request: Request, brief_id: int, skipped: str = '', duplicate
     })
 
 
+# The old /news page's form (GET /news redirects now): a tab left open or a script still posts here. Platforms,
+# no destinations: its posts publish by the old rules, as they always did.
 @router.post('/news')
 def submit_news(
     request: Request,
