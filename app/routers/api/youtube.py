@@ -15,6 +15,7 @@ from urllib.parse import quote_plus
 from app.routers.api.common import _e
 from app.routers.api.common import _oauth_check_state
 from app.routers.api.common import _oauth_new_state
+from app.routers.api.common import settings_back_url
 from app.routers.api.common import templates_api
 
 router = APIRouter()
@@ -43,7 +44,7 @@ def yt_save(
     logger.info("YT save done")
     # Redirect appropriately based on htmx or normal form
     if request.headers.get("HX-Request"):
-        return Response(content="", headers={"HX-Redirect": "/accounts"})
+        return Response(content="", headers={"HX-Redirect": settings_back_url(request)})
     else:
         return RedirectResponse(url="/accounts", status_code=302)
 

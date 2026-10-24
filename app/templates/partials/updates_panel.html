@@ -51,22 +51,7 @@
 			</div>
 		</div>
 		<div class="settings-right">
-			<div class="instructions">
-				<h4>How updates work</h4>
-				<p>IndiePulse looks for a new release on GitHub 30 seconds after it starts and every 6 hours. Installing
-					downloads the release, checks its checksum, waits until nothing is publishing, then restarts
-					IndiePulse on the new version. If the new version doesn't come up, the previous one is put back by
-					itself. Your settings, posts and media are never touched (they live in the data folder).</p>
-				<h4>Access token (private repository)</h4>
-				<ol>
-					<li>GitHub → <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Settings → Developer settings → Fine-grained tokens → Generate new token</a></li>
-					<li>Repository access: <b>Only select repositories</b> → the repository above</li>
-					<li>Permissions → Repository → <b>Contents: Read-only</b> (Metadata: read-only comes with it)</li>
-					<li>Pick an expiration, Generate, paste it here, Save, then «Check now»</li>
-				</ol>
-				<div class="info-box">The token can only read that repository. It is kept in this app's settings and never
-					shown in logs. A public repository needs no token.</div>
-			</div>
+			{% include "partials/settings/help/updates.html" %}
 		</div>
 	</div>
 </div>

@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Settings</h2>
+<div class="setup-head">
+	<h2>Settings</h2>
+	<form method="post" action="/setup/restart">
+		<button type="submit" class="btn-link" title="The setup wizard again: languages, networks, accounts, AI, updates">Run setup again</button>
+	</form>
+</div>
 
 <div id="settings_container">
 	<!-- The sections of app/core/settings_schema.py in order: made from their fields (partials/settings_section.html)

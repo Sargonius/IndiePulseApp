@@ -34,6 +34,14 @@ def _e(value) -> str:
 templates_api = make_templates()
 
 
+def settings_back_url(request: Request) -> str:
+    """Where a saved hand-written Settings form reloads to: the setup wizard's step when it was there, else
+    Settings (htmx sends the page it was on as HX-Current-URL)."""
+    from urllib.parse import urlsplit
+    here = urlsplit(request.headers.get("HX-Current-URL") or "")
+    return f"/setup?{here.query}" if here.path == "/setup" else "/accounts"
+
+
 async def form_texts(request: Request) -> dict:
     """The text_<lang> fields of a post form → {lang: text}. The forms have one per language of Settings →
     Languages, so the names aren't known in advance (a FastAPI dependency: the form is parsed once and cached)."""

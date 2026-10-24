@@ -20,6 +20,7 @@ from app.core.logging import setup_logging, request_logger
 from app.db.session import create_db_and_tables, migrate_db
 from app.routers import home, pages, api
 from app.routers import modules as modules_router
+from app.routers import setup as setup_router
 
 setup_logging()
 
@@ -90,6 +91,7 @@ app.include_router(home.router)
 app.include_router(pages.router)
 app.include_router(api.router)
 app.include_router(modules_router.router)
+app.include_router(setup_router.router)
 
 # Ensure directories exist before mounting (media/ is data: relative to the data folder, see app.core.paths)
 os.makedirs("media", exist_ok=True)

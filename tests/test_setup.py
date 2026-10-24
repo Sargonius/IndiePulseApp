@@ -160,3 +160,108 @@ def test_youtube_without_a_default_playlist_adds_none(monkeypatch, make_post, se
     set_settings(yt_playlist_title="Devlogs")
     publish()
     assert calls == [("ensure", "Devlogs"), ("add", "PL1")]
+
+
+# ── the wizard ───────────────────────────────────────────────────────────────
+
+def state() -> dict:
+    return load_settings()["setup_state"]
+
+
+def test_a_fresh_install_is_walked_through_setup(fresh, client):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/setup"
+    page = client.get("/setup").text
+    assert "The language you write in" in page
+    assert '<option value="en" selected>' in page  # not the built-in ru + en of the install it was written for
+
+    # 1. languages: the starting destinations follow (nothing is set up behind them yet)
+    r = client.post("/setup/languages", data={"write": "en", "publish": ["en", "ja"]}, follow_redirects=False)
+    assert r.status_code == 303 and state()["step"] == "modules"
+    cfg = load_settings()
+    assert cfg["languages"] == ["en", "ja"]
+    langs = {d["id"]: d["lang"] for d in cfg["destinations"]}
+    assert langs["telegram-ru"] == "en" and langs["vk"] == "en" and "facebook-ru" not in langs
+    assert set(langs.values()) == {"en"}
+
+    # a restart in the middle comes back to the same step
+    assert setup.on_start() == ""
+    assert "Where do you publish?" in client.get("/setup").text
+    assert client.get("/", follow_redirects=False).status_code == 303
+
+    # 2. networks & features
+    client.post("/setup/modules", data={"on": ["telegram", "youtube", "shorts"]})
+    assert state()["step"] == "accounts"
+    disabled = load_settings()["modules_disabled"]
+    assert "telegram" not in disabled and "vk" in disabled and "outreach" in disabled
+
+    # 3. their accounts: the Settings sections themselves, saving in place
+    page = client.get("/setup").text
+    assert 'id="section_telegram"' in page and 'id="section_youtube"' in page and 'id="section_vk"' not in page
+    assert 'id="section_languages"' in page and 'id="ld_langs"' in page  # more channels: the destinations editor
+    r = client.post("/api/settings/section/telegram", data={"tg_bot_token": "1:abc", "tg_chat_id_ru": "-100"})
+    assert r.status_code == 200 and load_settings()["tg_bot_token"] == "1:abc"
+    client.post("/setup/next", data={"step": "accounts"})
+
+    # 4. AI & translation, 5. updates
+    assert 'id="section_openai"' in client.get("/setup").text
+    client.post("/setup/next", data={"step": "ai"})
+    page = client.get("/setup").text
+    assert 'id="sf_updates_setup"' in page and 'name="update_token"' in page and 'name="update_repo"' not in page
+    client.post("/api/settings/section/updates", data={"_group": "setup", "update_mode": "auto",
+                                                       "update_token": "github_pat_x"})
+    assert (load_settings()["update_mode"], load_settings()["update_token"]) == ("auto", "github_pat_x")
+    client.post("/setup/next", data={"step": "updates"})
+
+    # done
+    assert state()["done"] is True and state()["step"] == "done"
+    assert "IndiePulse is set up" in client.get("/setup").text
+    assert client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_every_step_can_be_skipped(fresh, client):
+    for step in setup.STEP_IDS[:-1]:
+        assert state()["step"] == step
+        client.post("/setup/next", data={"step": step})
+    assert state()["done"] is True
+    assert load_settings()["languages"] == ["ru", "en"] and load_settings()["modules_disabled"] == []
+
+
+def test_skip_setup_leaves_it_for_good(fresh, client):
+    r = client.post("/setup/skip", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert state()["done"] is True and client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_it_is_never_forced_on_an_install_with_settings(existing, client):
+    assert client.get("/", follow_redirects=False).status_code == 200
+    # it can still be opened, and shows that install's own languages
+    assert "IndiePulse is set up" in client.get("/setup").text
+    page = client.get("/setup?step=languages").text
+    assert 'value="ru" checked' in page and 'value="en" checked' in page and '<option value="ru" selected>' in page
+    # Settings → "Run setup again": from the start, but the home page stays the home page
+    assert "/setup/restart" in client.get("/accounts").text
+    client.post("/setup/restart")
+    assert state()["step"] == "languages" and state()["done"] is False and state()["fresh"] is False
+    assert client.get("/", follow_redirects=False).status_code == 200
+    assert "The language you write in" in client.get("/setup").text
+
+
+def test_the_languages_step_checks_what_it_gets(fresh, client):
+    r = client.post("/setup/languages", data={"write": "", "publish": ["en"]})
+    assert r.status_code == 422 and "Pick the language you write in" in r.text
+    r = client.post("/setup/languages", data={"write": "en", "other": "eo, Klingon"})
+    assert r.status_code == 422 and "“Klingon” is not a language code" in r.text
+    assert load_settings()["languages"] == ["ru", "en"] and state()["step"] == "languages"
+    client.post("/setup/languages", data={"write": "de", "publish": ["en"], "other": "pt_BR"})
+    assert load_settings()["languages"] == ["de", "en", "pt-br"]
+
+
+def test_a_destination_that_is_set_up_keeps_its_language(existing, client):
+    # its Telegram channel is set up and posts in Russian: dropping Russian would send it elsewhere
+    r = client.post("/setup/languages", data={"write": "en", "publish": ["en"]})
+    assert r.status_code == 422 and "Telegram · RU publishes in Russian" in r.text
+    assert load_settings()["languages"] == ["ru", "en"]
+    r = client.post("/setup/languages", data={"write": "ru", "publish": ["ru", "en", "ja"]}, follow_redirects=False)
+    assert r.status_code == 303 and load_settings()["languages"] == ["ru", "en", "ja"]
+    assert {d["id"]: d["lang"] for d in load_settings()["destinations"]}["telegram-ru"] == "ru"

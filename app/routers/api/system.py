@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from loguru import logger
 from typing import Optional
 from app.routers.api.common import _e
+from app.routers.api.common import settings_back_url
 from app.routers.api.common import templates_api
 
 router = APIRouter()
@@ -76,13 +77,6 @@ def system_autoreload_status():
     return HTMLResponse(_render_autoreload_button_html(enabled))
 
 
-def _back_to(request: Request) -> str:
-	"""Where a saved hand-written form goes back to: the setup wizard when it was there, else Settings."""
-	from urllib.parse import urlsplit
-	here = urlsplit(request.headers.get("HX-Current-URL") or "")
-	return f"/setup?{here.query}" if here.path == "/setup" else "/accounts"
-
-
 @router.post("/settings/save")
 async def save_settings_endpoint(request: Request):
 	"""The hand-written Settings forms (VK, X, YouTube stats, Facebook's manual fields, TikTok): any form field
@@ -92,7 +86,7 @@ async def save_settings_endpoint(request: Request):
 	updates = settings_schema.parse_legacy(await request.form())
 	save_settings(updates)
 	# Ask htmx to reload the page so new values are visible
-	return Response(content="", headers={"HX-Redirect": _back_to(request)})
+	return Response(content="", headers={"HX-Redirect": settings_back_url(request)})
 
 
 @router.post("/settings/section/{section_id}", response_class=HTMLResponse)

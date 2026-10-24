@@ -177,3 +177,20 @@
 .sf-error { color: var(--danger); font-size: 12px; margin-top: 3px; }
 .form-group label.sf-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 12px; margin-top: 4px; }
 .form-group label.sf-check input { width: auto; }
+
+/* The setup wizard (setup.html) */
+.setup-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.setup-steps { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; padding: 0; margin: 0 0 16px; }
+.setup-steps li a { display: inline-block; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: 13px; text-decoration: none; color: var(--muted); }
+.setup-steps li.is-done a { color: var(--success); border-color: var(--success); }
+.setup-steps li.is-current a { color: #fff; background: var(--primary); border-color: var(--primary); font-weight: 600; }
+.setup-card { margin-bottom: 16px; }
+.setup-card h3, .setup-sub { margin: 16px 0 8px; font-size: 16px; }
+.setup-intro { margin: 0 0 12px; }
+.setup-langs { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px 12px; }
+.setup-langs label { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 0; }
+.form-group .setup-langs input { width: auto; }
+.setup-nav { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.setup-nav-gap { flex: 1; }
+.setup-errors { margin: 0 0 12px; padding: 8px 12px; border-left: 4px solid var(--danger); background: #fee2e2; color: #991b1b; border-radius: 6px; }
+.setup-status { list-style: none; padding: 0; display: grid; gap: 4px; }

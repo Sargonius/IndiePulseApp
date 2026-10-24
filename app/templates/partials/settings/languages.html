@@ -1,7 +1,8 @@
 {#- Settings → Languages & destinations, its hand-written part (inside partials/settings_section.html): the
     languages, every place posts go to with its language; the script edits them and saves to
-    /api/destinations/save. -#}
-<div class="form-group">
+    /api/destinations/save. On the setup wizard's accounts step (`ld_wizard`) the languages row is hidden: its first
+    step sets them. -#}
+<div class="form-group"{% if ld_wizard %} hidden{% endif %}>
 	<label>Languages <span class="muted" style="font-weight:400;">— the first is the one you write in; the post forms get a text field for each</span></label>
 	<div id="ld_langs" class="ld-langs"></div>
 	<div class="row" style="margin-top:6px;">
