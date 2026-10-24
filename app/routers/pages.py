@@ -14,7 +14,7 @@ from app.services.draft_store import load_draft, save_draft, clear_draft
 from app.services import music_library
 from app.services.settings import load_settings
 from app.jobs.tasks import refresh_metrics_for_post
-from app.services.settings import load_settings
+from app.routers.api.common import form_texts
 
 router = APIRouter()
 templates = make_templates()
@@ -75,6 +75,8 @@ def _enrich_posts(posts):
         row = {
             'id': p.id,
             'platform_text': platform_text,
+            # two channels of one network differ only by this (Settings → Languages & destinations)
+            'destination': getattr(p, 'destination_id', None),
             'status_text': (p.status.value if hasattr(p.status, 'value') else str(p.status)),
             'brief_id': getattr(p, 'brief_id', None),
             'scheduled_at': getattr(p, 'scheduled_at', None),
@@ -143,6 +145,7 @@ def projects_page(request: Request, session: Session = Depends(get_session)):
 
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
+    from app.services import destinations
     cfg = load_settings()
     token = cfg.get('vk_access_token', '') or ''
     token_hint = ('•••' + token[-4:]) if token else ''
@@ -151,6 +154,7 @@ def accounts(request: Request):
         {
             'request': request,
             'ui_language': cfg.get('ui_language', 'en'),
+            'dest_editor': destinations.editor_context(cfg),
             'discord_webhook': cfg.get('discord_webhook_url', ''),
             'discord_bot_token_hint': (('•••' + (cfg.get('discord_bot_token') or '')[-4:]) if (cfg.get('discord_bot_token') or '') else ''),
             'discord_guild_id': cfg.get('discord_guild_id', ''),
@@ -350,20 +354,71 @@ def _published_redirect(brief_id: int, skipped: Optional[List[str]] = None, dupl
     return RedirectResponse(f"/published/{brief_id}" + (f"?{urlencode(query)}" if query else ''), status_code=303)
 
 
-def _duplicate_redirect(session: Session, brief: Brief, platforms: Optional[List[str]], allow_duplicate: Optional[str]):
+def _duplicate_redirect(session: Session, brief: Brief, platforms: Optional[List[str]], allow_duplicate: Optional[str],
+                        targets: Optional[list] = None):
     """Refuse to create a publication the chosen networks already got (or are about to
-    get) unless "publish again" was ticked; None = go ahead."""
+    get) unless "publish again" was ticked; None = go ahead. `targets`: the chosen
+    destinations ([(destination, PlatformEnum)]) when the form sent destinations."""
     if allow_duplicate:
         return None
     from app.services import duplicates
     chosen = []
-    for p in platforms or []:
-        try:
-            chosen.append(PlatformEnum(p))
-        except ValueError:
-            pass
-    twin = duplicates.existing_publication(session, brief, chosen)
+    by_dest = None
+    if targets is not None:
+        chosen = [plat for _, plat in targets]
+        by_dest = {}
+        for dest, plat in targets:
+            by_dest.setdefault(plat.value, []).append(dest['id'])
+    else:
+        for p in platforms or []:
+            try:
+                chosen.append(PlatformEnum(p))
+            except ValueError:
+                pass
+    twin = duplicates.existing_publication(session, brief, chosen, by_dest)
     return _published_redirect(twin.brief_id, duplicate=True) if twin is not None else None
+
+
+# ==================== Languages & destinations in the post forms ====================
+
+def _lang_fields(cfg, draft) -> list:
+    """One text field per language of Settings → Languages (the first: the one you write in), from the draft."""
+    from app.services import languages
+    draft = draft or {}
+    texts = dict(draft.get('texts') or {})
+    for lang in languages.MIRRORED:
+        if draft.get(f'text_{lang}') and not texts.get(lang):
+            texts[lang] = draft[f'text_{lang}']
+    return [{'code': c, 'name': languages.name(c), 'text': texts.get(c) or ''} for c in languages.configured(cfg)]
+
+
+def _dest_groups(form: str, cfg, draft, default_off: tuple = ()) -> list:
+    """The form's destination checkboxes grouped by network (modules that are off and destinations turned off
+    are not there). Ticked: what the draft had, else every destination that is set up — except video-only ones
+    on the post form and the modules in `default_off` (as the old checkboxes were)."""
+    from app.services import destinations
+    groups = destinations.for_form(form, cfg)
+    picked = (draft or {}).get('destinations')
+    for g in groups:
+        for d in g['destinations']:
+            d['checked'] = (d['id'] in picked) if isinstance(picked, list) else \
+                (d['ready'] and not g['video_only'] and g['module'] not in default_off)
+    return groups
+
+
+def _destination_targets(ids, form: str, brief, skipped: list) -> list:
+    """The destinations a form sent → [(destination, PlatformEnum)] to create posts for. Turned off, removed,
+    of a module that is off, or taking only a language the post has no text in: skipped (the result page says so)."""
+    from app.services import destinations
+    chosen, off = destinations.chosen(ids, form)
+    skipped += [f"{i} (turned off or removed)" for i in off]
+    out = []
+    for d in chosen:
+        if destinations.lacks_own_text(d, brief):
+            skipped.append(f"{destinations.title(d)} (no {d['lang'].upper()} text)")
+            continue
+        out.append((d, PlatformEnum(destinations.post_platform(d, form))))
+    return out
 
 
 def _mark_allowed(payload: dict, allow_duplicate: Optional[str]) -> dict:
@@ -543,7 +598,7 @@ def submit_news(
                 continue
             # Skip unconfigured platforms and record the info
             if not is_ready(p):
-                skipped.append(p)
+                skipped.append(f"{p} (not configured)")
                 continue
             # Failsafe: skip platforms lacking required media
             if p == 'tiktok':
@@ -638,6 +693,8 @@ def create_post_form(request: Request):
     return templates.TemplateResponse('create_post.html', {
         'request': request,
         'draft': draft,
+        'langs': _lang_fields(cfg, draft),
+        'dest_groups': _dest_groups('post', cfg, draft),
         'ui_language': cfg.get('ui_language', 'en')
     })
 
@@ -645,10 +702,10 @@ def create_post_form(request: Request):
 @router.post('/create/post')
 def submit_post(
     request: Request,
-    text_ru: str = Form(...),
-    text_en: Optional[str] = Form(None),
+    texts: dict = Depends(form_texts),
     tags: Optional[str] = Form(None),
     platforms: Optional[List[str]] = Form(None),
+    destinations: Optional[List[str]] = Form(None),
     scheduled_at: Optional[str] = Form(None),
     media_normal: Optional[str] = Form(None),
     gallery_order: Optional[str] = Form(None),
@@ -686,12 +743,18 @@ def submit_post(
     brief = Brief(
         user_id=1,
         type='post',
-        text_ru=text_ru or '',
-        text_en=text_en or '',
+        text_ru=texts.get('ru') or '',
+        text_en=texts.get('en') or '',
         tags_json=tags_final,
         media_path=media_path,
     )
-    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate)
+    from app.services.languages import set_brief_texts
+    set_brief_texts(brief, texts)  # text_<lang> of every language of Settings → Languages
+    skipped: List[str] = []
+    # The form sends destinations (each with its language); `platforms` is the older way (API, scripts):
+    # posts without a destination, published by the platform's old rules.
+    targets = _destination_targets(destinations, 'post', brief, skipped) if destinations else None
+    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate, targets)
     if dup is not None:
         return dup  # the draft stays, so "publish again" is one tick away
     session.add(brief)
@@ -710,7 +773,20 @@ def submit_post(
         except Exception:
             when_dt = None
 
-    if platforms:
+    if targets is not None:
+        for dest, enum_val in targets:
+            post = Post(
+                user_id=1,
+                brief_id=brief.id,
+                platform=enum_val,
+                destination_id=dest['id'],
+                status=PostStatusEnum.queued,
+                scheduled_at=when_dt,
+            )
+            session.add(post)
+            created_posts.append(post)
+        session.commit()
+    elif platforms:
         for p in platforms:
             try:
                 enum_val = PlatformEnum(p)
@@ -758,7 +834,7 @@ def submit_post(
 
     clear_draft()
 
-    return _published_redirect(brief.id)
+    return _published_redirect(brief.id, skipped)
 
 
 @router.get('/shorts', response_class=HTMLResponse)
@@ -1067,6 +1143,9 @@ def create_video_form(request: Request):
     return templates.TemplateResponse('create_video.html', {
         'request': request,
         'draft': draft,
+        'langs': _lang_fields(cfg, draft),
+        # VK Video was never ticked by default; YouTube and TikTok were
+        'dest_groups': _dest_groups('video', cfg, None, default_off=('vk',)),
         'ui_language': cfg.get('ui_language', 'en')
     })
 
@@ -1075,10 +1154,10 @@ def create_video_form(request: Request):
 def submit_video(
     request: Request,
     title: Optional[str] = Form(None),
-    text_ru: Optional[str] = Form(None),
-    text_en: Optional[str] = Form(None),
+    texts: dict = Depends(form_texts),
     tags: Optional[str] = Form(None),
     platforms: Optional[List[str]] = Form(None),
+    destinations: Optional[List[str]] = Form(None),
     scheduled_at: Optional[str] = Form(None),
     media_horizontal: Optional[str] = Form(None),
     media_vertical: Optional[str] = Form(None),
@@ -1100,8 +1179,8 @@ def submit_video(
     brief = Brief(
         user_id=1,
         type='video',
-        text_ru=text_ru or '',
-        text_en=text_en or '',
+        text_ru=texts.get('ru') or '',
+        text_en=texts.get('en') or '',
         title=(title or '').strip() or None,
         tags_json=(tags or '').strip(),
         media_path=media_path,
@@ -1109,7 +1188,12 @@ def submit_video(
         media_vertical_path=media_vertical,
         media_normal_path=media_horizontal,
     )
-    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate)
+    from app.services.languages import set_brief_texts
+    set_brief_texts(brief, texts)
+    skipped: List[str] = []
+    # destinations from the form (each with its language); `platforms` = the older way, no destination
+    targets = _destination_targets(destinations, 'video', brief, skipped) if destinations else None
+    dup = _duplicate_redirect(session, brief, platforms, allow_duplicate, targets)
     if dup is not None:
         return dup
     session.add(brief)
@@ -1127,12 +1211,18 @@ def submit_video(
         except Exception:
             when_dt = None
 
-    if platforms:
-        for p in platforms:
+    if targets is not None:
+        chosen = [(d['id'], plat) for d, plat in targets]
+    else:
+        chosen = []
+        for p in platforms or []:
             try:
-                enum_val = PlatformEnum(p)
+                chosen.append((None, PlatformEnum(p)))
             except ValueError:
                 continue
+    if chosen:
+        for dest_id, enum_val in chosen:
+            p = enum_val.value
 
             # Skip if no media for platform
             if p == 'tiktok' and not media_vertical:
@@ -1144,6 +1234,7 @@ def submit_video(
                 user_id=1,
                 brief_id=brief.id,
                 platform=enum_val,
+                destination_id=dest_id,
                 status=PostStatusEnum.queued,
                 scheduled_at=when_dt,
             )
@@ -1186,4 +1277,4 @@ def submit_video(
 
     clear_draft()
 
-    return _published_redirect(brief.id)
+    return _published_redirect(brief.id, skipped)

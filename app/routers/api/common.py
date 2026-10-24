@@ -3,6 +3,7 @@
 from app.services.settings import load_settings
 from app.services.settings import save_settings
 from app.core.templating import make_templates
+from fastapi import Request
 
 def _oauth_new_state(provider: str) -> str:
     """Random one-time `state` for an OAuth connect flow (stops forged callbacks
@@ -31,3 +32,17 @@ def _e(value) -> str:
 
 
 templates_api = make_templates()
+
+
+async def form_texts(request: Request) -> dict:
+    """The text_<lang> fields of a post form → {lang: text}. The forms have one per language of Settings →
+    Languages, so the names aren't known in advance (a FastAPI dependency: the form is parsed once and cached)."""
+    from app.services.languages import normalize_code
+    form = await request.form()
+    out = {}
+    for key, value in form.multi_items():
+        if key.startswith("text_") and isinstance(value, str):
+            lang = normalize_code(key[len("text_"):])
+            if lang:
+                out[lang] = value
+    return out

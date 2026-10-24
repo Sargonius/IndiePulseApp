@@ -34,7 +34,8 @@ def publish(session, post, job) -> Optional[str]:
     if not p.startswith('media/'):
         p = f"media/{p}"
     video_path = _os.path.abspath(p)
-    caption = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or getattr(brief, 'title', None) or '')
+    from app.platforms.common import post_text
+    caption = (post_text(brief, post, ('en', 'ru'), cfg) or getattr(brief, 'title', None) or '')
     if brief and getattr(brief, 'tags_json', None):
         try:
             caption = (caption + '\n' + brief.tags_json).strip()

@@ -9,7 +9,7 @@ def publish(session, post, job) -> Optional[str]:
     or a result string ('error', 'ok', ...) after setting the final state itself."""
     from app.models.models import PostStatusEnum, JobStatusEnum
     import os
-    # Reddit EN only
+    # A post without a destination: the EN subreddit with the EN text (as it always was)
     from app.services.reddit_client import RedditClient
     from app.services.settings import load_settings
     from app.models.models import Brief
@@ -18,7 +18,9 @@ def publish(session, post, job) -> Optional[str]:
     csec = (cfg.get('reddit_client_secret') or '').strip()
     uname = (cfg.get('reddit_username') or '').strip()
     pwd = (cfg.get('reddit_password') or '').strip()
-    sub = (cfg.get('reddit_subreddit_en') or '').strip()
+    from app.platforms.common import post_destination, post_text
+    dest = post_destination(post, cfg)
+    sub = ((dest['target'].get('subreddit') if dest else cfg.get('reddit_subreddit_en')) or '').strip()
     if not (cid and csec and uname and pwd and sub):
         post.status = PostStatusEnum.error
         post.error_text = 'reddit_not_configured'
@@ -32,7 +34,7 @@ def publish(session, post, job) -> Optional[str]:
         return 'error'
     from app.platforms.common import brief_for_publish
     brief = brief_for_publish(session, post)
-    full_body = (getattr(brief, 'text_en', None) or getattr(brief, 'text_ru', None) or '')
+    full_body = post_text(brief, post, ('en', 'ru'), cfg)
     # Use job payload value for number of sentences in main post
     sent_count = 2
     try:

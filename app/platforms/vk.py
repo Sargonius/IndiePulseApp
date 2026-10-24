@@ -33,9 +33,9 @@ def publish(session, post, job) -> Optional[str]:
     s = ''.join(ch for ch in s if ch.isdigit())
     owner_id = f"-{s}"
     from app.models.models import Brief
-    from app.platforms.common import brief_for_publish
+    from app.platforms.common import brief_for_publish, post_text
     brief = brief_for_publish(session, post)
-    text = (brief.text_ru or brief.text_en or '') if brief else ''
+    text = post_text(brief, post, ('ru', 'en'), cfg)
     # Include hashtags on VK
     if brief and getattr(brief, 'tags_json', None):
         try:

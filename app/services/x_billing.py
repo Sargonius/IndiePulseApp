@@ -131,7 +131,7 @@ def _tweets(session, post) -> list[str]:
     from app.jobs.tasks import find_publish_jobs
     from app.platforms import x as xp
     from app.platforms.common import brief_for_publish
-    base, tags = xp.compose(brief_for_publish(session, post))
+    base, tags = xp.compose(brief_for_publish(session, post), post)
     full = (base + ("\n" + tags if tags else "")).strip()
     if len(full) <= 280:
         return [full]
