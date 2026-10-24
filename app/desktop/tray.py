@@ -14,13 +14,14 @@ import threading
 import time
 import webbrowser
 
-from app.desktop import ROOT
+from app.core.paths import enter_data_dir
+from app.desktop import DATA, ROOT
 
-os.chdir(ROOT)
+enter_data_dir()
 
 from dotenv import load_dotenv
 
-load_dotenv(ROOT / ".env")
+load_dotenv(DATA / ".env")
 
 from loguru import logger
 
@@ -169,9 +170,9 @@ def main(argv: list[str] | None = None) -> None:
 	parser.add_argument("--background", action="store_true", help="don't open the browser (autostart)")
 	args = parser.parse_args(argv)
 
-	(ROOT / "logs").mkdir(exist_ok=True)
+	(DATA / "logs").mkdir(exist_ok=True)
 	logger.remove()  # pythonw has no stdout
-	logger.add(ROOT / "logs" / "launcher.log", rotation="2 MB", retention=3, encoding="utf-8",
+	logger.add(DATA / "logs" / "launcher.log", rotation="2 MB", retention=3, encoding="utf-8",
 			   format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {message}")
 	try:
 		run(args.background)

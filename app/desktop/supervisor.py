@@ -21,10 +21,10 @@ from typing import Callable, Optional
 import psutil
 from loguru import logger
 
-from app.desktop import RESTART_REQUEST_FILE, ROOT, SUPERVISED_ENV, deps
+from app.desktop import DATA, RESTART_REQUEST_FILE, ROOT, SUPERVISED_ENV, deps
 from app.desktop.winapi import CREATE_NO_WINDOW, KillOnCloseJob
 
-LOGS = ROOT / "logs"
+LOGS = DATA / "logs"
 _BACKOFF = (1, 3, 10, 30)
 _CRASH_WINDOW = 300
 _MAX_CRASHES = 5
@@ -80,7 +80,7 @@ class Child:
 		python = deps.venv_python()
 		with open(log_path, "ab", buffering=0) as log:
 			self.proc = subprocess.Popen(
-				[str(python), "-m", self.module], cwd=ROOT, env=env,
+				[str(python), "-m", self.module], cwd=ROOT, env=env,  # the child itself moves into DATA
 				stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,
 				creationflags=CREATE_NO_WINDOW,
 			)

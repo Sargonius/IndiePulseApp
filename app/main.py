@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.core import config
+from app.core.paths import ROOT, TEMPLATES_DIR
 from app.core.logging import setup_logging, request_logger
 from app.db.session import create_db_and_tables, migrate_db
 from app.routers import home, pages, api
@@ -77,13 +78,12 @@ app.include_router(home.router)
 app.include_router(pages.router)
 app.include_router(api.router)
 
-# Ensure directories exist before mounting
-os.makedirs("app/static", exist_ok=True)
+# Ensure directories exist before mounting (media/ is data: relative to the data folder, see app.core.paths)
 os.makedirs("media", exist_ok=True)
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
 app.mount("/media", StaticFiles(directory="media"), name="media")
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
 @app.get("/health")

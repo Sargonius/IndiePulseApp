@@ -6,7 +6,7 @@ it bootstraps the venv and then runs `python -m app.desktop.tray`.
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+from app.core.paths import DATA, ROOT
 # ClubKit: the user's kit for working from other people's computers, in the root of the drive IndiePulse is on.
 # IndiePulse takes its uv (and the Pythons uv keeps there) and its list of trusted computers; without it IndiePulse
 # behaves as an installed program.
@@ -16,7 +16,7 @@ KIT = Path(ROOT.anchor) / "ClubKit"
 # "please shut down gracefully" (see lifeline.py) and /api/system/restart asks the
 # supervisor instead of spawning scripts.
 SUPERVISED_ENV = "INDIEPULSE_SUPERVISED"
-RESTART_REQUEST_FILE = ROOT / ".restart_request"
+RESTART_REQUEST_FILE = DATA / ".restart_request"
 
 
 def is_supervised() -> bool:

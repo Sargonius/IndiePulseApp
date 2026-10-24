@@ -109,3 +109,21 @@ def test_shortcuts_only_on_a_trusted_computer(monkeypatch, tmp_path):
     assert winapi.trusted_pc()
     monkeypatch.setattr(winapi, "_machine_id", lambda: "")
     assert not winapi.trusted_pc()
+
+
+def test_where_the_data_lives(monkeypatch, tmp_path):
+    """The code can be replaced without touching the data; a copy that already runs keeps its data where it is."""
+    code = tmp_path / "IndiePulse"
+    code.mkdir()
+    monkeypatch.setattr(paths, "ROOT", code)
+    monkeypatch.delenv("INDIEPULSE_DATA", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData"))
+    no_kit = Path(code.anchor) / "ClubKit"
+    if not no_kit.is_dir():  # the drive the tests run on has no ClubKit: an installed program
+        assert paths._data_dir() == tmp_path / "AppData" / "IndiePulse"
+    (code / "portable.txt").write_text("", encoding="utf-8")
+    assert paths._data_dir() == code / "data"
+    (code / ".settings.json").write_text("{}", encoding="utf-8")  # has been running from its own folder
+    assert paths._data_dir() == code
+    monkeypatch.setenv("INDIEPULSE_DATA", str(tmp_path / "elsewhere"))
+    assert paths._data_dir() == tmp_path / "elsewhere"

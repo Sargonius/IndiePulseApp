@@ -5,6 +5,10 @@ and the `.autoreload` toggle from the header.
 """
 import os
 
+from app.core.paths import ROOT, enter_data_dir
+
+enter_data_dir()
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +24,7 @@ def main() -> None:
 	reload = os.path.exists(".autoreload")
 	cfg = uvicorn.Config(
 		"app.main:app", host=config.APP_HOST, port=config.APP_PORT,
-		reload=reload, reload_dirs=["app", "app/templates", "app/static"] if reload else None,
+		reload=reload, reload_dirs=[str(ROOT / "app")] if reload else None,  # templates and static are inside
 		access_log=False,  # app.core.logging logs requests itself (minus /health polling)
 		# open browser tabs keep connections alive; don't wait for them forever on stop
 		timeout_graceful_shutdown=5,

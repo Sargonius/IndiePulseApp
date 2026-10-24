@@ -1,3 +1,7 @@
+from app.core.paths import enter_data_dir
+
+enter_data_dir()  # the DBs, media/, logs/ — the same working directory as the web server
+
 from dotenv import load_dotenv
 
 load_dotenv()  # same .env as the web app (DATABASE_URL, QUEUE_DB, ...)

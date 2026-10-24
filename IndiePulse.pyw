@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from app.desktop import deps  # noqa: E402  (stdlib only)
+from app.desktop import DATA, deps  # noqa: E402  (stdlib only)
 
 
 def _message(text: str) -> None:
@@ -30,13 +30,13 @@ def main() -> None:
 	if not deps.venv_alive():  # the first run, or the first one on this computer
 		_message("First IndiePulse launch on this computer: installing dependencies (a minute or two).\n"
 				 "When it’s done, an icon appears in the tray and the browser opens.")
-		if not deps.ensure_venv(ROOT / "logs" / "venv.log"):
+		if not deps.ensure_venv(DATA / "logs" / "venv.log"):
 			_message("Couldn’t create the Python environment. Details: logs\\venv.log")
 			sys.exit(1)
 	# The tray syncs requirements itself (with a status in the icon); here only make
 	# sure it can start at all.
 	if deps.requirements_changed() and not _tray_importable():
-		if not deps.install_requirements(ROOT / "logs" / "pip.log"):
+		if not deps.install_requirements(DATA / "logs" / "pip.log"):
 			_message("Couldn’t install dependencies. Details: logs\\pip.log")
 			sys.exit(1)
 

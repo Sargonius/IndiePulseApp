@@ -5,6 +5,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from app.core.paths import TEMPLATES_DIR
 from sqlmodel import Session
 
 from app.db.session import get_session
@@ -15,7 +16,7 @@ from app.services import publications as pubs
 from app.services.settings import load_settings
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 templates.env.filters.update(
     num=mk.fmt_num, delta=mk.fmt_delta, day=mk.fmt_day, metric_label=mk.metric_label,
     when=pubs.fmt_when, fromjson=json.loads,
