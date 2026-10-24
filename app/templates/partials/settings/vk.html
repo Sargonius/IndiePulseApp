@@ -1,0 +1,34 @@
+{#- Settings → VK, its hand-written part (inside partials/settings_section.html): the keys, and the token got by
+    VK's implicit flow pasted in. Saved by /api/settings/save. -#}
+<form hx-post="/api/settings/save" hx-target="#vk_status" hx-swap="innerHTML">
+	<div class="form-group">
+		<label>Client ID</label>
+		<input type="text" name="vk_client_id" value="{{ vk_client_id }}" />
+	</div>
+	<div class="form-group">
+		<label>Client Secret</label>
+		<input type="text" name="vk_client_secret" value="{{ vk_client_secret }}" />
+	</div>
+	<div class="form-group">
+		<label>Group ID</label>
+		<input type="text" name="vk_group_id" value="{{ vk_group_id }}" placeholder="123456789" />
+	</div>
+	<div class="form-group">
+		<label>Access Token</label>
+		<input type="password" name="vk_access_token" value="" placeholder="{{ vk_token_hint }}" />
+	</div>
+	<div class="form-group">
+		<label>User Access Token (for media upload)</label>
+		<input type="password" name="vk_user_access_token" value="" placeholder="{{ vk_user_token_hint }}" />
+	</div>
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="button" class="btn" hx-post="/api/vk/test_post" hx-target="#vk_status" hx-swap="innerHTML">Test Post</button>
+	</div>
+</form>
+<div class="btn-row" style="margin-top:8px;">
+	<button type="button" class="btn btn-success" hx-get="/api/vk/implicit_url" hx-target="#vk_implicit" hx-swap="innerHTML">Get Access Token</button>
+	<button type="button" class="btn" hx-post="/api/vk/check_token" hx-target="#vk_status" hx-swap="innerHTML">Check Token</button>
+</div>
+<div id="vk_implicit" class="status-msg"></div>
+<div id="vk_status" class="status-msg"></div>

@@ -1,0 +1,27 @@
+{#- Settings → YouTube, its hand-written part (inside partials/settings_section.html): the Google Cloud keys +
+    Connect YouTube (/api/youtube/save), then its options, a form made from the schema. -#}
+<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
+	<div class="form-group">
+		<label>Client ID</label>
+		<input type="text" name="yt_client_id" value="{{ yt_client_id }}" />
+	</div>
+	<div class="form-group">
+		<label>Client Secret</label>
+		<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" />
+	</div>
+	<div class="form-group">
+		<label>Access Token</label>
+		<input type="text" name="yt_access_token" value="{{ yt_access_token }}" />
+	</div>
+	<div class="form-group">
+		<label>Refresh Token</label>
+		<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" />
+	</div>
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="button" class="btn" hx-get="/api/accounts/connect/youtube" hx-target="#yt_status" hx-swap="innerHTML">Connect YouTube</button>
+	</div>
+</form>
+<div id="yt_status" class="status-msg"></div>
+<h4 class="ai-sub">Options</h4>
+{% with form = forms.youtube_opts %}{% include "partials/settings_form.html" %}{% endwith %}

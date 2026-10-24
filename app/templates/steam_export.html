@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h2>Steam Export</h2>
-<p>Export content for Steam Partner Events (manual upload). Default App ID: {{ config.STEAM_APP_ID if config else '' }}.</p>
+<p>Export content for Steam Partner Events (manual upload). The game: {% if steam_app_id %}App ID {{ steam_app_id }}{% else %}not set yet (<a href="/accounts#section_steam">Settings → Steam</a>){% endif %}.</p>
 
 <form method="post" action="/api/steam/export" enctype="multipart/form-data" id="steam_form">
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items:start;">
@@ -118,7 +118,7 @@
     <div style="margin-top:16px;">
         <button type="submit" class="btn btn-primary">Export Assets Folder</button>
         <button type="button" id="open_folder_btn" class="btn">Open folder with assets</button>
-        <a class="btn" id="steam_link" href="https://steamcommunity.com/games/2847510/partnerevents/create" target="_blank">Open Steam Partner Events</a>
+        <a class="btn" id="steam_link" href="{{ steam_events_url or '/accounts#section_steam' }}" target="_blank"{% if not steam_events_url %} title="Set the Steam App ID of the game in Settings → Steam first"{% endif %}>Open Steam Partner Events</a>
     </div>
 </form>
 

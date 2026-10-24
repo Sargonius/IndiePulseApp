@@ -101,8 +101,8 @@ def publish(session, post, job) -> Optional[str]:
             playlist_id = (yt.ensure_playlist(pname[:1].upper() + pname[1:]) or '') if pname else ''
         else:
             playlist_id = (cfg.get('yt_playlist_id') or '').strip()
-            if not playlist_id:
-                pname = (cfg.get('yt_playlist_title') or 'Synthetica').strip()
+            pname = (cfg.get('yt_playlist_title') or '').strip()  # empty: no default playlist
+            if not playlist_id and pname:
                 playlist_id = yt.ensure_playlist(pname) or ''
         if playlist_id and vid:
             try:

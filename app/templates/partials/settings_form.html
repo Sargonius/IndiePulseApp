@@ -1,0 +1,43 @@
+{#- One form of a Settings section, rendered from its schema (app/core/settings_schema.py: form_view → `form`).
+    POST /api/settings/section/<id> saves it and answers with this form again: "Saved", or what to fix (422,
+    swapped in by static/settings.js). A secret is never sent back: it shows the last 4 characters, and left
+    empty keeps the saved one. -#}
+{%- set s = form.section -%}
+<form id="{{ form.id }}" class="settings-form" hx-post="/api/settings/section/{{ s.id }}" hx-target="this" hx-swap="outerHTML" autocomplete="off">
+	{% if form.group %}<input type="hidden" name="_group" value="{{ form.group }}" />{% endif %}
+	{% for v in form.fields %}{% set f = v.f %}{% set fid = form.id ~ '_' ~ f.key %}
+	{% if f.heading %}<h4 class="ai-sub">{{ f.heading | safe }}</h4>{% endif %}
+	<div class="form-group{% if v.error %} has-error{% endif %}">
+		{% if f.type == 'bool' %}
+		<label class="sf-check"><input type="checkbox" id="{{ fid }}" name="{{ f.key }}" value="1" {% if v.value %}checked{% endif %} /> {{ f.label }}{% if f.help %} <span class="muted">— {{ f.help | safe }}</span>{% endif %}</label>
+		{% else %}
+		<label for="{{ fid }}">{{ f.label }}{% if f.help %} <span class="muted" style="font-weight:400;">— {{ f.help | safe }}</span>{% endif %}
+			{% if v.hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ v.hint }}</span>{% endif %}</label>
+		{% if f.type == 'secret' %}
+		<input type="password" id="{{ fid }}" name="{{ f.key }}" value="" autocomplete="off"
+			placeholder="{% if v.hint %}Saved — paste a new one to replace it{% else %}{{ f.placeholder }}{% endif %}" />
+		{% if f.clearable and v.hint %}<label class="sf-check muted"><input type="checkbox" name="{{ f.key }}__clear" value="1" /> remove the saved one</label>{% endif %}
+		{% elif f.type == 'textarea' %}
+		<textarea id="{{ fid }}" name="{{ f.key }}" rows="{{ f.rows }}" placeholder="{{ f.placeholder }}">{{ v.value }}</textarea>
+		{% elif f.type == 'select' %}
+		<select id="{{ fid }}" name="{{ f.key }}">
+			{% for val, text in f.choices %}<option value="{{ val }}" {% if v.value == val %}selected{% endif %}>{{ text }}</option>{% endfor %}
+		</select>
+		{% elif f.type == 'number' %}
+		<input type="number" id="{{ fid }}" name="{{ f.key }}" value="{{ v.value }}" step="1"{% if f.min is not none %} min="{{ f.min }}"{% endif %}{% if f.max is not none %} max="{{ f.max }}"{% endif %} style="width:120px;" />
+		{% else %}
+		<input type="text" id="{{ fid }}" name="{{ f.key }}" value="{{ v.value }}" placeholder="{{ f.placeholder }}"{% if f.type == 'url' %} inputmode="url"{% endif %} />
+		{% endif %}
+		{% endif %}
+		{% if f.below %}{% include f.below %}{% endif %}
+		{% if v.error %}<div class="sf-error">{{ v.error }}</div>{% endif %}
+	</div>
+	{% endfor %}
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		{% for a in form.actions %}
+		<button type="button" class="btn" hx-{{ a.method }}="{{ a.url }}" hx-target="#{{ form.id }}_status" hx-swap="innerHTML"{% if a.include %} hx-include="#{{ form.id }}_{{ a.include }}"{% endif %}{% if a.title %} title="{{ a.title }}"{% endif %}>{{ a.label }}</button>
+		{% endfor %}
+	</div>
+	<div id="{{ form.id }}_status" class="status-msg">{% if form.note %}<span style="color:{{ 'red' if form.note_error else 'green' }}">{{ form.note }}</span>{% endif %}</div>
+</form>

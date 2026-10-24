@@ -28,8 +28,16 @@ DEFAULTS: Dict[str, Any] = {
 	"steam_financial_api_key": "",
 	# Secret baked into the "IndiePulse ← Steam" traffic bookmarklet (created on first use)
 	"steam_traffic_token": "",
+	# The game the store-news export (/steam) opens Steam's event editor for; empty = INDIEPULSE_STEAM_APP_ID from .env.
+	# Installs from before it existed got the old built-in one at their first start (app/services/setup.py).
+	"steam_app_id": "",
 	# UI
 	"ui_language": "en",
+	# What the post form's "Suggest" puts in the hashtags field ("#a #b"); empty = nothing to suggest
+	"default_hashtags": "",
+	# The setup wizard (app/services/setup.py): None = not decided yet (the next start does), then
+	# {"done", "step", "fresh", "at"}
+	"setup_state": None,
 	# Languages the posts are written in (Settings → Languages & destinations); the first
 	# is the one you write in, the rest are translations (app.services.languages).
 	"languages": ["ru", "en"],
@@ -78,7 +86,8 @@ DEFAULTS: Dict[str, Any] = {
     "yt_api_key": "",
     # YouTube playlist preferences
     "yt_playlist_id": "",
-    "yt_playlist_title": "Synthetica",
+    # empty = no playlist unless the form picks one (older installs keep theirs: app/services/setup.py)
+    "yt_playlist_title": "",
     # Video stats: every 30 min for the first week, then daily until this many days
     # after publish (Shorts keep gathering views for weeks). 0 = first week only.
     "yt_metrics_days": 90,
@@ -141,8 +150,9 @@ DEFAULTS: Dict[str, Any] = {
     "update_mode": "notify",
     "update_repo": "Sargonius/IndiePulseNew",
     "update_token": "",
-    # Local music directory (Windows default path)
-    "music_dir": "E:\\SynthSocial\\Music",
+    # Music folders for the video editors, one per line (Settings → Video & music); empty = none yet. Older
+    # installs keep the one they had by default (app/services/setup.py).
+    "music_dir": "",
     # Modules turned off on the 🧩 Modules page (app.core.modules); empty = all on
     "modules_disabled": [],
 }

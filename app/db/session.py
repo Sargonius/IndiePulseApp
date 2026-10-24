@@ -93,6 +93,13 @@ def migrate_db() -> None:
                     logger.info(f"migrate_db: added {table}.{col}")
                 except Exception as exc:
                     logger.error(f"migrate_db: could not add {table}.{col}: {exc}")
+    # Before anything else writes the settings: the first start of this version decides whether this is a
+    # fresh install (the setup wizard) or one with settings (setup done, its old built-in defaults written down).
+    try:
+        from app.services import setup
+        setup.on_start()
+    except Exception as exc:
+        logger.error(f"migrate_db: setup state not decided: {exc}")
     # The settings half of the same upgrade: the server and the worker both run migrate_db at
     # start, so the destinations list exists before either publishes by it.
     try:

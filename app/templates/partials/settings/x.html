@@ -1,0 +1,44 @@
+{#- Settings → X / Twitter, its hand-written part (inside partials/settings_section.html): OAuth 2 keys + Authorize,
+    OAuth 1.0a keys for media. Saved by /api/settings/save. -#}
+<form hx-post="/api/settings/save" hx-target="#x_status" hx-swap="innerHTML">
+	<div class="form-group">
+		<label>Client ID (OAuth 2.0)</label>
+		<input type="text" name="x_client_id" value="{{ x_client_id }}" />
+	</div>
+	<div class="form-group">
+		<label>Client Secret (OAuth 2.0)</label>
+		<input type="text" name="x_client_secret" value="{{ x_client_secret }}" />
+	</div>
+	<div class="form-group">
+		<label>Redirect URI</label>
+		<input type="text" name="x_redirect_uri" value="{{ x_redirect_uri }}" placeholder="http://127.0.0.1:8000/api/accounts/callback/x" />
+	</div>
+	<details style="margin:8px 0;">
+		<summary style="cursor:pointer;color:#666;">OAuth 1.0a (for media upload)</summary>
+		<div style="padding:8px;background:#f8fafc;border-radius:4px;margin-top:4px;">
+			<div class="form-group">
+				<label>API Key / Consumer Key</label>
+				<input type="text" name="x_api_key" value="{{ x_api_key }}" />
+			</div>
+			<div class="form-group">
+				<label>API Secret / Consumer Secret</label>
+				<input type="text" name="x_api_secret" value="{{ x_api_secret }}" />
+			</div>
+			<div class="form-group">
+				<label>OAuth1 Access Token</label>
+				<input type="text" name="x_oauth_token" value="{{ x_oauth_token }}" />
+			</div>
+			<div class="form-group">
+				<label>OAuth1 Access Token Secret</label>
+				<input type="text" name="x_oauth_token_secret" value="{{ x_oauth_token_secret }}" />
+			</div>
+		</div>
+	</details>
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="button" class="btn" hx-get="/api/accounts/connect/x" hx-target="#x_auth" hx-swap="innerHTML">Authorize</button>
+		<button type="button" class="btn" hx-post="/api/x/test_tweet" hx-target="#x_status" hx-swap="innerHTML" title="Posts a real tweet — costs ~$0.015 in X API credits">Test Tweet</button>
+	</div>
+</form>
+<div id="x_auth" class="status-msg"></div>
+<div id="x_status" class="status-msg"></div>

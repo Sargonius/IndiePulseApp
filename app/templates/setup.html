@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{#- The setup wizard (app/routers/setup.py): one step per page. The account, AI and update steps are the Settings
+    sections themselves (partials/settings_section.html), saving in place; Next only moves on. -#}
+{% block content %}
+<link rel="stylesheet" href="/static/settings.css?v={{ request.app.state.asset_version if request and request.app and request.app.state and request.app.state.asset_version else '1' }}">
+<div class="setup-head">
+	<h2>Set up IndiePulse</h2>
+	{% if not state.done %}
+	<form method="post" action="/setup/skip">
+		<button type="submit" class="btn-link" title="Everything here is also in ⚙️ Settings; Settings → “Run setup again” brings this back">Skip setup</button>
+	</form>
+	{% endif %}
+</div>
+<ol class="setup-steps">
+	{% for id, name in steps %}
+	<li class="{% if id == step %}is-current{% elif loop.index0 < reached or state.done %}is-done{% endif %}">
+		<a href="/setup?step={{ id }}">{{ loop.index }}. {{ name }}</a>
+	</li>
+	{% endfor %}
+</ol>
+
+{% if errors %}
+<div class="setup-errors" role="alert">{% for e in errors %}<div>{{ e }}</div>{% endfor %}</div>
+{% endif %}
+
+{% macro nav(step, prev, next_label="Next →", submit=True) %}
+<div class="setup-nav">
+	{% if prev %}<a class="btn" href="/setup?step={{ prev }}">← Back</a>{% endif %}
+	<span class="setup-nav-gap"></span>
+	{% if submit %}
+	<button type="submit" class="btn" form="setup_skip_step" title="Leave this step as it is">Skip this step</button>
+	<button type="submit" class="btn btn-primary">{{ next_label }}</button>
+	{% else %}
+	<input type="hidden" name="step" value="{{ step }}" />
+	<button type="submit" class="btn btn-primary">{{ next_label }}</button>
+	{% endif %}
+</div>
+{% endmacro %}
+<form id="setup_skip_step" method="post" action="/setup/next"><input type="hidden" name="step" value="{{ step }}" /></form>
+
+{% if step == 'languages' %}
+<form method="post" action="/setup/languages" class="card setup-card">
+	<p class="muted">IndiePulse keeps a text per language for every post and sends each place the text in its language.
+		You can change this later in ⚙️ Settings → Languages &amp; destinations.</p>
+	<div class="form-group">
+		<label for="setup_write">The language you write in</label>
+		<select id="setup_write" name="write">
+			{% for code, name in known %}<option value="{{ code }}" {% if code == langs[0] %}selected{% endif %}>{{ name }} ({{ code }})</option>{% endfor %}
+		</select>
+	</div>
+	<div class="form-group">
+		<label>The languages you publish in <span class="muted" style="font-weight:400;">— each gets a text field in the post forms, filled by “Translate missing” from the one you write in</span></label>
+		<div class="setup-langs">
+			{% for code, name in known %}
+			<label><input type="checkbox" name="publish" value="{{ code }}" {% if code in langs %}checked{% endif %} /> {{ name }}</label>
+			{% endfor %}
+		</div>
+		<label for="setup_other" style="margin-top:8px;">Another one <span class="muted" style="font-weight:400;">— its code, e.g. eo or pt-br</span></label>
+		<input type="text" id="setup_other" name="other" value="" style="width:160px;" />
+	</div>
+	{{ nav(step, prev) }}
+</form>
+
+{% elif step == 'modules' %}
+<form method="post" action="/setup/modules" class="setup-card">
+	<p class="muted">What you leave unticked is hidden everywhere — menus, Settings, the post forms — and nothing goes
+		there. Nothing is deleted; 🧩 Modules turns it on again any time.</p>
+	{% for kind, heading in (("platform", "Where do you publish?"), ("feature", "Which features do you want?")) %}
+	<h3>{{ heading }}</h3>
+	<div class="modules-grid">
+		{% for r in module_rows if r.m.kind == kind %}
+		<label class="card module-card">
+			<input type="checkbox" name="on" value="{{ r.m.id }}" {% if r.on %}checked{% endif %} />
+			<span>
+				<strong>{{ r.m.name }}</strong>
+				<span class="muted">{{ r.m.description }}</span>
+				{% if r.requires %}<span class="muted module-note">Needs: {{ r.requires|join(", ") }}</span>{% endif %}
+			</span>
+		</label>
+		{% endfor %}
+	</div>
+	{% endfor %}
+	{{ nav(step, prev) }}
+</form>
+
+{% elif step in ('accounts', 'ai', 'updates') %}
+<div class="setup-intro muted">
+	{% if step == 'accounts' %}
+	Connect the networks you picked: each section saves by itself, its instructions are on the right. A network can
+	wait — everything here is also in ⚙️ Settings.
+	{% elif step == 'ai' %}
+	Optional. With a key, “Translate missing” and the outreach letters use OpenAI or Claude; without one, machine
+	translation (DeepL with a key, else the free public translators).
+	{% else %}
+	IndiePulse can tell you about a new version, or install it by itself. While its repository
+	({{ wizard_repo }}) is private, checking needs a GitHub token that can read it.
+	{% endif %}
+</div>
+{% for sec in sections %}{% include "partials/settings_section.html" %}{% else %}
+<div class="card muted">No networks are on: turn some on in step 2, or in 🧩 Modules later.</div>
+{% endfor %}
+{% if step == 'accounts' and sections %}
+<h3 class="setup-sub">More than one channel, Page or subreddit?</h3>
+<p class="muted">One per language: add them here, each with the language its posts go out in.</p>
+{% for sec in destinations %}{% include "partials/settings_section.html" %}{% endfor %}
+{% endif %}
+<form method="post" action="/setup/next" id="setup_next">
+	{{ nav(step, prev, submit=False) }}
+</form>
+
+{% elif step == 'done' %}
+<div class="card setup-card">
+	<h3>IndiePulse is set up</h3>
+	<p>You write in <b>{{ langs[0] | upper }}</b>{% if langs | length > 1 %} and publish in {{ langs[1:] | map('upper') | join(', ') }} too{% endif %}.
+		On: {% for m in on_modules %}{{ m.name }}{% if not loop.last %}, {% endif %}{% else %}nothing yet{% endfor %}.</p>
+	{% if status_rows %}
+	<ul class="setup-status">
+		{% for sid, title in status_rows %}<li><a href="/accounts#section_{{ sid }}">{{ title }}</a> <span class="status-badge" id="status_{{ sid }}">…</span></li>{% endfor %}
+	</ul>
+	{% endif %}
+	<p class="muted">Everything is in ⚙️ Settings; ⚙️ → “Run setup again” comes back here.</p>
+	<div class="setup-nav">
+		{% if prev %}<a class="btn" href="/setup?step={{ prev }}">← Back</a>{% endif %}
+		<span class="setup-nav-gap"></span>
+		<a class="btn" href="/accounts">⚙️ Settings</a>
+		<a class="btn btn-primary" href="/create/post">Write a post →</a>
+	</div>
+</div>
+{% endif %}
+
+<script src="/static/settings.js?v={{ request.app.state.asset_version if request and request.app and request.app.state and request.app.state.asset_version else '1' }}"></script>
+<script>
+// Next with a section changed but not saved: ask first (the sections save themselves, Next only moves on)
+(function () {
+	const next = document.getElementById('setup_next');
+	if (!next) return;
+	const dirty = new Set();
+	document.addEventListener('input', e => { const f = e.target.closest('form'); if (f && f !== next) dirty.add(f); });
+	document.addEventListener('change', e => { const f = e.target.closest('form'); if (f && f !== next) dirty.add(f); });
+	document.addEventListener('htmx:afterRequest', e => { const f = e.target.closest && e.target.closest('form'); if (f) dirty.delete(f); });
+	next.addEventListener('submit', e => {
+		const open = [...dirty].filter(f => document.body.contains(f));
+		if (!open.length) return;
+		const names = [...new Set(open.map(f => (f.closest('.settings-section')?.querySelector('h3')?.textContent || '').trim()).filter(Boolean))];
+		if (!confirm(`Not saved yet: ${names.join(', ') || 'a section'}. Go on without saving?`)) e.preventDefault();
+	});
+})();
+</script>
+{% endblock %}

@@ -42,7 +42,7 @@ MODULES: list[Module] = [
 	_platform("x", "X / Twitter", "Posts with media (OAuth 2; API credits are paid)", ("x",), ("x",)),
 	_platform("youtube", "YouTube", "Videos and Shorts, channel stats (Google Cloud project)", ("yt",),
 			  ("youtube",)),
-	_platform("facebook", "Facebook", "Posts to Pages (RU and EN)", ("fb_ru", "fb_en"), ("facebook",)),
+	_platform("facebook", "Facebook", "Posts to Pages (a Page per language)", ("fb_ru", "fb_en"), ("facebook",)),
 	_platform("instagram", "Instagram Reels", "Reels through the Instagram Graph API", ("ig_reels",)),
 	_platform("reddit", "Reddit", "Posts to subreddits (script app)", ("reddit",)),
 	_platform("tiktok", "TikTok", "Videos into the TikTok app's drafts: finish them there", ("tiktok",),

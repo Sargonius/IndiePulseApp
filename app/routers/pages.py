@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,7 +10,6 @@ from app.db.session import get_session
 from app.models.models import Brief, Post, PlatformEnum, PostStatusEnum, Job, JobKindEnum, JobStatusEnum, Project
 from app.jobs.tasks import publish_news_post
 from app.services.draft_store import load_draft, save_draft, clear_draft
-from app.services import music_library
 from app.services.settings import load_settings
 from app.jobs.tasks import refresh_metrics_for_post
 from app.routers.api.common import form_texts
@@ -112,7 +110,9 @@ def news_form(request: Request):
 def steam_export_page(request: Request):
     draft = load_draft()
     cfg = load_settings()
-    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en')})
+    from app.services import steam_links
+    return templates.TemplateResponse('steam_export.html', {'request': request, 'draft': draft, 'ui_language': cfg.get('ui_language', 'en'),
+                                                            'steam_app_id': steam_links.app_id(cfg), 'steam_events_url': steam_links.events_url(cfg)})
 
 @router.get('/projects', response_class=HTMLResponse)
 def projects_page(request: Request, session: Session = Depends(get_session)):
@@ -134,81 +134,18 @@ def projects_page(request: Request, session: Session = Depends(get_session)):
 
 @router.get('/accounts', response_class=HTMLResponse)
 def accounts(request: Request):
-    from app.services import destinations
+    # the sections come from app.core.settings_schema (app/routers/settings_page.py)
+    from app.routers import settings_page
     cfg = load_settings()
-    token = cfg.get('vk_access_token', '') or ''
-    token_hint = ('•••' + token[-4:]) if token else ''
     return templates.TemplateResponse(
         'accounts.html',
         {
             'request': request,
             'ui_language': cfg.get('ui_language', 'en'),
-            'dest_editor': destinations.editor_context(cfg),
-            'discord_webhook': cfg.get('discord_webhook_url', ''),
-            'discord_bot_token_hint': (('•••' + (cfg.get('discord_bot_token') or '')[-4:]) if (cfg.get('discord_bot_token') or '') else ''),
-            'discord_guild_id': cfg.get('discord_guild_id', ''),
-            'steam_key_hint': (('•••' + (cfg.get('steam_financial_api_key') or '')[-4:]) if (cfg.get('steam_financial_api_key') or '') else ''),
-            'vk_client_id': cfg.get('vk_client_id', ''),
-            'vk_client_secret': cfg.get('vk_client_secret', ''),
-            'vk_group_id': cfg.get('vk_group_id', ''),
-            'vk_redirect_uri': cfg.get('vk_redirect_uri', ''),
-            'vk_token_hint': token_hint,
-            'vk_user_token_hint': (('•••' + (cfg.get('vk_user_access_token') or '')[-4:]) if (cfg.get('vk_user_access_token') or '') else ''),
-            'x_client_id': cfg.get('x_client_id', ''),
-            'x_client_secret': cfg.get('x_client_secret', ''),
-            'x_redirect_uri': cfg.get('x_redirect_uri', ''),
-            'x_api_key': cfg.get('x_api_key', ''),
-            'x_api_secret': cfg.get('x_api_secret', ''),
-            'x_oauth_token': cfg.get('x_oauth_token', ''),
-            'x_oauth_token_secret': cfg.get('x_oauth_token_secret', ''),
-            'yt_client_id': cfg.get('yt_client_id', ''),
-            'yt_client_secret': cfg.get('yt_client_secret', ''),
-            'yt_access_token': cfg.get('yt_access_token', ''),
-            'yt_refresh_token': cfg.get('yt_refresh_token', ''),
-            'yt_metrics_days': cfg.get('yt_metrics_days', 90),
-            'fb_app_id': cfg.get('fb_app_id', ''),
-            'fb_app_secret': cfg.get('fb_app_secret', ''),
-            'fb_ru_page_id': cfg.get('fb_ru_page_id', ''),
-            'fb_en_page_id': cfg.get('fb_en_page_id', ''),
-            'fb_ru_page_access_token': cfg.get('fb_ru_page_access_token', ''),
-            'fb_en_page_access_token': cfg.get('fb_en_page_access_token', ''),
-            'ig_user_id': cfg.get('ig_user_id', ''),
-            'ig_access_token_hint': (('•••' + (cfg.get('ig_access_token') or '')[-4:]) if (cfg.get('ig_access_token') or '') else ''),
-            'bluesky_handle': cfg.get('bluesky_handle', ''),
-            'bluesky_service': cfg.get('bluesky_service', 'https://bsky.social'),
-            'bluesky_pw_hint': (('•••' + (cfg.get('bluesky_app_password') or '')[-4:]) if (cfg.get('bluesky_app_password') or '') else ''),
-            'reddit_client_id': cfg.get('reddit_client_id', ''),
-            'reddit_client_secret': cfg.get('reddit_client_secret', ''),
-            'reddit_username': cfg.get('reddit_username', ''),
-            'reddit_subreddit_en': cfg.get('reddit_subreddit_en', ''),
-            'openai_api_key': cfg.get('openai_api_key', ''),
-            'openai_model': cfg.get('openai_model', ''),
-            'llm_provider': cfg.get('llm_provider') or 'auto',
-            'openai_key_hint': (('•••' + (cfg.get('openai_api_key') or '')[-4:]) if (cfg.get('openai_api_key') or '') else ''),
-            'anthropic_model': cfg.get('anthropic_model', ''),
-            'anthropic_key_hint': (('•••' + (cfg.get('anthropic_api_key') or '')[-4:]) if (cfg.get('anthropic_api_key') or '') else ''),
-            'deepl_key_hint': (('•••' + (cfg.get('deepl_api_key') or '')[-4:]) if (cfg.get('deepl_api_key') or '') else ''),
-            'tiktok_client_key': cfg.get('tiktok_client_key', ''),
-            'tiktok_secret_hint': (('•••' + (cfg.get('tiktok_client_secret') or '')[-4:]) if (cfg.get('tiktok_client_secret') or '') else ''),
-            'tiktok_redirect_uri': cfg.get('tiktok_redirect_uri'),
-            'tiktok_token_hint': (('•••' + (cfg.get('tiktok_access_token') or '')[-4:]) if (cfg.get('tiktok_access_token') or '') else ''),
-            'music_dir': '\n'.join(music_library.folders(cfg)),
-            'music_folders': _music_folder_rows(cfg),
-            'discord_upload_limit_mb': cfg.get('discord_upload_limit_mb') or 10,
+            'sections': settings_page.sections_view(cfg),
+            **settings_page.custom_context(cfg),
         },
     )
-
-
-def _music_folder_rows(cfg) -> list:
-    rows = []
-    for f in music_library.folders(cfg):
-        ok = os.path.isdir(f)
-        n = 0
-        if ok:
-            for _root, _dirs, files in os.walk(f):
-                n += sum(1 for x in files if os.path.splitext(x)[1].lower() in music_library.AUDIO_EXTS)
-        rows.append({'path': f, 'exists': ok, 'tracks': n})
-    return rows
 
 @router.get('/jobs', response_class=HTMLResponse)
 def jobs_list(request: Request, session: Session = Depends(get_session)):

@@ -1,14 +1,20 @@
-"""App-level endpoints: restart/autoreload, settings save + status, API health check."""
+"""App-level endpoints: restart/autoreload, settings save (per section, from its schema) + status, API health
+check."""
 
 from app.services.settings import load_settings
+from app.core import settings_schema
+from app.services import destinations
 from fastapi import APIRouter
 from fastapi import Form
 from fastapi import Query
+from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.responses import Response
 from loguru import logger
 from typing import Optional
 from app.routers.api.common import _e
+from app.routers.api.common import settings_back_url
+from app.routers.api.common import templates_api
 
 router = APIRouter()
 
@@ -72,177 +78,45 @@ def system_autoreload_status():
 
 
 @router.post("/settings/save")
-def save_settings_endpoint(
-	vk_client_id: str = Form(""),
-	vk_client_secret: str = Form(""),
-	vk_group_id: str = Form(""),
-	vk_redirect_uri: str = Form(""),
-	vk_access_token: str = Form(""),
-	vk_user_access_token: str = Form(""),
-	x_client_id: str = Form(""),
-	x_client_secret: str = Form(""),
-	x_redirect_uri: str = Form(""),
-	x_api_key: str = Form(""),
-	x_api_secret: str = Form(""),
-	x_oauth_token: str = Form(""),
-	x_oauth_token_secret: str = Form(""),
-	yt_client_id: str = Form(""),
-	yt_client_secret: str = Form(""),
-	yt_access_token: str = Form(""),
-	yt_refresh_token: str = Form(""),
-	yt_metrics_days: str = Form(""),
-	tiktok_client_key: str = Form(""),
-	tiktok_client_secret: str = Form(""),
-	tiktok_redirect_uri: str = Form(""),
-	fb_app_id: str = Form(""),
-	fb_app_secret: str = Form(""),
-	fb_ru_page_id: str = Form(""),
-	fb_en_page_id: str = Form(""),
-	fb_ru_page_access_token: str = Form(""),
-	fb_en_page_access_token: str = Form(""),
-	ig_user_id: str = Form(""),
-	ig_access_token: str = Form(""),
-	bluesky_handle: str = Form(""),
-	bluesky_app_password: str = Form(""),
-	bluesky_service: str = Form(""),
-	reddit_client_id: str = Form(""),
-	reddit_client_secret: str = Form(""),
-	reddit_username: str = Form(""),
-	reddit_password: str = Form(""),
-	reddit_subreddit_en: str = Form(""),
-	# AI for translation and letters: OpenAI or Claude; DeepL for machine translation
-	llm_provider: str = Form(""),
-	openai_api_key: str = Form(""),
-	openai_model: str = Form(""),
-	anthropic_api_key: str = Form(""),
-	anthropic_model: str = Form(""),
-	deepl_api_key: str = Form(""),
-	# Telegram
-	tg_bot_token: str = Form(""),
-	tg_chat_id_ru: str = Form(""),
-	# Discord (bot token for reading message reactions into analytics)
-	discord_bot_token: str = Form(""),
-	discord_guild_id: str = Form(""),
-	# Steamworks Financial API key (wishlist + sales reports)
-	steam_financial_api_key: str = Form(""),
-	# Video editor: music folders (one per line) + Discord file limit
-	music_dir: str = Form(""),
-	discord_upload_limit_mb: str = Form(""),
-):
-	# Only update keys that are non-empty to avoid wiping other settings
-	updates = {}
-	if vk_client_id.strip():
-		updates["vk_client_id"] = vk_client_id.strip()
-	if vk_client_secret.strip():
-		updates["vk_client_secret"] = vk_client_secret.strip()
-	if vk_group_id.strip():
-		updates["vk_group_id"] = vk_group_id.strip()
-	if vk_redirect_uri.strip():
-		updates["vk_redirect_uri"] = vk_redirect_uri.strip()
-	if vk_access_token.strip():
-		updates["vk_access_token"] = vk_access_token.strip()
-	if vk_user_access_token.strip():
-		updates["vk_user_access_token"] = vk_user_access_token.strip()
-	if x_client_id.strip():
-		updates["x_client_id"] = x_client_id.strip()
-	if x_client_secret.strip():
-		updates["x_client_secret"] = x_client_secret.strip()
-	if x_redirect_uri.strip():
-		updates["x_redirect_uri"] = x_redirect_uri.strip()
-	if x_api_key.strip():
-		updates["x_api_key"] = x_api_key.strip()
-	if x_api_secret.strip():
-		updates["x_api_secret"] = x_api_secret.strip()
-	if x_oauth_token.strip():
-		updates["x_oauth_token"] = x_oauth_token.strip()
-	if x_oauth_token_secret.strip():
-		updates["x_oauth_token_secret"] = x_oauth_token_secret.strip()
-	if yt_client_id.strip():
-		updates["yt_client_id"] = yt_client_id.strip()
-	if yt_client_secret.strip():
-		updates["yt_client_secret"] = yt_client_secret.strip()
-	if yt_access_token.strip():
-		updates["yt_access_token"] = yt_access_token.strip()
-	if yt_refresh_token.strip():
-		updates["yt_refresh_token"] = yt_refresh_token.strip()
-	if yt_metrics_days.strip():
-		try:
-			updates["yt_metrics_days"] = max(0, min(3650, int(yt_metrics_days.strip())))
-		except ValueError:
-			pass
-	if tiktok_client_key.strip():
-		updates["tiktok_client_key"] = tiktok_client_key.strip()
-	if tiktok_client_secret.strip():
-		updates["tiktok_client_secret"] = tiktok_client_secret.strip()
-	if tiktok_redirect_uri.strip():
-		updates["tiktok_redirect_uri"] = tiktok_redirect_uri.strip()
-	if fb_app_id.strip():
-		updates["fb_app_id"] = fb_app_id.strip()
-	if fb_app_secret.strip():
-		updates["fb_app_secret"] = fb_app_secret.strip()
-	if bluesky_handle.strip():
-		updates["bluesky_handle"] = bluesky_handle.strip().lstrip('@')
-	if bluesky_app_password.strip():
-		updates["bluesky_app_password"] = bluesky_app_password.strip()
-	if bluesky_service.strip():
-		updates["bluesky_service"] = bluesky_service.strip()
-	if fb_ru_page_id.strip():
-		updates["fb_ru_page_id"] = fb_ru_page_id.strip()
-	if fb_en_page_id.strip():
-		updates["fb_en_page_id"] = fb_en_page_id.strip()
-	if fb_ru_page_access_token.strip():
-		updates["fb_ru_page_access_token"] = fb_ru_page_access_token.strip()
-	if fb_en_page_access_token.strip():
-		updates["fb_en_page_access_token"] = fb_en_page_access_token.strip()
-	if ig_user_id.strip():
-		updates["ig_user_id"] = ig_user_id.strip()
-	if ig_access_token.strip():
-		updates["ig_access_token"] = ig_access_token.strip()
-	if reddit_client_id.strip():
-		updates["reddit_client_id"] = reddit_client_id.strip()
-	if reddit_client_secret.strip():
-		updates["reddit_client_secret"] = reddit_client_secret.strip()
-	if reddit_username.strip():
-		updates["reddit_username"] = reddit_username.strip()
-	if reddit_password.strip():
-		updates["reddit_password"] = reddit_password.strip()
-	if reddit_subreddit_en.strip():
-		updates["reddit_subreddit_en"] = reddit_subreddit_en.strip()
-	if openai_api_key.strip():
-		updates["openai_api_key"] = openai_api_key.strip()
-	if openai_model.strip():
-		updates["openai_model"] = openai_model.strip()
-	if llm_provider.strip() in ("auto", "openai", "anthropic"):
-		updates["llm_provider"] = llm_provider.strip()
-	if anthropic_api_key.strip():
-		updates["anthropic_api_key"] = anthropic_api_key.strip()
-	if anthropic_model.strip():
-		updates["anthropic_model"] = anthropic_model.strip()
-	if deepl_api_key.strip():
-		updates["deepl_api_key"] = deepl_api_key.strip()
-	if tg_bot_token.strip():
-		updates["tg_bot_token"] = tg_bot_token.strip()
-	if tg_chat_id_ru.strip():
-		updates["tg_chat_id_ru"] = tg_chat_id_ru.strip()
-	if discord_bot_token.strip():
-		updates["discord_bot_token"] = discord_bot_token.strip()
-	if discord_guild_id.strip():
-		updates["discord_guild_id"] = discord_guild_id.strip()
-	if steam_financial_api_key.strip():
-		updates["steam_financial_api_key"] = steam_financial_api_key.strip()
-	if music_dir.strip():
-		dirs = [d.strip().strip('"') for d in music_dir.replace(";", "\n").splitlines()]
-		updates["music_dir"] = "\n".join(d for d in dirs if d)
-	if discord_upload_limit_mb.strip():
-		try:
-			updates["discord_upload_limit_mb"] = max(1, min(500, int(float(discord_upload_limit_mb))))
-		except ValueError:
-			pass
+async def save_settings_endpoint(request: Request):
+	"""The hand-written Settings forms (VK, X, YouTube stats, Facebook's manual fields, TikTok): any form field
+	of app/core/settings_schema.py, stored only when it isn't empty — so a field left blank never wipes a value
+	(a secret isn't shown back) — and when it reads (a bad number is skipped). The other sections save through
+	/settings/section/<id> below."""
+	updates = settings_schema.parse_legacy(await request.form())
 	# a chat id / Page / subreddit set up here reaches a destination (Settings → Languages & destinations)
-	from app.services import destinations
 	destinations.save_keys(updates)
 	# Ask htmx to reload the page so new values are visible
-	return Response(content="", headers={"HX-Redirect": "/accounts"})
+	return Response(content="", headers={"HX-Redirect": settings_back_url(request)})
+
+
+@router.post("/settings/section/{section_id}", response_class=HTMLResponse)
+async def save_settings_section(request: Request, section_id: str):
+	"""One section's form made from its schema (partials/settings_form.html): every field it shows is checked;
+	anything wrong → the form again with what to fix (422) and nothing saved; else only its keys are written. A
+	secret left empty keeps the saved one; `_group` = one of a hand-written section's forms of fields."""
+	s = settings_schema.section(section_id)
+	if s is None or not s.form_fields:
+		return HTMLResponse("unknown settings section", status_code=404)
+	form = await request.form()
+	group = str(form.get("_group") or "")
+	keys = settings_schema.group_keys(s, group)
+	if (group or s.custom) and keys is None:
+		# a hand-written section saves its own fields; only its groups made from the schema come here
+		return HTMLResponse("unknown settings group", status_code=404)
+	updates, errors = settings_schema.parse_form(s, form, keys)
+	if errors:
+		view = settings_schema.form_view(s, load_settings(), keys, group, submitted=form, errors=errors,
+										 note="Not saved: " + "; ".join(errors.values()), note_error=True)
+		return templates_api.TemplateResponse("partials/settings_form.html", {"request": request, "form": view},
+											  status_code=422)
+	if updates:
+		# the Telegram chat id, the Discord webhook, the subreddit… reach a destination even when the migration
+		# made none for them (app.services.destinations.adopt_keys)
+		destinations.save_keys(updates)
+	logger.info(f"settings section {section_id} saved: {sorted(updates)}")
+	view = settings_schema.form_view(s, load_settings(), keys, group, note="Saved ✓")
+	return templates_api.TemplateResponse("partials/settings_form.html", {"request": request, "form": view})
 
 
 @router.post("/health/run")

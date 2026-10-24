@@ -3,7 +3,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from app.core.templating import make_templates
 from sqlmodel import Session
 
@@ -30,6 +30,9 @@ def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
 
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, session: Session = Depends(get_session)):
+    from app.services import setup
+    if setup.should_show():  # a fresh install: the setup wizard until it is finished or skipped
+        return RedirectResponse("/setup", status_code=303)
     return _render(request, "home.html", {"body_class": "page-index", **views.home_context(session)})
 
 

@@ -34,11 +34,17 @@ from app.services import settings as settings_mod  # noqa: E402
 create_db_and_tables()
 
 
+# Setup done: pages render as on an install that is set up (a fresh one's home page is the setup wizard, see
+# tests/test_setup.py, which starts from FRESH_SETTINGS).
+SET_UP_SETTINGS = '{"setup_state": {"done": true, "step": "done", "fresh": false, "at": 0}}'
+FRESH_SETTINGS = "{}"
+
+
 @pytest.fixture(autouse=True)
 def settings_file(tmp_path, monkeypatch):
-    """Every test gets its own empty .settings.json (never the real one)."""
+    """Every test gets its own .settings.json (never the real one), empty but for the setup wizard marked done."""
     path = tmp_path / "settings.json"
-    path.write_text("{}", encoding="utf-8")
+    path.write_text(SET_UP_SETTINGS, encoding="utf-8")
     monkeypatch.setattr(settings_mod, "SETTINGS_PATH", str(path))
     from app.services import health_check
     monkeypatch.setattr(health_check, "LAST_RESULT_PATH", str(tmp_path / "health_last.json"))

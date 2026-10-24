@@ -9,6 +9,21 @@ from __future__ import annotations
 from typing import Optional
 
 
+def app_id(cfg: Optional[dict] = None) -> str:
+    """The game the store-news export is for: Settings → Steam, else INDIEPULSE_STEAM_APP_ID from .env; "" = none set."""
+    from app.core import config
+    if cfg is None:
+        from app.services.settings import load_settings
+        cfg = load_settings()
+    return str(cfg.get("steam_app_id") or config.STEAM_APP_ID or "").strip()
+
+
+def events_url(cfg: Optional[dict] = None) -> str:
+    """Steam's "create an event" page of that game ("" without one)."""
+    a = app_id(cfg)
+    return f"https://steamcommunity.com/games/{a}/partnerevents/create" if a else ""
+
+
 def app_links(appid) -> list[dict]:
     a = int(appid)
     return [

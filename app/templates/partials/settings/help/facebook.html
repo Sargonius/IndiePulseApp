@@ -1,0 +1,13 @@
+<div class="instructions">
+	<h4>Easy Setup (one-time, ~5 min)</h4>
+	<ol>
+		<li>Create an app at <a href="https://developers.facebook.com/apps" target="_blank">Meta for Developers</a> (type: <b>Business</b>). Keep it in <b>Development mode</b> — no App Review needed when you are the app admin and Page admin.</li>
+		<li>Copy <b>App ID</b> and <b>App Secret</b> from App Settings → Basic into the fields here.</li>
+		<li>Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a>, pick your app, click <b>Generate Access Token</b> with permissions: <b>pages_show_list</b>, <b>pages_manage_posts</b>, <b>pages_read_engagement</b>.</li>
+		<li>Paste the token here and click <b>Fetch My Pages</b>.</li>
+		<li>Click <b>Use as RU</b> / <b>Use as EN</b> next to your pages. Done.</li>
+	</ol>
+	<div class="info-box">
+		The app exchanges your token for a long-lived one automatically — Page tokens obtained this way effectively don't expire. Re-run this flow only if Facebook invalidates the token (password change, revoked permissions).
+	</div>
+</div>

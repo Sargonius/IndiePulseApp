@@ -211,10 +211,10 @@
   <h3>Letter settings <span class="muted">· {{ project.name }}</span></h3>
   <form method="post" action="/api/outreach/{{ project.id }}/settings" class="or-form">
     <label>Pitch <span class="muted">— what the game is, what’s new, why now. The letter uses only these facts.</span>
-      <textarea name="pitch" rows="5" maxlength="3000" placeholder="Project Apocalypse is a zombie-survival city builder… The new update rebuilds the core loop: … It’s 50% off until …">{{ cfg.pitch }}</textarea></label>
+      <textarea name="pitch" rows="5" maxlength="3000" placeholder="{{ project.name }} is a … (genre, the hook). The new update …: what changed. It’s 50% off until …">{{ cfg.pitch }}</textarea></label>
     <div class="or-form-row">
       <label>Extra links <span class="muted">(trailer, press kit — one per line)</span><textarea name="links" rows="2" maxlength="1000">{{ cfg.links }}</textarea></label>
-      <label>Signature<textarea name="signature" rows="2" maxlength="300" placeholder="Evgeny, solo dev of Project Apocalypse">{{ cfg.signature }}</textarea></label>
+      <label>Signature<textarea name="signature" rows="2" maxlength="300" placeholder="Your name, solo dev of {{ project.name }}">{{ cfg.signature }}</textarea></label>
     </div>
     <div class="or-form-row or-form-row--small">
       <label>Game languages <input type="text" name="languages" value="{{ cfg.languages }}" title="Creators speaking these get a bonus (codes: en, ru, ja, zh…)"></label>
