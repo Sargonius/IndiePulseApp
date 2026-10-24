@@ -205,10 +205,12 @@ def test_a_fresh_install_is_walked_through_setup(fresh, client):
     assert 'id="section_openai"' in client.get("/setup").text
     client.post("/setup/next", data={"step": "ai"})
     page = client.get("/setup").text
-    assert 'id="sf_updates_setup"' in page and 'name="update_token"' in page and 'name="update_repo"' not in page
+    assert 'id="sf_updates_setup"' in page and 'name="update_mode"' in page
+    # the repository is public: no token to ask a new user for (Settings keeps the field, for a private fork)
+    assert 'name="update_token"' not in page and 'name="update_repo"' not in page
     client.post("/api/settings/section/updates", data={"_group": "setup", "update_mode": "auto",
                                                        "update_token": "github_pat_x"})
-    assert (load_settings()["update_mode"], load_settings()["update_token"]) == ("auto", "github_pat_x")
+    assert (load_settings()["update_mode"], load_settings()["update_token"]) == ("auto", "")  # only what it shows
     client.post("/setup/next", data={"step": "updates"})
 
     # done
