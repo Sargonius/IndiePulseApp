@@ -3,6 +3,41 @@
 Local-first Windows app to write, schedule and cross-post news posts and short videos
 (Telegram, Discord, VK, X, YouTube, Facebook, Instagram Reels, Reddit, TikTok, Bluesky).
 
+## Install / update
+
+1. Download `IndiePulse-<version>.zip` from the repository's **Releases** page (under Assets).
+2. Unzip it wherever it should live (`D:\Apps`, a USB drive…): you get an `IndiePulse` folder.
+3. Double-click `IndiePulse.bat` in it. It needs Python 3.12 from python.org (with the `py` launcher) or
+   [uv](https://docs.astral.sh/uv/) on the computer — with uv it fetches Python 3.12 by itself, no admin. The first
+   run makes `.venv` and installs the packages (a minute or two), then the tray icon appears and the browser opens
+   http://127.0.0.1:8000.
+
+Your settings, posts, media and logs live apart from the code, in `%LOCALAPPDATA%\IndiePulse` — an update or a new
+unzip never touches them. To keep everything inside the folder instead (a drive you carry around), put an empty
+`portable.txt` next to `IndiePulse.bat` before the first run: the data then goes to `IndiePulse\data`.
+
+**Updates.** IndiePulse looks at the releases 30 seconds after it starts and then every 6 hours. When there is a newer
+version, every page shows *IndiePulse vX is available — What's new · Install*, and the tray shows a balloon and an
+**Install update vX** item. Install downloads the zip, checks its SHA-256 against the release's `latest.json`, waits
+until nothing is publishing, and restarts IndiePulse on the new version (about half a minute). If the new version
+doesn't come up within 4 minutes, the previous one is put back by itself and the banner says why (details in
+`logs\update.log`). The previous version stays in `updates\previous` of the data folder until the next update.
+
+⚙️ Settings → **Updates**: *Tell me* (the default) / *Install it by itself when nothing is publishing* / *Don't
+check*; the repository releases come from; the access token; **Check now**. The tray menu has **Check for updates**.
+
+**Access token.** The releases are in a private repository, so the update check needs a token that can read it:
+GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token; *Repository access*: Only
+select repositories → `Sargonius/IndiePulseNew`; *Permissions* → Repository → **Contents: Read-only**; pick an
+expiration. Paste it in Settings → Updates, Save, Check now. Without one the check says *set an access token* instead
+of pretending there is nothing new; an expired token says so too. The token is only sent to api.github.com and is
+masked in the logs.
+
+An update replaces the code — `app\`, the launchers, `requirements.*`, `README.md` — and nothing else: not `.venv`,
+`.env`, `portable.txt` or the data. A **git checkout** is never updated in place and doesn't check by itself (Check now
+still says what's released): update it with `git pull`. By hand: download the new zip, Quit IndiePulse from the tray,
+unzip over the old folder, start it.
+
 ## Quick start (Windows)
 
 1. Optional: copy `.env.example` to `.env` (host/port, DB path).
@@ -27,7 +62,7 @@ There are no console windows: IndiePulse lives in the tray. The icon runs two pr
 the web server and the Huey worker (the one that actually publishes; scheduled posts don't
 go out without it) — and its colour shows their state: green ok, amber starting/restarting,
 red broken (hover or open the menu for details). Tray menu: open the UI, restart, logs folder,
-start with Windows, **Выход** (stops both; the worker finishes the task in progress first).
+check for updates, start with Windows, **Выход** (stops both; the worker finishes the task in progress first).
 
 - Launching again while it runs just opens the browser.
 - A crashed process is restarted automatically; a hung server (no `/health` answer for 2 min) too.
@@ -81,7 +116,38 @@ and unknown Host headers so other websites can't drive it from your browser.
 ```bash
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .venv\Scripts\python.exe -m pytest
+.venv\Scripts\python.exe tools\lint.py   # pyflakes, as CI runs it
 ```
+CI (`.github/workflows/ci.yml`) runs both on Windows for every push and pull request to `main`.
+
+## Releasing
+
+The version is `__version__` in `app/__init__.py`, nowhere else (the footer, `/version`, the updater and the release
+build read it). `main` carries the next version with `-dev` (`2.0.0-dev`), so a checkout is never taken for a
+release; the order is `2.0.0-dev` < `2.0.0-rc.1` < `2.0.0` < `2.0.1-dev`.
+
+To release, from an up-to-date `main` with nothing uncommitted and the `.venv` in place:
+
+```powershell
+.\tools\release.ps1                                  # the current version without -dev
+.\tools\release.ps1 2.1.0 -Notes "What's new, for the banner and the release page"
+.\tools\release.ps1 2.1.0-rc.1                       # a prerelease: installs don't take it
+```
+
+It checks the version (newer than every `v*` tag, the tag free on GitHub), runs pyflakes and the tests, shows what it
+will do and asks. On `yes` it commits `__version__ = "2.1.0"`, tags that commit `v2.1.0` with the notes as the tag
+message (default: the commit subjects since the last tag), commits `2.1.1-dev`, and pushes `main` and the tag
+together; if any of that fails, it undoes its commits and the tag.
+
+The tag starts `.github/workflows/release.yml`: it fails unless the tag is `v` + `__version__`, runs pyflakes and the
+tests, builds `IndiePulse-2.1.0.zip` and `latest.json` with `tools/build_release.py` (only git-tracked files: `app/`,
+the launchers, requirements, README, `.env.example`, a LICENSE if there is one — no tests, tools or `.github`), and
+creates the GitHub Release with both attached, using only `GITHUB_TOKEN`. Installed copies see it at their next check
+(with their access token: Install / update above). To look at a build first:
+`python tools\build_release.py --tag v<version> --out dist` (the version must match).
+
+A broken release: release a fixed, higher version. Installs that took the broken one went back by themselves only if
+it didn't start; the others update to the fix at their next check.
 
 ## License
 Proprietary — all rights reserved.
