@@ -165,7 +165,7 @@ namespace IndiePulse
             bool ok = false;
             form.Shown += delegate
             {
-                form.Run(steps.Count > 1 ? "Getting IndiePulse ready" : "Starting IndiePulse", steps, delegate
+                form.Run(steps[0].Id == "update" ? "IndiePulse is being updated" : steps.Count > 1 ? "Getting IndiePulse ready" : "Starting IndiePulse", steps, delegate
                 {
                     ok = true;
                     form.CloseSoon(900);

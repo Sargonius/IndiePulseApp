@@ -70,7 +70,7 @@ namespace IndiePulse
             if (Uv.Length == 0 && !pip) steps.Add(new Step("uv", "Getting uv, the Python installer", GetUv));
             if (!alive)
             {
-                steps.Add(new Step("python", "Getting Python " + PythonVersion, GetPython));
+                steps.Add(new Step("python", (home.PythonDamaged() ? "Repairing Python " : "Getting Python ") + PythonVersion, GetPython));
                 steps.Add(new Step("venv", "Making IndiePulse's Python environment", MakeVenv));
             }
             steps.Add(new Step("packages", "Installing the packages IndiePulse uses", InstallPackages));
