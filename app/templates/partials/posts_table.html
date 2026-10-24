@@ -21,7 +21,7 @@
 				—
 			{% endif %}
 		</td>
-		<td>{{ p.platform_text }}</td>
+		<td>{{ p.platform_text }}{% if p.destination %} <span class="muted" style="font-size:11px;">→ {{ p.destination }}</span>{% endif %}</td>
 		<td>
 			{% set s = p.status_text %}
 			{% if s == 'done' %}<span class="badge success">done</span>

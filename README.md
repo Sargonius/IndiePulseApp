@@ -47,6 +47,28 @@ and platform checkboxes; the worker neither publishes there nor collects its num
 lives in `app/core/modules.py` (which platforms, URLs and requirements belong to each); what's off is
 `modules_disabled` in the settings.
 
+## Languages & destinations
+
+⚙️ Settings → Languages & destinations. **Languages**: an ordered list of codes (`ru`, `en`, `ja`…); the first is
+the one you write in. 📷 Post and 🎬 Video show a text field per language and **Translate missing**, which fills the
+empty ones from it (the AI from Settings, else machine translation). **Destinations**: every place posts go, each
+with its language — a Telegram channel, Discord webhook, Facebook Page or subreddit per language (as many as you
+like), and one for each single-account network (VK, X, Bluesky, YouTube, TikTok, Instagram), where you pick the
+language. A post sends each destination the text in its language, else the first language's, else any; a destination
+marked "only its language" gets nothing instead (the RU/EN Discord webhooks are, as they always behaved). The post
+forms tick destinations, not platforms.
+
+- Stored in the settings (`languages`, `destinations`); texts in `Brief.texts_json`, with `text_ru` / `text_en` kept
+  as mirrors (`app/services/languages.py`, `app/services/destinations.py`). A post knows its destination by
+  `Post.destination_id`.
+- On the first start they are built from the old per-language keys (Telegram chat, Discord RU/EN webhooks, Facebook
+  RU/EN pages, subreddits — the RU subreddit comes in off: it was never posted to) and stay **linked** to them:
+  editing either changes both, and the old keys are never deleted, so a rollback keeps working.
+- Posts queued before (and reposts / Shorts factory posts, which pick platforms) have no destination and publish
+  exactly as before. A destination removed or turned off while a post waits for it fails that post
+  (`destination_off`, Retry after fixing) instead of sending it somewhere else; a module that is off in 🧩 hides its
+  destinations.
+
 ## AI & translation
 
 ⚙️ Settings → AI & translation: your own key for OpenAI or Claude (pick one, or "auto"), plus an optional DeepL key.

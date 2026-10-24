@@ -49,7 +49,7 @@
 			<td>
 				<div class="pub-platforms">
 				{% for p in g.posts %}
-					<span class="platform-badge platform-{{ p.platform_text }} {% if p.status_text != 'done' %}not-done{% endif %}" data-post="{{ p.id }}" title="{{ p.platform_text }}: {{ p.status_text }}">{{ p.platform_text }}</span>
+					<span class="platform-badge platform-{{ p.platform_text }} {% if p.status_text != 'done' %}not-done{% endif %}" data-post="{{ p.id }}" title="{{ p.platform_text }}{% if p.destination %} → {{ p.destination }}{% endif %}: {{ p.status_text }}">{{ p.platform_text }}</span>
 				{% endfor %}
 				</div>
 			</td>

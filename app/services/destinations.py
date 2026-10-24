@@ -152,6 +152,11 @@ def migrate_settings() -> bool:
 		return False
 	dests = legacy_destinations(cfg)
 	save_settings({SETTINGS_KEY: dests})
+	if not isinstance(load_settings().get(SETTINGS_KEY), list):
+		# save_settings refuses to write over an unreadable file: the next start tries again, and until then
+		# stored() keeps answering with the same legacy set
+		logger.error("destinations: not migrated, the settings file could not be written")
+		return False
 	logger.info(f"destinations: migrated from the per-language settings: {', '.join(d['id'] for d in dests)}")
 	return True
 

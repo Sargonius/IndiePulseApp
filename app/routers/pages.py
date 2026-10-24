@@ -75,6 +75,8 @@ def _enrich_posts(posts):
         row = {
             'id': p.id,
             'platform_text': platform_text,
+            # two channels of one network differ only by this (Settings → Languages & destinations)
+            'destination': getattr(p, 'destination_id', None),
             'status_text': (p.status.value if hasattr(p.status, 'value') else str(p.status)),
             'brief_id': getattr(p, 'brief_id', None),
             'scheduled_at': getattr(p, 'scheduled_at', None),
