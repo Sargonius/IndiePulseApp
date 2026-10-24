@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 from typing import List
 from typing import Optional
-from app.routers.api.common import _e
+from app.routers.api.common import _e, form_texts
 
 router = APIRouter()
 
@@ -124,6 +124,21 @@ def translate(ru_text: Optional[str] = Form(None), text_ru: Optional[str] = Form
     return HTMLResponse(html)
 
 
+@router.post("/translate/missing")
+def translate_missing(texts: dict = Depends(form_texts)):
+    """The post forms' "Translate missing": every language of Settings → Languages whose field is empty, from
+    the first one with a text (the AI from Settings, then machine translation). → {texts, providers, failed,
+    source}; only the languages that were empty are in "texts"."""
+    from app.services import languages
+    result = languages.translate_missing(texts)
+    if result["texts"]:
+        merged = {**texts, **result["texts"]}
+        save_draft({"texts": merged, "text_ru": merged.get("ru"), "text_en": merged.get("en")})
+    logger.info(f"translate missing source={result['source']} filled={sorted(result['texts'])} "
+                f"providers={result['providers']} failed={result['failed']}")
+    return result
+
+
 @router.post("/hashtags/suggest")
 def suggest_hashtags(text: str = Form("")):
     # Default hashtag set for preview/posting (exclude on Discord when publishing)
@@ -157,14 +172,22 @@ def save_news_draft(
     tags: Optional[str] = Form(None),
     scheduled_at: Optional[str] = Form(None),
     platforms: Optional[List[str]] = Form(None),
+    destinations: Optional[List[str]] = Form(None),
     reddit_sentences: Optional[int] = Form(None),
     yt_title: Optional[str] = Form(None),
+    texts: dict = Depends(form_texts),
 ):
     payload = {}
     if text_ru is not None:
         payload["text_ru"] = text_ru
     if text_en is not None:
         payload["text_en"] = text_en
+    if texts:
+        # every language's field (text_ja, ...); text_ru / text_en above stay for the older forms
+        payload["texts"] = texts
+    if destinations is not None:
+        # the form sends one empty value when nothing is ticked, so "none" is saved too
+        payload["destinations"] = [d for d in destinations if d]
     if tags is not None:
         payload["tags"] = tags
     if scheduled_at is not None:

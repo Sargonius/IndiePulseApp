@@ -58,19 +58,19 @@
 				<div class="char-counter" id="title_counter">0/100</div>
 			</div>
 			
+			<!-- one description per language of Settings → Languages; each destination gets its language's -->
+			{% for lang in langs %}
 			<div class="form-group">
-				<label>Description (RU)</label>
-				<textarea name="text_ru" id="text_ru" rows="4">{{ draft.text_ru if draft else '' }}</textarea>
+				<label>Description ({{ lang.code | upper }}) <span class="muted" style="font-weight:400;">— {{ lang.name }}{% if loop.first %}, the one you write in{% endif %}</span></label>
+				<textarea name="text_{{ lang.code }}" id="text_{{ lang.code }}" class="lang-textarea" data-lang="{{ lang.code }}" rows="4">{{ lang.text }}</textarea>
 			</div>
-			
+			{% if loop.first and langs | length > 1 %}
 			<div class="btn-row" style="margin-bottom:12px;">
-				<button type="button" class="btn" hx-post="/api/translate" hx-include="#text_ru" hx-target="#text_en" hx-swap="outerHTML">Translate to EN</button>
+				<button type="button" class="btn" id="translate_missing_btn" title="Fills every empty language from the text you wrote (the AI from Settings, else DeepL / free translators)">Translate missing</button>
+				<span id="tr_status" class="muted"></span>
 			</div>
-			
-			<div class="form-group">
-				<label>Description (EN)</label>
-				<textarea id="text_en" name="text_en" rows="4">{{ draft.text_en if draft else '' }}</textarea>
-			</div>
+			{% endif %}
+			{% endfor %}
 			
 			<div class="form-group">
 				<label>Project</label>
@@ -112,13 +112,18 @@
 		</div>
 	</div>
 
-	<!-- Platforms -->
+	<!-- Destinations (Settings → Languages & destinations): class "pf" + data-platform, as on the post form -->
 	<div class="platforms-section">
-		<label>Platforms</label>
+		<label>Destinations</label>
+		<input type="hidden" name="destinations" value="" />
 		<div class="platforms-grid">
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="yt" checked /> YouTube</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="tiktok" checked /> TikTok</label>
-			<label class="platform-option"><input class="pf" type="checkbox" name="platforms" value="vk_video" /> VK Video</label>
+			{% for g in dest_groups %}
+			{% for d in g.destinations %}
+			<label class="platform-option" title="{{ d.title }}{% if not d.ready %} — not set up yet in Settings{% endif %}"><input class="pf" type="checkbox" name="destinations" value="{{ d.id }}" data-platform="{{ d.platform }}" data-lang="{{ d.lang }}"{% if d.checked %} checked{% endif %} /> {{ g.name }}{% if g.module == 'vk' %} Video{% endif %}{% if d.label != g.name %} · {{ d.label }}{% endif %} <span class="lang-badge">{{ d.lang | upper }}</span></label>
+			{% endfor %}
+			{% else %}
+			<span class="muted">No destinations — add them in <a href="/accounts#section_languages">Settings → Languages &amp; destinations</a>.</span>
+			{% endfor %}
 		</div>
 	</div>
 
@@ -252,6 +257,8 @@
 	margin-top: 8px;
 }
 
+.lang-badge { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #e2e8f0; color: #334155; }
+
 .platform-option {
 	display: flex;
 	align-items: center;
@@ -369,7 +376,7 @@ function renderSlots() {
 }
 
 function selectedPlatforms() {
-	return Array.from(document.querySelectorAll('input.pf[name="platforms"]:checked')).map(x => x.value);
+	return [...new Set(Array.from(document.querySelectorAll('input.pf[name="destinations"]:checked')).map(x => x.dataset.platform))];
 }
 
 document.querySelectorAll('.slot').forEach(box => {
@@ -397,11 +404,11 @@ document.querySelectorAll('.slot').forEach(box => {
 function updatePlatformNotes() {
 	const h = !!hiddenOf('horizontal').value, v = !!hiddenOf('vertical').value;
 	const note = { yt: h ? '16:9' : (v ? '9:16 → Shorts' : 'no video'), vk_video: h ? '16:9' : (v ? '9:16' : 'no video'), tiktok: v ? '9:16' : 'needs 9:16' };
-	document.querySelectorAll('input.pf[name="platforms"]').forEach(cb => {
+	document.querySelectorAll('input.pf[name="destinations"]').forEach(cb => {
 		const lab = cb.closest('label');
 		let s = lab.querySelector('.pf-note');
 		if (!s) { s = document.createElement('span'); s.className = 'pf-note muted'; lab.appendChild(s); }
-		s.textContent = sourceRel ? ` (${note[cb.value]})` : '';
+		s.textContent = sourceRel ? ` (${note[cb.dataset.platform]})` : '';
 	});
 }
 
@@ -446,8 +453,7 @@ document.getElementById('install_ffmpeg')?.addEventListener('click', async () =>
 // Clear
 document.getElementById('clear_btn')?.addEventListener('click', () => {
 	document.getElementById('video_title').value = '';
-	document.getElementById('text_ru').value = '';
-	document.getElementById('text_en').value = '';
+	document.querySelectorAll('textarea.lang-textarea').forEach(t => { t.value = ''; });
 	document.getElementById('tags_input').value = '';
 	document.getElementById('scheduled_at').value = '';
 	document.getElementById('media_horizontal_hidden').value = '';
@@ -500,6 +506,34 @@ IPGoals.load(document.getElementById('goal_select'), '');
 	}
 })();
 
-document.querySelectorAll('input.pf[name="platforms"]').forEach(cb => cb.addEventListener('change', updatePlatformNotes));
+document.querySelectorAll('input.pf[name="destinations"]').forEach(cb => cb.addEventListener('change', updatePlatformNotes));
+
+// "Translate missing": every empty language from the first one with a text (same as the post form)
+document.getElementById('translate_missing_btn')?.addEventListener('click', async () => {
+	const btn = document.getElementById('translate_missing_btn');
+	const st = document.getElementById('tr_status');
+	const areas = Array.from(document.querySelectorAll('textarea.lang-textarea'));
+	const empty = areas.filter(t => !t.value.trim()).map(t => t.dataset.lang);
+	if (!empty.length) { st.textContent = 'Every language has a text.'; return; }
+	if (empty.length === areas.length) { st.textContent = 'Write the text first.'; return; }
+	const fd = new FormData();
+	areas.forEach(t => fd.append('text_' + t.dataset.lang, t.value));
+	btn.disabled = true;
+	st.textContent = `Translating to ${empty.map(l => l.toUpperCase()).join(', ')}…`;
+	try {
+		const j = await (await fetch('/api/translate/missing', { method: 'POST', body: fd })).json();
+		Object.entries(j.texts || {}).forEach(([l, t]) => {
+			const el = document.getElementById('text_' + l);
+			if (el && !el.value.trim()) el.value = t;
+		});
+		const done = Object.keys(j.texts || {}).map(l => `${l.toUpperCase()} (${j.providers[l] || '?'})`);
+		st.textContent = (done.length ? 'Translated: ' + done.join(', ') + '. ' : '')
+			+ ((j.failed || []).length ? `Failed: ${j.failed.map(l => l.toUpperCase()).join(', ')} — check AI & translation in Settings.` : '');
+	} catch (e) {
+		st.textContent = 'Translation failed: ' + e;
+	} finally {
+		btn.disabled = false;
+	}
+});
 </script>
 {% endblock %}

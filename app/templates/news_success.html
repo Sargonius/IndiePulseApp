@@ -14,12 +14,12 @@
 {% if posts %}
 <ul class="muted">
 	{% for p in posts %}
-	<li>{{ p.platform.value if p.platform.value is defined else p.platform }} — {{ p.status.value if p.status.value is defined else p.status }}{% if p.platform_url %} · <a href="{{ p.platform_url }}" target="_blank" rel="noopener">open</a>{% endif %}</li>
+	<li>{{ p.platform.value if p.platform.value is defined else p.platform }}{% if p.destination_id %} → {{ p.destination_id }}{% endif %} — {{ p.status.value if p.status.value is defined else p.status }}{% if p.platform_url %} · <a href="{{ p.platform_url }}" target="_blank" rel="noopener">open</a>{% endif %}</li>
 	{% endfor %}
 </ul>
 {% endif %}
 {% if skipped and skipped|length %}
-<p class="muted">Skipped (not configured): {{ skipped | join(', ') }}</p>
+<p class="muted">Skipped: {{ skipped | join(', ') }}</p>
 {% endif %}
 <p><a href="/publications/{{ brief_id }}">Post report</a> | <a href="/create/post">New post</a> | <a href="/">Home</a></p>
 {% endblock %}

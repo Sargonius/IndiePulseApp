@@ -412,3 +412,97 @@ def test_the_settings_page_edits_languages_and_destinations(client, set_settings
     assert "discord-ja" in r.json()["destinations"]
     cfg = load_settings()
     assert cfg["languages"] == ["ru", "en", "ja"] and cfg["fb_ru_page_access_token"] == "tok-ru"
+
+
+# ── the post form: a field per language, destinations, Translate missing ────
+
+# (`networks` before `client`: the app's start migrates the settings it finds, so the owner's keys must be there)
+
+def _fake_ai(monkeypatch, fail=False):
+    from app.services import llm, machine_translate
+    calls = []
+
+    def chat(messages, **kw):
+        calls.append(messages[0]["content"])
+        if fail:
+            raise llm.LLMError("no AI key in Settings")
+        target = messages[1]["content"].split(",", 1)[0].replace("Translate to ", "")
+        return f"(the text in {target})", "openai:test"
+
+    monkeypatch.setattr(llm, "chat", chat)
+    monkeypatch.setattr(machine_translate, "translate", lambda text, target, source=None: (f"<{target}> {text}", "google"))
+    return calls
+
+
+def test_an_added_language_works_end_to_end(networks, client, session, monkeypatch):
+    """Add JA and a JA Telegram channel + Discord webhook → the form has a JA field, Translate missing fills
+    it, and publishing sends the JA text to the JA destinations."""
+    from sqlmodel import select
+    from app.models.models import Job, Post
+    _with_ja()
+    page = client.get("/create/post").text
+    assert 'name="text_ja"' in page and 'name="text_ru"' in page and 'name="text_en"' in page
+    assert 'value="telegram-ja"' in page and 'value="discord-ja"' in page and 'data-lang="ja"' in page
+    assert 'type="checkbox" name="platforms"' not in page
+
+    _fake_ai(monkeypatch)
+    r = client.post("/api/translate/missing", data={"text_ru": "Новый билд вышел", "text_en": "", "text_ja": ""})
+    res = r.json()
+    assert res["source"] == "ru" and sorted(res["texts"]) == ["en", "ja"] and res["failed"] == []
+    assert res["texts"] == {"en": "(the text in English)", "ja": "(the text in Japanese)"}
+    assert res["providers"]["ja"] == "openai:test"
+
+    r = client.post("/create/post", data={
+        "text_ru": "Новый билд вышел", "text_en": "New build is out", "text_ja": "新しいビルド",
+        "destinations": ["telegram-ja", "discord-ja", "telegram-ru", "nope"],
+    }, follow_redirects=False)
+    assert r.status_code == 303 and "nope" in r.headers["location"]  # skipped, and said so
+    brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
+    assert languages.brief_texts(reload(Brief, brief_id))["ja"] == "新しいビルド"
+    posts = session.exec(select(Post).where(Post.brief_id == brief_id).order_by(Post.id)).all()
+    assert [(p.platform.value, p.destination_id) for p in posts] == [
+        ("tg", "telegram-ja"), ("discord", "discord-ja"), ("tg", "telegram-ru")]
+    for p in posts:
+        job = next(j for j in session.exec(select(Job)).all() if json.loads(j.payload_json).get("post_id") == p.id)
+        assert _publish((p.id, job.id)) == "ok"
+    assert networks == [("tg", "-100222", "新しいビルド"), ("discord", "https://hook/ja", "新しいビルド"),
+                        ("tg", "-100111", "Новый билд вышел")]
+
+
+def test_translate_missing_falls_back_to_machine_translation(client, monkeypatch, set_settings):
+    set_settings(languages=["en", "ja", "de"])
+    calls = _fake_ai(monkeypatch, fail=True)
+    res = client.post("/api/translate/missing", data={"text_en": "Hello", "text_ja": "既に", "text_de": ""}).json()
+    assert calls and res["texts"] == {"de": "<de> Hello"} and res["providers"] == {"de": "google"}
+
+
+def test_the_form_sends_only_its_own_language_destinations_text_or_skips_them(networks, client, session):
+    from sqlmodel import select
+    from app.models.models import Post
+    _with_ja()
+    r = client.post("/create/post", data={"text_ru": "Только по-русски 1", "destinations": ["discord-en", "discord-ru"]},
+                    follow_redirects=False)
+    assert "no+EN+text" in r.headers["location"]
+    brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
+    assert [p.destination_id for p in session.exec(select(Post).where(Post.brief_id == brief_id))] == ["discord-ru"]
+
+
+def test_the_form_has_no_destinations_of_a_module_that_is_off(networks, client, set_settings):
+    _with_ja()
+    set_settings(modules_disabled=["telegram"])
+    page = client.get("/create/post").text
+    assert 'value="telegram-ja"' not in page and 'value="discord-ja"' in page
+
+
+def test_the_video_form_publishes_vk_as_a_video_to_its_destination(networks, client, session):
+    from sqlmodel import select
+    from app.models.models import Post
+    _with_ja(vk={"lang": "ja"})
+    page = client.get("/create/video").text
+    assert 'name="text_ja"' in page and 'value="vk"' in page and 'value="telegram-ja"' not in page
+    r = client.post("/create/video", data={"title": "Clip", "text_ru": "Ролик", "text_ja": "動画",
+                                           "media_horizontal": "clip.mp4", "destinations": ["vk"]},
+                    follow_redirects=False)
+    brief_id = int(r.headers["location"].split("/published/")[1].split("?")[0])
+    post = session.exec(select(Post).where(Post.brief_id == brief_id)).one()
+    assert (post.platform.value, post.destination_id) == ("vk_video", "vk")

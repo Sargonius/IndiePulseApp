@@ -285,7 +285,8 @@ def for_form(form: str = "post", cfg: Optional[dict] = None) -> list[dict]:
 		group = groups.setdefault(d["module"], {"module": d["module"], "name": kind.name,
 												"video_only": kind.video_only and form == "post", "destinations": []})
 		group["destinations"].append({"id": d["id"], "label": label(d), "lang": d["lang"], "title": title(d),
-									  "platform": post_platform(d, form), "ready": ready(d, cfg)})
+									  "platform": post_platform(d, form), "ready": ready(d, cfg),
+									  "own_only": d["skip_without_text"]})
 	return list(groups.values())
 
 
