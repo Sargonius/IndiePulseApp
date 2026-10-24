@@ -10,7 +10,7 @@ from typing import Optional
 
 
 def app_id(cfg: Optional[dict] = None) -> str:
-    """The game the store-news export is for: Settings → Steam, else STEAM_APP_ID from .env; "" = none set."""
+    """The game the store-news export is for: Settings → Steam, else INDIEPULSE_STEAM_APP_ID from .env; "" = none set."""
     from app.core import config
     if cfg is None:
         from app.services.settings import load_settings

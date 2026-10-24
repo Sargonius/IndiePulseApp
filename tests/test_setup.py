@@ -16,9 +16,29 @@ OWNER = {"tg_bot_token": "123:abc", "tg_chat_id_ru": "-100", "music_dir": "E:\\S
 
 @pytest.fixture(autouse=True)
 def no_steam_env(monkeypatch):
-    """STEAM_APP_ID from this computer's environment would stand in for the built-in default."""
+    """INDIEPULSE_STEAM_APP_ID from this computer's environment would stand in for the built-in default."""
     from app.core import config
     monkeypatch.setattr(config, "STEAM_APP_ID", "")
+
+
+def test_clubkits_steam_app_id_is_not_indiepulses(monkeypatch):
+    """ClubKit puts STEAM_APP_ID in the Windows user environment for another game's Steam builds; IndiePulse read it
+    and its store-news export opened that game. Only its own INDIEPULSE_STEAM_APP_ID counts now."""
+    import importlib
+    from app.core import config
+    from app.services import setup
+    monkeypatch.setenv("STEAM_APP_ID", "2962320")
+    monkeypatch.delenv("INDIEPULSE_STEAM_APP_ID", raising=False)
+    try:
+        importlib.reload(config)
+        assert config.STEAM_APP_ID == ""
+        assert setup.legacy_values({})["steam_app_id"] == setup.LEGACY_STEAM_APP_ID
+        monkeypatch.setenv("INDIEPULSE_STEAM_APP_ID", "1156500")
+        importlib.reload(config)
+        assert setup.legacy_values({})["steam_app_id"] == "1156500"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
 
 
 def stored(settings_file) -> dict:

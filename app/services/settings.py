@@ -28,7 +28,7 @@ DEFAULTS: Dict[str, Any] = {
 	"steam_financial_api_key": "",
 	# Secret baked into the "IndiePulse ← Steam" traffic bookmarklet (created on first use)
 	"steam_traffic_token": "",
-	# The game the store-news export (/steam) opens Steam's event editor for; empty = STEAM_APP_ID from .env.
+	# The game the store-news export (/steam) opens Steam's event editor for; empty = INDIEPULSE_STEAM_APP_ID from .env.
 	# Installs from before it existed got the old built-in one at their first start (app/services/setup.py).
 	"steam_app_id": "",
 	# UI
