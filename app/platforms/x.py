@@ -47,7 +47,6 @@ def publish(session, post, job) -> Optional[str]:
         session.commit()
         return 'error'
     # Compose text from brief if available
-    from app.models.models import Brief
     from app.platforms.common import brief_for_publish
     brief = brief_for_publish(session, post)
     base_text, hashtags = compose(brief, post)

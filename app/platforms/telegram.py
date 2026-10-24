@@ -12,7 +12,6 @@ def publish(session, post, job) -> Optional[str]:
     try:
         from app.services.settings import load_settings
         from app.services.telegram_client import TelegramClient
-        from app.models.models import Brief
         cfg = load_settings()
         bot = (cfg.get('tg_bot_token') or '').strip()
         from app.platforms.common import brief_for_publish, post_destination, post_text

@@ -11,7 +11,6 @@ def publish(session, post, job) -> Optional[str]:
     import os
     # Instagram Reels via Graph API resumable upload; export fallback if unconfigured.
     from app.services.settings import load_settings
-    from app.models.models import Brief
     cfg = load_settings()
     ig_user_id = (cfg.get('ig_user_id') or '').strip()
     ig_token = (cfg.get('ig_access_token') or '').strip()

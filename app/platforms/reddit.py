@@ -12,7 +12,6 @@ def publish(session, post, job) -> Optional[str]:
     # A post without a destination: the EN subreddit with the EN text (as it always was)
     from app.services.reddit_client import RedditClient
     from app.services.settings import load_settings
-    from app.models.models import Brief
     cfg = load_settings()
     cid = (cfg.get('reddit_client_id') or '').strip()
     csec = (cfg.get('reddit_client_secret') or '').strip()

@@ -12,7 +12,6 @@ def publish(session, post, job) -> Optional[str]:
     # Bluesky via AT Protocol: text thread (300-char chunks) + up to 4 images
     from app.services.bluesky_client import BlueskyClient
     from app.services.settings import load_settings
-    from app.models.models import Brief
     cfg = load_settings()
     handle = (cfg.get('bluesky_handle') or '').strip()
     app_pw = (cfg.get('bluesky_app_password') or '').strip()

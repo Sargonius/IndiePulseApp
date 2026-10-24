@@ -1,13 +1,9 @@
 """pyflakes over app/ and tests/ as CI runs it: any warning fails the build (`python tools/lint.py`).
 
-Two exceptions, so that the check can be strict without touching code that is being rewritten elsewhere:
-- a line marked `# noqa` (the convention the code already uses for imports kept on purpose: a re-export, a module
-  imported for its side effects, a pytest fixture). pyflakes itself ignores noqa; "redefinition of unused X" counts
-  as the import's own warning, so the noqa on the import line covers it too (a fixture imported, then taken as an
-  argument);
-- KNOWN: warnings left for another branch. app/platforms/* and app/routers/pages.py are being rewritten on
-  stage2-destinations (languages/destinations); fixing their unused names here would only make that merge conflict.
-  Drop these entries once it has landed — then they fail like any other warning.
+One exception: a line marked `# noqa` (the convention the code already uses for imports kept on purpose: a re-export,
+a module imported for its side effects, a pytest fixture). pyflakes itself ignores noqa; "redefinition of unused X"
+counts as the import's own warning, so the noqa on the import line covers it too (a fixture imported, then taken as an
+argument).
 """
 from __future__ import annotations
 
@@ -21,12 +17,6 @@ from pyflakes.reporter import Reporter
 
 ROOT = Path(__file__).resolve().parents[1]
 PATHS = ("app", "tests")
-KNOWN = [  # (path regex, message text) — no line numbers, so edits around them don't matter
-	(r"app/platforms/\w+\.py", "'app.models.models.Brief' imported but unused"),
-	(r"app/routers/pages\.py", "redefinition of unused 'load_settings'"),
-	(r"app/routers/pages\.py", "local variable 'has_video' is assigned to but never used"),
-	(r"app/routers/pages\.py", "local variable 'cfg' is assigned to but never used"),
-]
 _NOQA = re.compile(r"#\s*noqa\b", re.I)
 
 
@@ -54,10 +44,6 @@ def _noqa(message: messages.Message, lines: dict[str, list[str]]) -> bool:
 	return any(0 < n <= len(src) and _NOQA.search(src[n - 1]) for n in marked)
 
 
-def _known(rel: str, text: str) -> bool:
-	return any(re.fullmatch(path, rel) and known in text for path, known in KNOWN)
-
-
 def problems(paths=PATHS) -> list[str]:
 	"""Every warning that should fail the check, as 'path:line: message'."""
 	reporter = _Collector()
@@ -67,7 +53,7 @@ def problems(paths=PATHS) -> list[str]:
 	for m in reporter.found:
 		rel = Path(m.filename).resolve().relative_to(ROOT).as_posix()
 		text = m.message % m.message_args
-		if not _noqa(m, lines) and not _known(rel, text):
+		if not _noqa(m, lines):
 			out.append(f"{rel}:{m.lineno}: {text}")
 	return out
 
