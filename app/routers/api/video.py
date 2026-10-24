@@ -225,6 +225,7 @@ def music_file(path: str = Query(""), session: Session = Depends(get_session)):
     """Play a library track in the editor (only files from the music folders/presets)."""
     from fastapi.responses import FileResponse
     from app.services import music_library
+    path = music_library.on_this_drive(path)  # from a clip saved where the drive had another letter
     if not music_library.is_allowed(path, extra=music_library.preset_music_paths(session)):
         raise HTTPException(status_code=404, detail="not a library track")
     return FileResponse(path)
@@ -234,6 +235,7 @@ def music_file(path: str = Query(""), session: Session = Depends(get_session)):
 def music_peaks(path: str = Query(""), session: Session = Depends(get_session)):
     """Waveform of a library track: {duration, peaks: [0..1]}."""
     from app.services import music_library
+    path = music_library.on_this_drive(path)
     if not music_library.is_allowed(path, extra=music_library.preset_music_paths(session)):
         raise HTTPException(status_code=404, detail="not a library track")
     try:

@@ -51,6 +51,8 @@ def run(background: bool) -> None:
 
 	icon: pystray.Icon
 	want_browser = [not background]  # open the UI once the server answers
+	# A club computer the drive only visits gets no shortcuts and no autostart entry: nothing left behind
+	trusted = winapi.trusted_pc()
 
 	def refresh() -> None:
 		icon.icon = tray_image(sup.status())
@@ -142,8 +144,9 @@ def run(background: bool) -> None:
 			Menu.SEPARATOR,
 			Item("Restart", sup.restart, enabled=lambda _: sup.phase in ("running",)),
 			Item("Open logs folder", open_logs),
-			Item("Start at Windows sign-in", toggle_autostart, checked=lambda _: winapi.autostart_enabled()),
-			Item("Create shortcuts (desktop, Start menu)", make_shortcuts),
+			Item("Start at Windows sign-in", toggle_autostart, checked=lambda _: winapi.autostart_enabled(),
+				 visible=lambda _: trusted or winapi.autostart_enabled()),  # left on: still can be turned off
+			Item("Create shortcuts (desktop, Start menu)", make_shortcuts, visible=lambda _: trusted),
 			Menu.SEPARATOR,
 			Item("Quit", quit_app),
 		),
@@ -153,8 +156,8 @@ def run(background: bool) -> None:
 		ic.visible = True
 		sup.start()
 		threading.Thread(target=youtube_watch, name="youtube-reminder", daemon=True).start()
-		if not _SHORTCUTS_MARKER.exists():
-			make_shortcuts()  # first run: behave like an installed program
+		if not _SHORTCUTS_MARKER.exists() and trusted:
+			make_shortcuts()  # first run: behave like an installed program — not on a club computer the drive visits
 
 	logger.info(f"IndiePulse tray starting ({url}, background={background})")
 	icon.run(setup=setup)

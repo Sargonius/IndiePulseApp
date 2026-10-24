@@ -11,6 +11,8 @@ import re
 import subprocess
 from typing import Optional
 
+from app.core.paths import on_this_drive
+
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
 MAX_DEPTH = 3        # subfolder levels under each music folder
 MAX_TRACKS = 2000
@@ -19,13 +21,14 @@ _durations: dict[tuple, float] = {}
 
 
 def folders(cfg: Optional[dict] = None) -> list[str]:
-    """Music folders from the settings: one per line (or `;`-separated)."""
+    """Music folders from the settings: one per line (or `;`-separated). A folder on this drive
+    under another letter (set up on another computer) is found under this one."""
     if cfg is None:
         from app.services.settings import load_settings
         cfg = load_settings()
     out: list[str] = []
     for part in re.split(r"[\r\n;]+", str(cfg.get("music_dir") or "")):
-        p = part.strip().strip('"').strip()
+        p = on_this_drive(part.strip().strip('"').strip())
         if p and p not in out:
             out.append(p)
     return out
@@ -155,7 +158,7 @@ def preset_music_paths(session) -> list[str]:
     out: list[str] = []
     for model in (Project, Preset):
         try:
-            out += [p for p in session.exec(select(model.music_path)).all() if p]
+            out += [on_this_drive(p) for p in session.exec(select(model.music_path)).all() if p]
         except Exception:
             pass
     return out

@@ -81,6 +81,36 @@ def test_recently_due_post_with_queued_job_is_left_alone(make_post, session, mon
     assert post_id not in [kw["args"][1] for kw in scheduled]
 
 
+def test_posts_missed_while_the_app_was_off_wait_for_the_user(make_post, session, monkeypatch):
+    """The drive with IndiePulse sat in a drawer for two days: on the next start neither the watchdog nor Huey's
+    overdue tasks publish those posts in one burst — they wait for Retry. A post due a moment ago still goes out."""
+    from app import platforms
+    sent, scheduled = [], []
+    monkeypatch.setitem(platforms.PUBLISHERS, "tg", lambda session, post, job: sent.append(post.id))
+    monkeypatch.setattr(tasks.publish_news_post, "schedule", lambda **kw: scheduled.append(kw))
+    by_watchdog, _ = make_post("tg")
+    by_huey, huey_job = make_post("tg")
+    fresh, fresh_job = make_post("tg")
+    for post_id in (by_watchdog, by_huey):
+        _age_post(session, post_id, scheduled_at=datetime.now() - timedelta(days=2))
+    _age_post(session, fresh, scheduled_at=datetime.now() - timedelta(minutes=5))
+
+    assert tasks._publish_news_post_impl(huey_job, by_huey) == "missed"  # Huey runs the overdue task first
+    tasks.enqueue_due_posts.call_local()
+    for post_id in (by_watchdog, by_huey):
+        post = reload(Post, post_id)
+        assert post.status == PostStatusEnum.error and tasks.MISSED in post.error_text
+        assert post_id not in [kw["args"][1] for kw in scheduled]
+    assert reload(Job, huey_job).status == JobStatusEnum.error
+    tasks._maybe_retry_publish(huey_job, by_huey, "missed")  # not a transient failure: no auto-retry
+    assert reload(Post, by_huey).status == PostStatusEnum.error and sent == []
+
+    assert tasks._publish_news_post_impl(fresh_job, fresh) == "ok" and sent == [fresh]
+
+    _age_post(session, by_huey, status=PostStatusEnum.queued, error_text=None, scheduled_at=None)  # what Retry does
+    assert tasks._publish_news_post_impl(huey_job, by_huey) == "ok" and sent == [fresh, by_huey]
+
+
 def test_failed_metrics_fetch_keeps_previous_numbers(make_post, session, monkeypatch):
     post_id, _ = make_post("bluesky", status=PostStatusEnum.done)
     _age_post(session, post_id, platform_post_id="at://x", metrics_json=json.dumps({"like": 5, "reposts": 2}))

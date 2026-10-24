@@ -26,6 +26,7 @@ from typing import Optional
 
 from loguru import logger
 
+from app.core.paths import on_this_drive
 from app.services.text_overlay import clean_overlays, clean_trim, render_overlay_png
 
 MEDIA_DIR = "media"
@@ -182,7 +183,7 @@ def clean_spec(raw: Optional[dict], duration: Optional[float] = None) -> dict:
             te = None
     clip = (te if te is not None else (duration or 0)) - (ts or 0)
     music = raw.get("music") if isinstance(raw.get("music"), dict) else {}
-    mpath = str(music.get("path") or "").strip()
+    mpath = on_this_drive(str(music.get("path") or "").strip())  # saved on a computer where the drive had another letter
     music_spec = None
     if mpath:
         music_spec = {

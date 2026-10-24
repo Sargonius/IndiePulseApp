@@ -6,9 +6,22 @@ Local-first Windows app to write, schedule and cross-post news posts and short v
 ## Quick start (Windows)
 
 1. Optional: copy `.env.example` to `.env` (host/port, DB path).
-2. Double-click `IndiePulse.pyw` (needs Python 3.12 installed). First run creates `.venv`,
-   installs `requirements.txt` and adds **IndiePulse** shortcuts to the Desktop and Start menu.
+2. Double-click `IndiePulse.pyw` (needs Python 3.12 with the `py` launcher) or `IndiePulse.bat` (works on a
+   computer without Python too: it takes uv from PATH or from `ClubKit\tools\uv` on the same drive, and uv
+   fetches Python 3.12 once into `ClubKit\data\uv` — no install, no admin). The first run on a computer creates
+   `.venv`, installs `requirements.lock` and adds **IndiePulse** shortcuts to the Desktop and Start menu.
 3. The browser opens http://127.0.0.1:8000; fill in platform credentials on the ⚙️ Settings page.
+
+**From the drive on different computers.** A `.venv` made on another computer (its Python in another user's
+profile or on the drive under another letter) is recognised by `pyvenv.cfg` and rebuilt (`logs/venv.log`). With
+uv it is built on the Python on the drive, packages come from uv's cache there: seconds, and on any computer with
+the same drive letter it then just works. With ClubKit next to it, shortcuts and the "Start at Windows sign-in"
+item exist only on a trusted computer (`ClubKit\data\trusted-pcs.txt`) — a club computer gets nothing left behind.
+Paths saved where the drive had another letter (`E:\SynthSocial\Music` in the settings, music of presets and
+clips) are found under this one. Scheduled posts go out only while IndiePulse runs: one that is more than 2 hours
+late (the drive was unplugged) isn't published on the next start but marked `missed_schedule` — Retry publishes it.
+Dependencies: `requirements.txt` says what the app needs, `requirements.lock` the exact tested versions (what gets
+installed; regenerate it after editing `requirements.txt`, see its header).
 
 There are no console windows: IndiePulse lives in the tray. The icon runs two processes —
 the web server and the Huey worker (the one that actually publishes; scheduled posts don't
@@ -21,7 +34,7 @@ start with Windows, **Выход** (stops both; the worker finishes the task in 
 - Closing or killing the tray always takes the server and worker down with it (Windows job
   object), so the port is never left busy; leftovers of old `start.bat` windows are killed on start.
 - Open pages show a banner while the server is unreachable and reload themselves when it's back.
-- `requirements.txt` changes are installed automatically on the next launch (`logs/pip.log`).
+- `requirements.txt` / `requirements.lock` changes are installed automatically on the next launch (`logs/pip.log`).
 - Logs: `logs/launcher.log` (tray), `logs/server.log`, `logs/worker.log` (+ `.prev.log` of the
   previous run), `logs/app.log` (the app itself).
 - Dev: `python -m app.serve` / `python -m app.worker` still run standalone in a console.

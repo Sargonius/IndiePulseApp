@@ -40,6 +40,8 @@ def _maybe_retry_publish(job_id: int, post_id: int, result: str) -> None:
         from app.services.video_editor import TOO_LARGE
         if TOO_LARGE in (post.error_text or ''):
             return  # compression already failed; a rerun would fail the same way
+        if MISSED in (post.error_text or ''):
+            return  # not a failure: waits for the user's Retry
         payload = {}
         if job is not None and job.payload_json:
             try:
@@ -108,6 +110,12 @@ def _publish_news_post_impl(job_id: int, post_id: int) -> str:
                     return 'rescheduled'
         except Exception:
             pass
+
+        if _missed(post):
+            _mark_missed(session, post, job)
+            from loguru import logger
+            logger.warning(f"publish post={post_id} skipped: {post.error_text}")
+            return 'missed'
 
         # Never send the same publication twice (a re-submitted form, a second Shorts batch...)
         import json as _json
@@ -235,6 +243,36 @@ def publish_payload_for(session, post_id: int) -> dict:
 
 STUCK_RUNNING_MIN = 90   # a publish that "runs" this long has died with the worker
 LOST_QUEUED_MIN = 15     # a due post whose queued job hasn't started in this long was lost
+MISSED_AFTER_MIN = 120   # a scheduled post this late isn't published by itself any more (see _missed)
+MISSED = "missed_schedule"
+
+
+def _missed(post, now=None) -> bool:
+    """Due long ago and nobody has said "publish now" since (Publish Now and Retry drop scheduled_at): IndiePulse
+    wasn't running at that time — the drive it lives on was unplugged, the computer off. On the next start Huey
+    would run every overdue task at once and days of posts would go out in one burst; such a post waits for
+    the user instead."""
+    from datetime import datetime as _dt, timedelta as _td
+    target = getattr(post, 'scheduled_at', None)
+    if target is None:
+        return False
+    if getattr(target, 'tzinfo', None) is not None:
+        target = target.replace(tzinfo=None)  # scheduled_at is local naive time, as the UI enters it
+    return target <= (now or _dt.now()) - _td(minutes=MISSED_AFTER_MIN)
+
+
+def _mark_missed(session, post, job=None) -> None:
+    from app.models.models import PostStatusEnum, JobStatusEnum
+    post.status = PostStatusEnum.error
+    post.error_text = (f"{MISSED}: IndiePulse wasn't running at {post.scheduled_at:%d.%m %H:%M} — "
+                       f"Retry publishes it now, or set a new time")
+    session.add(post)
+    for j in [job] if job is not None else find_publish_jobs(session, post.id):
+        if j.status in (JobStatusEnum.queued, JobStatusEnum.running):
+            j.status = JobStatusEnum.error
+            j.last_error = ((j.last_error or '') + f' {MISSED}').strip()
+            session.add(j)
+    session.commit()
 
 
 @huey.periodic_task(crontab(minute='*'))
@@ -282,8 +320,12 @@ def enqueue_due_posts() -> str:
                 Post.scheduled_at <= now,
             ).limit(100)
         ).all()
-        scheduled = 0
+        scheduled = missed = 0
         for post in rows:
+            if _missed(post, now):
+                _mark_missed(session, post)
+                missed += 1
+                continue
             jobs = find_publish_jobs(session, post.id)
             active = [j for j in jobs if j.status in (JobStatusEnum.queued, JobStatusEnum.running)]
             overdue = post.scheduled_at <= now - _td(minutes=LOST_QUEUED_MIN)
@@ -302,7 +344,7 @@ def enqueue_due_posts() -> str:
             session.refresh(job)
             publish_news_post.schedule(args=(job.id, post.id), delay=0)
             scheduled += 1
-        return f"scheduled={scheduled} stuck={len(stuck)}"
+        return f"scheduled={scheduled} missed={missed} stuck={len(stuck)}"
 
 
 def _short_edit(brief) -> dict:
@@ -442,8 +484,9 @@ def render_short(job_id: int, brief_id: int) -> str:
                 if spec is not None:
                     video_edit.render_file(src_abs, out_abs, spec, info)
                 else:
+                    from app.core.paths import on_this_drive
                     music_abs = None
-                    mp = getattr(brief, 'music_path', None)
+                    mp = on_this_drive(getattr(brief, 'music_path', None) or '')
                     if mp and os.path.exists(mp):
                         music_abs = mp
                     _render_short_file(brief, src_abs, out_abs, music_abs, edit)

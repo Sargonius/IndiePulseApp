@@ -1,6 +1,7 @@
-# Pinned to the versions this app is tested with (~= allows bugfix releases only).
-# The launcher (IndiePulse.pyw / tray) reinstalls whenever this file changes; unpinned deps could then break the app
-# (e.g. praw 8.0 removed submit_image/submit_video).
+# What the app needs (~= allows bugfix releases only). Not installed as is: the launcher (IndiePulse.pyw / tray)
+# installs requirements.lock, the exact versions of everything, made from this file — regenerate it after an edit
+# (see its header). `~=` alone wasn't enough: praw 8.0 removed submit_image/submit_video, sqlmodel 0.0.48 rejects
+# naive datetimes.
 fastapi~=0.116.1
 uvicorn[standard]~=0.35.0
 jinja2~=3.1.6

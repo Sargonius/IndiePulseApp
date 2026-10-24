@@ -9,7 +9,7 @@ import winreg
 from ctypes import wintypes
 from pathlib import Path
 
-from app.desktop import ROOT
+from app.desktop import KIT, ROOT
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _k32.CreateJobObjectW.restype = wintypes.HANDLE
@@ -109,6 +109,28 @@ def set_autostart(enabled: bool) -> None:
 
 
 # ── Shortcuts ────────────────────────────────────────────────────────────────
+def _machine_id() -> str:
+	try:
+		with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography", 0,
+							winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+			return str(winreg.QueryValueEx(k, "MachineGuid")[0])
+	except OSError:
+		return ""
+
+
+def trusted_pc() -> bool:
+	"""Not someone else's computer the drive only visits: ClubKit has no list of trusted computers next to IndiePulse,
+	or this one is on it. Its lines are «NAME|MachineGuid», checked by the GUID as ClubKit does (a club computer may
+	well have the home one's name)."""
+	listed = KIT / "data" / "trusted-pcs.txt"
+	try:
+		lines = listed.read_text(encoding="utf-8-sig").splitlines()
+	except OSError:
+		return not KIT.is_dir()
+	me = _machine_id().lower()
+	return bool(me) and any(line.partition("|")[2].strip().lower() == me for line in lines)
+
+
 def _known_folder(ps_name: str) -> Path:
 	out = subprocess.check_output(
 		["powershell", "-NoProfile", "-Command", f"[Environment]::GetFolderPath('{ps_name}')"],

@@ -27,11 +27,12 @@ def _tray_importable() -> bool:
 
 
 def main() -> None:
-	first_run = not deps.venv_python().exists()
-	if first_run:
-		_message("First IndiePulse launch: installing dependencies (a couple of minutes).\n"
+	if not deps.venv_alive():  # the first run, or the first one on this computer
+		_message("First IndiePulse launch on this computer: installing dependencies (a minute or two).\n"
 				 "When it’s done, an icon appears in the tray and the browser opens.")
-	deps.ensure_venv()
+		if not deps.ensure_venv(ROOT / "logs" / "venv.log"):
+			_message("Couldn’t create the Python environment. Details: logs\\venv.log")
+			sys.exit(1)
 	# The tray syncs requirements itself (with a status in the icon); here only make
 	# sure it can start at all.
 	if deps.requirements_changed() and not _tray_importable():
