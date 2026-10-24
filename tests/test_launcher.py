@@ -1,0 +1,163 @@
+"""IndiePulse.exe (launcher/, C#) and the Python side agree about a folder: where its code, runtime, venv and data are,
+what the requirements stamp says, what the folder's named events are called, what still has to be prepared. The exe
+is built here with the C# compiler that is part of Windows (tools/build_launcher.ps1) and asked with --paths, on
+folders made up in tmp; skipped where there is no such compiler."""
+import ctypes
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from app.core import paths
+from app.desktop import apply_update, deps
+
+ROOT = Path(__file__).resolve().parents[1]
+CSC = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe"
+pytestmark = pytest.mark.skipif(os.name != "nt" or not CSC.is_file(), reason="needs the C# compiler of Windows")
+
+
+@pytest.fixture(scope="module")
+def exe(tmp_path_factory):
+    out = tmp_path_factory.mktemp("launcher") / "IndiePulse.exe"
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        str(ROOT / "tools" / "build_launcher.ps1"), "-Out", str(out)],
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return out
+
+
+def _code(root: Path, version: str) -> None:
+    (root / "app").mkdir(parents=True)
+    (root / "app" / "__init__.py").write_text(f'__version__ = "{version}"\n', encoding="utf-8")
+    (root / "requirements.txt").write_text("httpx~=0.28\n", encoding="utf-8")
+    (root / "requirements.lock").write_text("httpx==0.28.1\nanyio==4.9.0\n", encoding="utf-8")
+
+
+@pytest.fixture
+def release(tmp_path, exe):
+    """An unzipped release: IndiePulse.exe, README, the code in lib\\."""
+    home = tmp_path / "IndiePulse"
+    _code(home / "lib", "2.1.0")
+    (home / "README.md").write_text("# IndiePulse\n", encoding="utf-8")
+    shutil.copy(exe, home / "IndiePulse.exe")
+    return home
+
+
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    """The environment both sides see: no INDIEPULSE_DATA of the test run, a LOCALAPPDATA of tmp."""
+    monkeypatch.delenv("INDIEPULSE_DATA", raising=False)
+    monkeypatch.delenv("INDIEPULSE_INSTANCE", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    return tmp_path
+
+
+def ask(home: Path, exe_path: Path | None = None) -> dict:
+    out = home.parent / f"paths-{home.name}.json"
+    r = subprocess.run([str(exe_path or home / "IndiePulse.exe"), "--paths", str(out)], timeout=60)
+    assert r.returncode == 0
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def python_side(monkeypatch, home: Path, root: Path) -> dict:
+    monkeypatch.setattr(paths, "ROOT", root)
+    monkeypatch.setattr(paths, "HOME", home)
+    monkeypatch.setattr(deps, "REQUIREMENTS", root / "requirements.txt")
+    monkeypatch.setattr(deps, "LOCK", root / "requirements.lock")
+    return {"data": str(paths._data_dir()), "key": apply_update.instance_key(home),
+            "requirements_hash": deps._requirements_hash(), "version": apply_update.version_of(home),
+            "root": str(apply_update.code_dir(home)), "venv": str(apply_update.venv_python(home).parent.parent)}
+
+
+def _kit_uv(home: Path) -> bool:
+    return (Path(home.anchor) / "ClubKit" / "tools" / "uv" / "uv.exe").is_file()
+
+
+def test_a_release_folder(release, clean_env, monkeypatch):
+    j = ask(release)
+    py = python_side(monkeypatch, release, release / "lib")
+    assert j["home"] == str(release) and j["release"] is True
+    assert j["root"] == py["root"] == str(release / "lib")
+    assert j["runtime"] == str(release / "runtime") and j["venv"] == py["venv"] == str(release / "runtime" / "venv")
+    assert j["data"] == py["data"]
+    if not (Path(release.anchor) / "ClubKit").is_dir():  # the drive the tests run on: installed, not portable
+        assert j["data"] == str(clean_env / "local" / "IndiePulse") and j["portable"] is False
+    assert j["version"] == py["version"] == "2.1.0"
+    assert j["requirements_hash"] == py["requirements_hash"]
+    assert j["key"] == py["key"] and len(j["key"]) == 16
+    assert j["install_dir"] == str(clean_env / "local" / "Programs" / "IndiePulse")
+    assert j["installed_here"] is False and j["venv_alive"] is False
+    assert j["plan"] == (["python", "venv", "packages"] if _kit_uv(release) else ["uv", "python", "venv", "packages"])
+
+
+def test_portable_and_the_other_data_rules(release, clean_env, monkeypatch):
+    (release / "portable.txt").write_text("", encoding="utf-8")
+    j = ask(release)
+    assert j["portable"] is True and j["data"] == str(release / "data")
+    assert j["data"] == python_side(monkeypatch, release, release / "lib")["data"]
+    (release / "lib" / ".settings.json").write_text("{}", encoding="utf-8")  # a copy that ran with its data there
+    assert ask(release)["data"] == str(release / "lib") == python_side(monkeypatch, release, release / "lib")["data"]
+    monkeypatch.setenv("INDIEPULSE_DATA", str(clean_env / "elsewhere"))
+    assert ask(release)["data"] == str(clean_env / "elsewhere")
+
+
+def test_a_checkout_is_its_own_code_folder(tmp_path, exe, clean_env, monkeypatch):
+    home = tmp_path / "checkout"
+    _code(home, "2.2.0-dev")
+    shutil.copy(exe, home / "IndiePulse.exe")
+    j = ask(home)
+    py = python_side(monkeypatch, home, home)
+    assert j["release"] is False and j["root"] == py["root"] == str(home)
+    assert j["venv"] == py["venv"] == str(home / ".venv") and j["version"] == "2.2.0-dev"
+    assert j["data"] == py["data"] and j["requirements_hash"] == py["requirements_hash"]
+
+
+def test_the_venv_and_what_is_left_to_prepare(release, clean_env, monkeypatch):
+    """deps.venv_alive() and the stamp, read by both: a venv whose base Python is here, and the stamp of these
+    requirements, need nothing more."""
+    base = clean_env / "python"
+    base.mkdir()
+    (base / "python.exe").write_bytes(b"MZ")
+    venv = release / "runtime" / "venv"
+    (venv / "Scripts").mkdir(parents=True)
+    (venv / "Scripts" / "pythonw.exe").write_bytes(b"MZ")
+    (venv / "Scripts" / "python.exe").write_bytes(b"MZ")
+    (venv / "pyvenv.cfg").write_text(f"home = {base}\nversion_info = 3.12.15\n", encoding="utf-8")
+    monkeypatch.setattr(deps, "VENV", venv)
+    monkeypatch.setattr(deps, "_STAMP", venv / "indiepulse-requirements.sha256")
+    j = ask(release)
+    assert j["venv_alive"] is True and deps.venv_alive()
+    no_uv = [] if _kit_uv(release) else ["uv"]
+    assert j["plan"] == no_uv + ["packages"]          # no stamp yet; no uv and no pip to install with
+    (release / "runtime" / "uv").mkdir()
+    (release / "runtime" / "uv" / "uv.exe").write_bytes(b"MZ")
+    assert ask(release)["plan"] == ["packages"]
+    python_side(monkeypatch, release, release / "lib")
+    (venv / "indiepulse-requirements.sha256").write_text(deps._requirements_hash(), encoding="ascii")
+    assert ask(release)["plan"] == [] and not deps.requirements_changed()
+    (base / "python.exe").unlink()                     # an antivirus took the base Python's python.exe
+    j = ask(release)
+    assert j["venv_alive"] is False and not deps.venv_alive() and j["plan"] == ["python", "venv", "packages"]
+
+
+def test_the_same_key_from_a_short_path(release, clean_env):
+    """%TEMP% is often spelt with 8.3 names (C:\\Users\\SARGON~1\\...): the exe's key is the long path's, as Python's."""
+    buf = ctypes.create_unicode_buffer(1024)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(release / "IndiePulse.exe"), buf, 1024) or "~" not in buf.value:
+        pytest.skip("no 8.3 names on this volume")
+    j = ask(release, Path(buf.value))
+    assert j["home"] == str(release) and j["key"] == apply_update.instance_key(release)
+
+
+def test_a_sandboxed_profile_is_followed(release, clean_env, monkeypatch):
+    """LOCALAPPDATA / APPDATA / USERPROFILE pointed elsewhere (a test, a sandbox): the setup's folders go there."""
+    profile = clean_env / "profile"
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    monkeypatch.setenv("APPDATA", str(profile / "AppData" / "Roaming"))
+    j = ask(release)
+    assert j["desktop"] == str(profile / "Desktop")
+    assert j["start_menu"] == str(profile / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs")
+    assert j["install_dir"] == str(clean_env / "local" / "Programs" / "IndiePulse")

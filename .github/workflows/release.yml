@@ -1,6 +1,8 @@
 # A v* tag (pushed by tools/release.ps1) → a GitHub Release with IndiePulse-<version>.zip and latest.json, which
-# every installed IndiePulse checks for (app/services/updates.py). Only GITHUB_TOKEN: gh, which the runners have.
-# Fails before building when the tag isn't v + app/__init__.py's __version__, or when the tests fail.
+# every installed IndiePulse checks for (app/services/updates.py). The zip has IndiePulse.exe in it, built here with
+# the C# compiler of .NET Framework 4.8 (tools/build_launcher.ps1: part of Windows, no SDK). Only GITHUB_TOKEN: gh,
+# which the runners have. Fails before building when the tag isn't v + app/__init__.py's __version__, or when the
+# tests fail.
 name: Release
 
 on:
@@ -45,9 +47,12 @@ jobs:
       - name: pytest
         run: .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
 
+      - name: IndiePulse.exe
+        run: .\tools\build_launcher.ps1 -Out dist\IndiePulse.exe
+
       - name: Build the zip and latest.json
         id: build
-        run: .venv\Scripts\python.exe tools\build_release.py --tag $env:TAG --repo $env:GITHUB_REPOSITORY --out dist
+        run: .venv\Scripts\python.exe tools\build_release.py --tag $env:TAG --repo $env:GITHUB_REPOSITORY --out dist --exe dist\IndiePulse.exe
 
       # gh uploads the assets before it publishes, so the release never shows up without latest.json;
       # an -rc version is a prerelease, which /releases/latest (what IndiePulse checks) skips
