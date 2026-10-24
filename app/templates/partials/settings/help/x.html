@@ -1,0 +1,15 @@
+<div class="instructions">
+	<h4>Setup Instructions</h4>
+	<ol>
+		<li>Open <a href="https://console.x.com" target="_blank" rel="noopener">X Developer Console</a></li>
+		<li>Create app, enable <b>OAuth 2.0</b> with PKCE</li>
+		<li>Set Redirect URI to your callback URL</li>
+		<li>Copy Client ID and Secret</li>
+		<li>For media uploads: also get OAuth 1.0a keys</li>
+		<li>Buy API credits (Billing) — without them X answers 402</li>
+	</ol>
+	<div class="info-box">
+		<b>Scopes needed:</b> tweet.read, tweet.write, users.read, offline.access
+	</div>
+</div>
+<div id="x_billing" hx-get="/api/x/billing" hx-trigger="load" hx-swap="innerHTML"></div>

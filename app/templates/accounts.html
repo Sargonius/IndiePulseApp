@@ -7,7 +7,7 @@
 	     or hand-written (partials/settings/<id>.html: OAuth connect flows, the destinations editor, Updates). A
 	     module that is off: its section is hidden by base.html. -->
 	{% for sec in sections %}
-	{% if sec.form %}{% include "partials/settings_section.html" %}{% else %}{% include sec.section.custom %}{% endif %}
+	{% if sec.section.frame %}{% include "partials/settings_section.html" %}{% else %}{% include sec.section.custom %}{% endif %}
 	{% endfor %}
 </div>
 

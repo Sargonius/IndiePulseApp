@@ -1,62 +1,34 @@
-	<!-- TikTok -->
-	<div class="settings-section" id="section_tiktok">
-		<div class="settings-row">
-			<div class="settings-left">
-				<div class="settings-header">
-					<h3>TikTok</h3>
-					<span class="status-badge" id="status_tiktok">Loading...</span>
-				</div>
-				<div class="info-box" style="margin-bottom:12px;">
-					Works in <b>draft (inbox)</b> mode: videos go straight to your TikTok inbox,
-					then you add sound/caption in the app and publish. No TikTok audit needed for this.
-					Connect and post from <a href="/tiktok">🎵 TikTok</a>: it also shows whether a draft went live and its numbers.
-				</div>
-				<form hx-post="/api/settings/save" hx-target="#tiktok_status" hx-swap="innerHTML">
-					<div class="form-group">
-						<label>Client Key</label>
-						<input type="text" name="tiktok_client_key" value="{{ tiktok_client_key or '' }}" placeholder="sbaw..." />
-					</div>
-					<div class="form-group">
-						<label>
-							Client Secret
-							{% if tiktok_secret_hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ tiktok_secret_hint }}</span>{% endif %}
-						</label>
-						<input type="password" name="tiktok_client_secret" value="" autocomplete="off"
-							placeholder="{% if tiktok_secret_hint %}Secret saved — paste a new one to replace it{% else %}...{% endif %}" />
-					</div>
-					<div class="form-group">
-						<label>Redirect URI (must match the TikTok app setting exactly)</label>
-						<input type="text" name="tiktok_redirect_uri" value="{{ tiktok_redirect_uri or '' }}" />
-					</div>
-					<div class="btn-row">
-						<button type="submit" class="btn btn-primary">Save</button>
-						<button type="button" class="btn" hx-get="/api/accounts/connect/tiktok" hx-target="#tiktok_status" hx-swap="innerHTML">Connect TikTok</button>
-						<button type="button" class="btn" hx-post="/api/tiktok/test" hx-target="#tiktok_status" hx-swap="innerHTML">Test</button>
-					</div>
-				</form>
-				<div id="tiktok_status" class="status-msg"></div>
-				{% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (refreshes automatically)</div>{% endif %}
-			</div>
-			<div class="settings-right">
-				<div class="instructions">
-					<h4>Setup</h4>
-					<ol>
-						<li>Create an app at <a href="https://developers.tiktok.com/" target="_blank">developers.tiktok.com</a></li>
-						<li>Add the <b>Login Kit</b> and <b>Content Posting API</b> products</li>
-						<li>Enable the <b>user.info.basic</b> and <b>video.upload</b> scopes (inbox mode, no audit needed).
-							For views and followers on <a href="/tiktok">🎵 TikTok</a> also <b>video.list</b>, <b>user.info.stats</b>, <b>user.info.profile</b>.</li>
-						<li>In Login Kit, set the Redirect URI — the same one as in the field on the left</li>
-						<li>Copy the Client Key + Secret here → Save → <b>Connect TikTok</b></li>
-					</ol>
-					<div class="info-box">
-						TikTok requires an <b>HTTPS</b> redirect for production apps — for local use, switch the app
-						to <b>Sandbox</b> mode and add your TikTok account to target users,
-						or run an https tunnel (ngrok/cloudflared) and use its URI.
-					</div>
-					<div class="info-box">
-						Without keys the factory keeps saving videos to <code>render/</code> for manual upload.
-					</div>
-				</div>
-			</div>
-		</div>
+{#- Settings → TikTok, its hand-written part (inside partials/settings_section.html): the app's keys + Connect
+    TikTok (/api/settings/save), then the export folder, a form made from the schema. -#}
+<div class="info-box" style="margin-bottom:12px;">
+	Works in <b>draft (inbox)</b> mode: videos go straight to your TikTok inbox,
+	then you add sound/caption in the app and publish. No TikTok audit needed for this.
+	Connect and post from <a href="/tiktok">🎵 TikTok</a>: it also shows whether a draft went live and its numbers.
+</div>
+<form hx-post="/api/settings/save" hx-target="#tiktok_status" hx-swap="innerHTML">
+	<div class="form-group">
+		<label>Client Key</label>
+		<input type="text" name="tiktok_client_key" value="{{ tiktok_client_key or '' }}" placeholder="sbaw..." />
 	</div>
+	<div class="form-group">
+		<label>
+			Client Secret
+			{% if tiktok_secret_hint %}<span class="status-badge" style="color:#3ba55d;">✓ saved {{ tiktok_secret_hint }}</span>{% endif %}
+		</label>
+		<input type="password" name="tiktok_client_secret" value="" autocomplete="off"
+			placeholder="{% if tiktok_secret_hint %}Secret saved — paste a new one to replace it{% else %}...{% endif %}" />
+	</div>
+	<div class="form-group">
+		<label>Redirect URI (must match the TikTok app setting exactly)</label>
+		<input type="text" name="tiktok_redirect_uri" value="{{ tiktok_redirect_uri or '' }}" />
+	</div>
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="button" class="btn" hx-get="/api/accounts/connect/tiktok" hx-target="#tiktok_status" hx-swap="innerHTML">Connect TikTok</button>
+		<button type="button" class="btn" hx-post="/api/tiktok/test" hx-target="#tiktok_status" hx-swap="innerHTML">Test</button>
+	</div>
+</form>
+<div id="tiktok_status" class="status-msg"></div>
+{% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (refreshes automatically)</div>{% endif %}
+<h4 class="ai-sub">Without a token</h4>
+{% with form = forms.tiktok_opts %}{% include "partials/settings_form.html" %}{% endwith %}

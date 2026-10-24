@@ -1,50 +1,27 @@
-	<!-- YouTube -->
-	<div class="settings-section" id="section_youtube">
-		<div class="settings-row">
-			<div class="settings-left">
-				<div class="settings-header">
-					<h3>YouTube</h3>
-					<span class="status-badge" id="status_youtube">Loading...</span>
-				</div>
-				<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
-					<div class="form-group">
-						<label>Client ID</label>
-						<input type="text" name="yt_client_id" value="{{ yt_client_id }}" />
-					</div>
-					<div class="form-group">
-						<label>Client Secret</label>
-						<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" />
-					</div>
-					<div class="form-group">
-						<label>Access Token</label>
-						<input type="text" name="yt_access_token" value="{{ yt_access_token }}" />
-					</div>
-					<div class="form-group">
-						<label>Refresh Token</label>
-						<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" />
-					</div>
-					<div class="btn-row">
-						<button type="submit" class="btn btn-primary">Save</button>
-						<button type="button" class="btn" hx-get="/api/accounts/connect/youtube" hx-target="#yt_status" hx-swap="innerHTML">Connect YouTube</button>
-					</div>
-				</form>
-				<div id="yt_status" class="status-msg"></div>
-				<form hx-post="/api/settings/save" hx-target="#yt_metrics_status" hx-swap="innerHTML">
-					<div class="form-group">
-						<label>Video stats, days after publishing <span style="opacity:.6">(first week every 30 min, then daily; 0 = first week only)</span></label>
-						<input type="number" name="yt_metrics_days" value="{{ yt_metrics_days }}" min="0" max="3650" />
-					</div>
-					<div class="btn-row">
-						<button type="submit" class="btn btn-primary">Save</button>
-					</div>
-				</form>
-				<div id="yt_metrics_status" class="status-msg"></div>
-			</div>
-			<div class="settings-right">
-				<!-- Live checklist: links into your Google Cloud project + ✓/✗ per step (api/youtube.py) -->
-				<div id="yt_setup" hx-get="/api/youtube/setup" hx-trigger="load" hx-swap="innerHTML">
-					<div class="instructions">Checking the YouTube connection…</div>
-				</div>
-			</div>
-		</div>
+{#- Settings → YouTube, its hand-written part (inside partials/settings_section.html): the Google Cloud keys +
+    Connect YouTube (/api/youtube/save), then its options, a form made from the schema. -#}
+<form hx-post="/api/youtube/save" hx-target="#yt_status" hx-swap="innerHTML">
+	<div class="form-group">
+		<label>Client ID</label>
+		<input type="text" name="yt_client_id" value="{{ yt_client_id }}" />
 	</div>
+	<div class="form-group">
+		<label>Client Secret</label>
+		<input type="text" name="yt_client_secret" value="{{ yt_client_secret }}" />
+	</div>
+	<div class="form-group">
+		<label>Access Token</label>
+		<input type="text" name="yt_access_token" value="{{ yt_access_token }}" />
+	</div>
+	<div class="form-group">
+		<label>Refresh Token</label>
+		<input type="text" name="yt_refresh_token" value="{{ yt_refresh_token }}" />
+	</div>
+	<div class="btn-row">
+		<button type="submit" class="btn btn-primary">Save</button>
+		<button type="button" class="btn" hx-get="/api/accounts/connect/youtube" hx-target="#yt_status" hx-swap="innerHTML">Connect YouTube</button>
+	</div>
+</form>
+<div id="yt_status" class="status-msg"></div>
+<h4 class="ai-sub">Options</h4>
+{% with form = forms.youtube_opts %}{% include "partials/settings_form.html" %}{% endwith %}
