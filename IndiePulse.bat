@@ -20,8 +20,10 @@ rem --system: never a .venv - the one here may have come from another computer, 
 set "PY="
 for /f "delims=" %%P in ('"%UV%" python find --system 3.12 2^>NUL') do set "PY=%%P"
 if not defined PY (
+	rem missing, or its python.exe gone (an antivirus took it): --reinstall puts it back from uv's cache;
+	rem --no-bin: no python3.12.exe left in the profile's .local/bin
 	echo Fetching Python 3.12 with uv...
-	"%UV%" python install 3.12 || (pause & exit /b 1)
+	"%UV%" python install --reinstall --no-bin 3.12 || (pause & exit /b 1)
 	for /f "delims=" %%P in ('"%UV%" python find --system 3.12 2^>NUL') do set "PY=%%P"
 )
 if not defined PY (echo uv could not find Python 3.12 & pause & exit /b 1)

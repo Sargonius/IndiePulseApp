@@ -127,3 +127,22 @@ def test_where_the_data_lives(monkeypatch, tmp_path):
     assert paths._data_dir() == code
     monkeypatch.setenv("INDIEPULSE_DATA", str(tmp_path / "elsewhere"))
     assert paths._data_dir() == tmp_path / "elsewhere"
+
+
+def test_python_taken_by_an_antivirus_comes_back(monkeypatch, tmp_path):
+    """Kaspersky deleted the drive's python.exe at reboot (2026-10-24): the .venv is fine, its Python only needs it back."""
+    home = tmp_path / "uv-python"
+    home.mkdir()
+    monkeypatch.setattr(deps, "VENV", _venv(tmp_path / "app", home))  # python.exe missing in home
+    calls = []
+
+    def fake_call(cmd, log, env=None):
+        calls.append(cmd)
+        if cmd[1:3] == ["python", "install"]:
+            (home / "python.exe").write_bytes(b"")
+        return True
+    monkeypatch.setattr(deps, "_call", fake_call)
+    monkeypatch.setattr(deps, "uv", lambda: "uv.exe")
+    assert deps.ensure_venv(tmp_path / "venv.log")
+    assert calls == [["uv.exe", "python", "install", "--reinstall", "--no-bin", "3.12"]]  # no rebuild, no bin shims
+    assert (deps.VENV / "pyvenv.cfg").exists()

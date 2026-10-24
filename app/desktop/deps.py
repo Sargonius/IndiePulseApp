@@ -27,16 +27,29 @@ def venv_python(windowed: bool = False) -> Path:
 	return VENV / "Scripts" / ("pythonw.exe" if windowed else "python.exe")
 
 
+def _venv_home() -> str:
+	"""The base Python's folder that pyvenv.cfg names ('' without a .venv)."""
+	try:
+		cfg = (VENV / "pyvenv.cfg").read_text(encoding="utf-8")
+	except OSError:
+		return ""
+	return next((v.strip() for k, _, v in (line.partition("=") for line in cfg.splitlines()) if k.strip() == "home"), "")
+
+
 def venv_alive() -> bool:
 	"""The .venv runs on this computer. One made on another (its Python in another user's profile, the drive under
 	another letter) still has its python.exe, which only says «No Python at …»: the base Python pyvenv.cfg names
 	must be here."""
-	try:
-		cfg = (VENV / "pyvenv.cfg").read_text(encoding="utf-8")
-	except OSError:
-		return False
-	home = next((v.strip() for k, _, v in (line.partition("=") for line in cfg.splitlines()) if k.strip() == "home"), "")
+	home = _venv_home()
 	return bool(home) and (Path(home) / "python.exe").is_file() and venv_python().is_file()
+
+
+def _repair_python(log_path: Path) -> bool:
+	"""uv's Python lost its python.exe — Kaspersky took the drive's one for a trojan once (2026-10-24) and deleted it
+	at reboot: uv puts it back from its cache. --no-bin: no python3.12.exe left in the profile's .local\\bin."""
+	exe = uv()
+	return bool(exe) and _call([exe, "python", "install", "--reinstall", "--no-bin", PYTHON_VERSION], log_path,
+							   uv_env())
 
 
 def uv() -> str | None:
@@ -100,10 +113,15 @@ def ensure_venv(log_path: Path) -> bool:
 	uv's Python (ClubKit's, on the drive; uv fetches it the first time), otherwise on the Python running this."""
 	if venv_alive():
 		return True
+	home = _venv_home()
+	if home and Path(home).is_dir() and not (Path(home) / "python.exe").is_file() and _repair_python(log_path) \
+			and venv_alive():
+		return True  # its Python is back: the .venv itself was fine
 	shutil.rmtree(VENV, ignore_errors=True)
 	exe = uv()
 	if exe:  # --seed: pip too, for when there is no uv next time; --clear: whatever rmtree couldn't remove
-		return _call([exe, "venv", "--seed", "--clear", "--python", PYTHON_VERSION, str(VENV)], log_path, uv_env())
+		cmd = [exe, "venv", "--seed", "--clear", "--python", PYTHON_VERSION, str(VENV)]
+		return _call(cmd, log_path, uv_env()) or (_repair_python(log_path) and _call(cmd, log_path, uv_env()))
 	# sys.executable is pythonw under pyw.exe; venv needs a real interpreter either way
 	base = Path(sys.executable)
 	py = base.with_name("python.exe") if base.name.lower() == "pythonw.exe" else base
