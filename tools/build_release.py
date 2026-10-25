@@ -151,7 +151,7 @@ def build(tag: str, out: Path, *, repo: str, notes: str, exe: Path, root: Path =
 def main(argv: list[str] | None = None) -> int:
 	ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 	ap.add_argument("--tag", default=os.getenv("GITHUB_REF_NAME", ""))
-	ap.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "Sargonius/IndiePulseNew"))
+	ap.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "Sargonius/IndiePulseApp"))
 	ap.add_argument("--out", type=Path, default=ROOT / "dist")
 	ap.add_argument("--exe", type=Path, default=ROOT / EXE, help="IndiePulse.exe (tools/build_launcher.ps1)")
 	ap.add_argument("--check", action="store_true", help="only check the tag against __version__")

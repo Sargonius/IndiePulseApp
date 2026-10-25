@@ -17,7 +17,7 @@ namespace IndiePulse
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\IndiePulse";
         const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         const string Publisher = "Evgeny Nesterovskiy";
-        const string Website = "https://github.com/Sargonius/IndiePulseNew";
+        const string Website = "https://github.com/Sargonius/IndiePulseApp";
 
         static string StartMenuLink { get { return Path.Combine(Folders.StartMenuPrograms, "IndiePulse.lnk"); } }
         static string DesktopLink { get { return Path.Combine(Folders.Desktop, "IndiePulse.lnk"); } }

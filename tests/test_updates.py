@@ -301,7 +301,7 @@ def test_unpack_takes_a_zip_without_the_folder(work_dir):
 def test_settings_defaults_and_redaction(set_settings):
     from app.core.redact import redact
     c = updates.config()
-    assert c == {"mode": "notify", "repo": "Sargonius/IndiePulseNew", "token": ""}
+    assert c == {"mode": "notify", "repo": "Sargonius/IndiePulseApp", "token": ""}
     set_settings(update_token=TOKEN, update_mode="nonsense")
     assert updates.config()["mode"] == "notify"
     assert TOKEN not in redact(f"GET with {TOKEN}")

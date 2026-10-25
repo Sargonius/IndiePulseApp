@@ -130,7 +130,7 @@ def updates_save(request: Request, update_mode: str = Form(""), update_repo: str
         repo = repo[len("https://github.com/"):].removesuffix(".git").strip("/")
     if repo:
         if not updates.valid_repo(repo):
-            return _panel(request, "The repository is owner/name, e.g. Sargonius/IndiePulseNew.", error=True)
+            return _panel(request, "The repository is owner/name, e.g. Sargonius/IndiePulseApp.", error=True)
         changes["update_repo"] = repo
     if clear_token:
         changes["update_token"] = ""

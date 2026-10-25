@@ -150,7 +150,7 @@ DEFAULTS: Dict[str, Any] = {
     # Updates from GitHub Releases (app/services/updates.py): "off" | "notify" | "auto" (installs when nothing is
     # publishing); the repo; for a private one a fine-grained token, Contents: read-only (redact.py masks *token*)
     "update_mode": "notify",
-    "update_repo": "Sargonius/IndiePulseNew",
+    "update_repo": "Sargonius/IndiePulseApp",
     "update_token": "",
     # Music folders for the video editors, one per line (Settings → Video & music); empty = none yet. Older
     # installs keep the one they had by default (app/services/setup.py).
