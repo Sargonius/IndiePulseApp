@@ -229,7 +229,7 @@ def test_a_kit_on_the_drive_seen_by_the_exe(release, clean_env, monkeypatch):
 
 
 def test_the_same_key_from_a_short_path(release, clean_env):
-    """%TEMP% is often spelt with 8.3 names (C:\\Users\\SARGON~1\\...): the exe's key is the long path's, as Python's."""
+    """%TEMP% is often spelt with 8.3 names (C:\\Users\\GAMEDE~1\\...): the exe's key is the long path's, as Python's."""
     buf = ctypes.create_unicode_buffer(1024)
     if not ctypes.windll.kernel32.GetShortPathNameW(str(release / "IndiePulse.exe"), buf, 1024) or "~" not in buf.value:
         pytest.skip("no 8.3 names on this volume")
