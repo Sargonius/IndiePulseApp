@@ -45,9 +45,11 @@ logs/
 .draft_news.json
 .locks/
 .autoreload
-# the data folder of a portable copy (app/core/paths.py), and the app window's browser profile in a data folder
+# the data folder of a portable copy (app/core/paths.py), and the app window's browser profiles in a data folder
+# (browser\ for Edge, browser-<exe>\ for the default browser: app/desktop/window.py)
 data/
 /browser/
+/browser-*/
 # the updater's downloads, the previous version and its state (app/services/updates.py)
 /updates/
 /.updates/
