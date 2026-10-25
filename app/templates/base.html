@@ -31,6 +31,63 @@
 		document.addEventListener('htmx:afterSwap', e => hide(e.target));
 	})();
   </script>
+  {% if request and request.cookies.get('ip_window') == 'app' %}
+  <script>
+	// IndiePulse's own window (app/desktop/window.py; the cookie: /api/system/app_window). Its browser profile is
+	// signed in nowhere, so links to other sites — a click, a middle-click, window.open() — open in the default
+	// browser instead (/api/system/open_external). Links of this app stay here, the connect flows too.
+	(function () {
+		const SCHEMES = ['http:', 'https:', 'mailto:'];
+		function external(href) {
+			let u;
+			try { u = new URL(href, document.baseURI); } catch (e) { return null; }
+			if (!SCHEMES.includes(u.protocol) || (u.protocol !== 'mailto:' && u.origin === location.origin)) return null;
+			return u.href;
+		}
+		function toast(msg) {
+			const t = document.createElement('div');
+			t.className = 'ip-toast';
+			t.textContent = msg;
+			document.body.appendChild(t);
+			setTimeout(() => t.remove(), 7000);
+		}
+		async function openExternal(url) {
+			try {
+				const r = await fetch('/api/system/open_external', { method: 'POST',
+					headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+				if (!r.ok) {
+					let j = null;
+					try { j = await r.json(); } catch (e) { /* not JSON */ }
+					throw new Error((j && typeof j.detail === 'string' && j.detail) || ('HTTP ' + r.status));
+				}
+			} catch (e) {
+				toast('Couldn’t open the link in your browser: ' + e.message);
+			}
+		}
+		const open = window.open;
+		window.open = function (url, ...rest) {
+			const ext = url ? external(String(url)) : null;
+			if (!ext) return open.call(window, url, ...rest);
+			openExternal(ext);
+			return null;
+		};
+		function onClick(e) {
+			// the lightbox's capture listener (registered earlier) may have taken the click already
+			if (e.defaultPrevented || (e.button !== 0 && e.button !== 1) || !(e.target instanceof Element)) return;
+			const a = e.target.closest('a[href]');
+			if (!a || a.hasAttribute('download')) return;
+			const url = external(a.getAttribute('href'));
+			if (!url) return;
+			e.preventDefault();
+			openExternal(url);
+		}
+		document.addEventListener('DOMContentLoaded', () => {
+			document.addEventListener('click', onClick, true);
+			document.addEventListener('auxclick', onClick, true);
+		});
+	})();
+  </script>
+  {% endif %}
 </head>
 <body class="{{ body_class or '' }}">
 	<header>

@@ -1,17 +1,21 @@
-"""App-level endpoints: restart/autoreload, settings save (per section, from its schema) + status, API health
-check."""
+"""App-level endpoints: restart/autoreload, IndiePulse's window (its mark, its links to other sites), settings save
+(per section, from its schema) + status, API health check."""
 
 from app.services.settings import load_settings
 from app.core import settings_schema
 from app.services import destinations
 from fastapi import APIRouter
 from fastapi import Form
+from fastapi import HTTPException
 from fastapi import Query
 from fastapi import Request
 from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 from loguru import logger
+from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import urlsplit
 from app.routers.api.common import _e
 from app.routers.api.common import settings_back_url
 from app.routers.api.common import templates_api
@@ -75,6 +79,71 @@ def system_autoreload_status():
     import os
     enabled = os.path.exists('.autoreload')
     return HTMLResponse(_render_autoreload_button_html(enabled))
+
+
+# ── IndiePulse's own window (app/desktop/window.py) ─────────────────────────
+# The cookie that marks it. Only the window's own profile ever has it: a tab of the user's browser pointed at
+# 127.0.0.1 doesn't, and nothing changes there. base.html reads it.
+APP_WINDOW_COOKIE = "ip_window"
+_APP_WINDOW_DAYS = 400  # the longest Chrome keeps a cookie; every start of the window sets it again
+_EXTERNAL_SCHEMES = ("http", "https", "mailto")
+_EXTERNAL_MAX = 16384  # a Gmail compose link with a whole letter in it (outreach.js) fits
+
+
+@router.get("/system/app_window")
+def system_app_window(next_page: str = Query("/", alias="next")):
+    """Where the window opens (window.start_url): marks it as IndiePulse's window, then goes on to `next`, a page of
+    this app. Its links to other sites then open in the default browser (base.html → open_external below)."""
+    local = (next_page.startswith("/") and next_page[1:2] not in ("/", "\\")
+             and all(" " < c < "\x7f" for c in next_page))
+    resp = RedirectResponse(next_page if local else "/", status_code=303)
+    resp.set_cookie(APP_WINDOW_COOKIE, "app", max_age=_APP_WINDOW_DAYS * 86400, path="/", samesite="lax",
+                    httponly=True)
+    return resp
+
+
+def external_site(url: str) -> str:
+    """The site of a link open_external opens: its host, or "mailto". ValueError: not such a link — http(s) with a
+    host, or mailto; printable ASCII without spaces or quotes (what a browser makes of a link: it percent-encodes the
+    rest), not too long."""
+    if not url or len(url) > _EXTERNAL_MAX:
+        raise ValueError("no link, or a link too long")
+    if any(not (" " < c < "\x7f") or c == '"' for c in url):
+        raise ValueError("control characters, spaces or quotes in the link")
+    parts = urlsplit(url)  # ValueError too: a broken [IPv6] host
+    scheme = parts.scheme.lower()
+    if scheme not in _EXTERNAL_SCHEMES:
+        raise ValueError("only http, https and mailto links open in the browser")
+    if scheme == "mailto":
+        return "mailto"
+    if not parts.hostname:
+        raise ValueError("a web link without a site")
+    return parts.hostname
+
+
+class ExternalLink(BaseModel):
+    url: str
+
+
+@router.post("/system/open_external")
+def system_open_external(link: ExternalLink):
+    """A link of IndiePulse's window to another site (Discord, PayPal, YouTube Studio…): opened in the default browser
+    (or mail app), where the user is signed in, instead of in the window's profile of its own. Cross-site POSTs never
+    get here (main.py, block_cross_site_writes). Only the site goes to the log."""
+    from app.desktop import window
+    try:
+        site = external_site(link.url)
+    except ValueError as exc:
+        logger.warning(f"open_external refused a link: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        window.open_external(link.url)
+    except OSError as exc:
+        why = exc.strerror or str(exc)  # os.startfile's has the link in str(): not for the log
+        logger.warning(f"open_external couldn't open a link to {site}: {why}")
+        raise HTTPException(status_code=500, detail=f"Windows couldn't open it: {why}")
+    logger.info(f"link to {site} opened in the default browser")
+    return {"ok": True}
 
 
 @router.post("/settings/save")

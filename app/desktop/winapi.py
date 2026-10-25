@@ -35,6 +35,7 @@ CREATE_NO_WINDOW = 0x08000000
 _ERROR_ALREADY_EXISTS = 183
 _JobObjectExtendedLimitInformation = 9
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 
 
 class _BasicLimits(ctypes.Structure):
@@ -56,14 +57,16 @@ class _ExtendedLimits(ctypes.Structure):
 
 class KillOnCloseJob:
 	"""Processes assigned here (and everything they spawn) die when this process dies,
-	however it dies — so a crashed/killed tray never leaves a server holding the port."""
+	however it dies — so a crashed/killed tray never leaves a server holding the port. Only a process started
+	with CREATE_BREAKAWAY_FROM_JOB leaves it: the one that opens a link in the user's browser
+	(window.open_external), which mustn't close with IndiePulse."""
 
 	def __init__(self) -> None:
 		self._handle = _k32.CreateJobObjectW(None, None)
 		if not self._handle:
 			raise ctypes.WinError(ctypes.get_last_error())
 		info = _ExtendedLimits()
-		info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+		info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_BREAKAWAY_OK
 		if not _k32.SetInformationJobObject(self._handle, _JobObjectExtendedLimitInformation,
 				ctypes.byref(info), ctypes.sizeof(info)):
 			raise ctypes.WinError(ctypes.get_last_error())

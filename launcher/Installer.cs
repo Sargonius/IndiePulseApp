@@ -122,12 +122,21 @@ namespace IndiePulse
             KillLeftovers(home, ctx.Log);
         }
 
-        // Processes still running from this folder (its Python, uv) or with its window's browser profile
+        // The browsers the app window may be in (window._APP_MODE), and INDIEPULSE_BROWSER's
+        static readonly string[] Browsers = {
+            "chrome.exe", "msedge.exe", "brave.exe", "vivaldi.exe", "chromium.exe", "browser.exe" };
+
+        // Processes still running from this folder (its Python, uv) or with one of its window's browser profiles
         public static void KillLeftovers(Home home, Log log)
         {
-            string profile = home.BrowserProfile;
-            const string query = "SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process WHERE Name='python.exe' " +
-                "OR Name='pythonw.exe' OR Name='uv.exe' OR Name='msedge.exe' OR Name='chrome.exe' OR Name='IndiePulse.exe'";
+            var names = new List<string> { "python.exe", "pythonw.exe", "uv.exe", Home.ExeName };
+            names.AddRange(Browsers);
+            string forced = (Environment.GetEnvironmentVariable("INDIEPULSE_BROWSER") ?? "").Trim().Trim('"');
+            if (forced.Length > 0 && forced.IndexOfAny(Path.GetInvalidPathChars()) < 0 && File.Exists(forced))
+                names.Add(Path.GetFileName(forced));
+            var where = new List<string>();
+            foreach (string name in names) where.Add("Name='" + name.Replace("\\", "\\\\").Replace("'", "\\'") + "'");
+            string query = "SELECT ProcessId, ExecutablePath, CommandLine FROM Win32_Process WHERE " + string.Join(" OR ", where);
             int me = Process.GetCurrentProcess().Id;
             try
             {
@@ -138,7 +147,7 @@ namespace IndiePulse
                     {
                         int pid = Convert.ToInt32(o["ProcessId"]);
                         string exe = o["ExecutablePath"] as string ?? "", cmd = o["CommandLine"] as string ?? "";
-                        bool ours = Home.Inside(exe, home.Dir) || cmd.IndexOf(profile, StringComparison.OrdinalIgnoreCase) >= 0;
+                        bool ours = Home.Inside(exe, home.Dir) || home.UsesBrowserProfile(cmd);
                         if (!ours || pid == me) continue;
                         try
                         {

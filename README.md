@@ -27,10 +27,13 @@ Questions, bugs, ideas: the [IndiePulse Discord](https://discord.gg/uYHm3aU2W4).
    packages of `requirements.lock` — about 70 MB to download, 250–300 MB on disk, a few minutes, nothing installed
    system-wide (`runtime\` in IndiePulse's folder). If a step fails, it says why in the window, with **Retry** and
    **Open log** (`logs\setup.log` in the data folder).
-5. Then the tray icon appears and IndiePulse opens **in a window of its own**: Edge (or Chrome) in app mode, with a
-   browser profile of IndiePulse's own in the data folder (`browser\`), so it never mixes with your browsing. No Edge
-   or Chrome: the default browser. `INDIEPULSE_BROWSER` (in the environment) picks another Chromium browser's exe,
-   or `default`. A fresh install starts with the setup wizard (*First run* below).
+5. Then the tray icon appears and IndiePulse opens **in a window of its own**: your default browser in app mode when
+   it is Chromium-based (Chrome, Edge, Brave, Vivaldi…), else Edge or Chrome, with a browser profile of IndiePulse's
+   own in the data folder (`browser\` for Edge, `browser-chrome\` and so on for the others), so it never mixes with
+   your browsing. No Chromium browser at all: a tab of the default browser. Links in the window to other sites
+   (Discord, PayPal, YouTube Studio…) open in your default browser, where you are signed in. `INDIEPULSE_BROWSER`
+   (in the environment) picks another Chromium browser's exe for the window, or `default`. A fresh install starts
+   with the setup wizard (*First run* below).
 
 Every later double-click on `IndiePulse.exe` (or its shortcut) starts IndiePulse, or brings its window to the front
 when it runs. When something is wrong with its Python — the folder came from another computer, an antivirus took
