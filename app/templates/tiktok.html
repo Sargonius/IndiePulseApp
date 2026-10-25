@@ -34,27 +34,41 @@
 		<p id="tt_empty" class="muted tt-empty" hidden>No clips yet. Add one of your best Shorts above.</p>
 	</section>
 
+	{%- set r = ctx.region %}
 	<aside class="tt-side">
+		<div class="card tt-region">
+			<label for="tt_region">Target region</label>
+			<select id="tt_region">
+				<option value="" {% if not r %}selected{% endif %}>— pick one —</option>
+				{% for x in ctx.regions %}<option value="{{ x.code }}" {% if r and r.code == x.code %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
+			</select>
+			<span class="muted tt-small">The country the clips aim at: its clock, its language first, its share of viewers. Also in <a href="/accounts#section_tiktok">⚙️ Settings → TikTok</a>.</span>
+		</div>
 		<div class="card tt-clock" id="tt_clock" aria-live="polite"></div>
 		<div class="card tt-book">
 			<h3>The test</h3>
-			<p>Does a Japanese caption bring Japanese viewers to an account from another region? TikTok picks a new clip’s first viewers by the account’s region, the viewers’ language and the clip’s language. Only TikTok knows the weights, so measure.</p>
-			<p><b>It works</b> when Japan gives at least 30% of the viewers across 5–7 clips. Below that the region wins, and the next step is an account with another region.</p>
+			{% if r %}
+			<p>Does {{ r.lang_a }} caption bring viewers from {{ r.place }} to an account from another region? TikTok picks a new clip’s first viewers by the account’s region, the viewers’ language and the clip’s language. Only TikTok knows the weights, so measure.</p>
+			<p><b>It works</b> when {{ r.place }} gives at least 30% of the viewers across 5–7 clips in {{ r.lang_word }}. Below that the account’s region wins, and the next step is an account with another region.</p>
+			{% else %}
+			<p>Does a caption in the target region’s language bring viewers from there to an account from another region? TikTok picks a new clip’s first viewers by the account’s region, the viewers’ language and the clip’s language. Only TikTok knows the weights, so measure.</p>
+			<p><b>It works</b> when the target region gives at least 30% of the viewers across 5–7 clips. Below that the account’s region wins, and the next step is an account with another region. Pick the target region above.</p>
+			{% endif %}
 			<h4>Rules while testing</h4>
 			<ul>
 				<li>One language for the first 10–15 clips. A mixed account muddles who it’s for.</li>
-				<li>At most one clip a day, in Japan’s evening.</li>
+				<li>At most one clip a day, {% if r %}{{ r.evening[0] }}:00–{{ r.evening[1] }}:00 {{ r.at }}{% else %}in the target region’s evening{% endif %}.</li>
 				<li>Don’t upload the same clip twice: repeats get little reach.</li>
 				<li>No VPN. TikTok goes by the SIM’s country, and a VPN only looks suspicious.</li>
 			</ul>
 			<h4>Sound</h4>
-			<p>The app’s trend list shows your own region. See what’s trending in Japan in <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/music/pc/en" target="_blank" rel="noopener">TikTok Creative Center</a> (Trends → Songs, region Japan; free business login), then search the track by name in the app. Or keep the game audio.</p>
+			<p>The app’s trend list shows your own region. See what’s trending {% if r %}in {{ r.place }}{% else %}in the target region{% endif %} in <a href="https://ads.tiktok.com/business/creativecenter/inspiration/popular/music/pc/en" target="_blank" rel="noopener">TikTok Creative Center</a> (Trends → Songs, {% if r %}region {{ r.name }}{% else %}pick the region{% endif %}; free business login), then search the track by name in the app. Or keep the game audio.</p>
 			<h4>Where the numbers come from</h4>
 			<ul>
 				<li><b>Posted yet?</b> TikTok’s status API, checked every 10 minutes (Refresh checks now).</li>
 				<li><b>Views, likes, comments, shares:</b> the <code>video.list</code> scope. Every 30 min for two days, then every 3 hours, then daily.</li>
 				<li><b>Followers:</b> the <code>user.info.stats</code> scope, read every 2 hours with the other networks.</li>
-				<li><b>Viewer countries</b> aren’t in the API: <a href="https://www.tiktok.com/tiktokstudio" target="_blank" rel="noopener">TikTok Studio</a> → the video → Viewers → Locations. Type the Japan share into the clip’s card.</li>
+				<li><b>Viewer countries</b> aren’t in the API: <a href="https://www.tiktok.com/tiktokstudio" target="_blank" rel="noopener">TikTok Studio</a> → the video → Viewers → Locations. Type the share of viewers from {% if r %}{{ r.place }}{% else %}the target region{% endif %} into the clip’s card.</li>
 			</ul>
 			<p class="muted tt-small">The long version: <a href="/guide">📖 Indie marketing playbook</a>.</p>
 		</div>
@@ -96,6 +110,9 @@
 .tt-book h4 { margin:12px 0 4px; font-size:13px; }
 .tt-book p { margin:0 0 6px; }
 .tt-book ul { margin:0; padding-left:18px; display:flex; flex-direction:column; gap:3px; }
+.tt-region { display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.tt-region label { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; }
+.tt-region select { font-size:14px; padding:4px 6px; }
 .tt-clock { font-size:13px; display:flex; flex-direction:column; gap:2px; }
 .tt-clock .tt-jst { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
 .tt-clock .tt-prime { color:#166534; font-weight:600; }

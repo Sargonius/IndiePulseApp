@@ -190,7 +190,9 @@ class TikTokItem(SQLModel, table=True):
     tt_error: Optional[str] = None
     status_checked_at: Optional[datetime] = None
     checks_json: Optional[str] = None          # manual ticks {key: true}
-    jp_share: Optional[float] = None           # % of viewers from the target country
+    # % of viewers from the target region (Settings → TikTok; its top viewer country for a clip in another
+    # language), typed in from TikTok Studio. Named when Japan was the only target; `region_share` in the API
+    jp_share: Optional[float] = None
     history_json: Optional[str] = None         # [[utc iso, views, likes, comments, shares], ...]
     archived: bool = Field(default=False)
     created_at: datetime = Field(default_factory=now_ts)

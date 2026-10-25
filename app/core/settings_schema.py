@@ -25,6 +25,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from app.services import tiktok_regions
+
 TYPES = ("text", "secret", "number", "select", "textarea", "bool", "url")
 
 
@@ -292,12 +294,15 @@ SECTIONS: list[Section] = [
 		elsewhere("reddit_subreddit_ru", _DESTINATIONS, "Subreddit (RU)"),
 	)),
 	Section("tiktok", "TikTok", module="tiktok", custom="partials/settings/tiktok.html", status=True,
-			groups=(("opts", ("tiktok_export_dir",)),), fields=(
+			groups=(("opts", ("tiktok_export_dir",)), ("target", ("tiktok_region",))), fields=(
 		Field("tiktok_client_key", "Client Key", placeholder="sbaw..."),
 		Field("tiktok_client_secret", "Client Secret", "secret"),
 		Field("tiktok_redirect_uri", "Redirect URI (must match the TikTok app setting exactly)", "url"),
 		Field("tiktok_export_dir", "Export folder", blank="default", placeholder="render",
 			  help="without a token, videos for TikTok and Instagram are saved here for a manual upload"),
+		Field("tiktok_region", "Target region", "select", choices=tiktok_regions.choices(), module="tiktok_pipeline",
+			  help="the country the clips on <a href=\"/tiktok\">🎵 TikTok</a> aim at: its clock, its evening, its "
+			  "language first, its share of viewers"),
 		elsewhere("tiktok_want_stats", "🎵 TikTok: the views & followers switch (asks for more scopes on the "
 				  "next connect)", "Ask for stats", "bool"),
 		state("tiktok_access_token", "Connect TikTok"),

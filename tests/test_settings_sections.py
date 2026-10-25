@@ -91,6 +91,19 @@ def test_a_group_of_a_hand_written_section(client, set_settings):
     assert client.post("/api/settings/section/youtube", data={"_group": "nope"}).status_code == 404
 
 
+def test_the_tiktok_target_region_is_a_group_of_the_tiktok_section(client, set_settings):
+    page = client.get("/accounts").text
+    tiktok = page.split('id="section_tiktok"', 1)[1].split('class="settings-section"', 1)[0]
+    assert 'id="sf_tiktok_target"' in tiktok and '<option value="JP"' in tiktok
+    r = client.post("/api/settings/section/tiktok", data={"_group": "target", "tiktok_region": "DE"})
+    assert r.status_code == 200 and load_settings()["tiktok_region"] == "DE"
+    assert client.get("/setup?step=accounts").text.count('id="sf_tiktok_target"') == 1   # the wizard has it too
+    # the pipeline turned off: the TikTok platform's section stays, without the test's region
+    set_settings(modules_disabled=["tiktok_pipeline"])
+    page = client.get("/accounts").text
+    assert 'id="section_tiktok"' in page and 'id="sf_tiktok_target"' not in page
+
+
 def test_unknown_sections_and_sections_without_a_form(client):
     assert client.post("/api/settings/section/nope", data={}).status_code == 404
     assert client.post("/api/settings/section/modules", data={"modules_disabled": "vk"}).status_code == 404

@@ -6,6 +6,11 @@ language → send it to the TikTok inbox → finish it in the app → IndiePulse
 it went live and reads its numbers. The checklist next to each clip is the test's
 playbook.
 
+The test aims at a target region (Settings → TikTok, app/services/tiktok_regions.py):
+its language comes first, its evening is when to post, and the share of viewers from
+it says whether the language beats the account's own region. Until one is picked the
+page names no country.
+
 What TikTok tells, and with which scope:
 - "posted yet?" — /post/publish/status/fetch/ (video.upload, always granted); the
   video id comes with it once the post is public and through moderation;
@@ -23,7 +28,7 @@ import json
 import os
 import re
 import statistics
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Optional
 
@@ -32,21 +37,23 @@ from sqlmodel import Session, select
 
 from app.models.models import (Brief, BriefTypeEnum, Job, JobKindEnum, JobStatusEnum, MetricPoint, PlatformEnum,
                                Post, PostStatusEnum, Project, TikTokItem)
-from app.services import repost, video_edit
+from app.services import languages, repost, tiktok_regions, video_edit
 
-LANGS = ("ja", "en", "ru")
-LANG_NAMES = {"ja": "Japanese", "en": "English", "ru": "Russian"}
-# hashtags a new upload starts with (a Short brings its own, translated)
+# hashtags a new upload starts with (a Short brings its own, translated); a language without a set of its own
+# starts with the English one
 TAG_HINTS = {"ja": "#インディーゲーム #個人開発 #ゲーム開発 #Steam",
              "en": "#indiegame #gamedev #indiedev #Steam",
-             "ru": "#инди #геймдев #индиигры #Steam"}
+             "ru": "#инди #геймдев #индиигры #Steam",
+             "es": "#videojuegos #juegosindie #gamedev #Steam",
+             "pt-br": "#jogosindie #jogos #gamedev #Steam",
+             "fr": "#jeuxvideo #indiegame #gamedev #Steam",
+             "ko": "#인디게임 #게임개발 #게임 #Steam",
+             "zh-hant": "#獨立遊戲 #遊戲開發 #遊戲 #Steam"}
 BASE_SCOPES = ("user.info.basic", "video.upload")
 STATS_SCOPES = ("video.list", "user.info.stats", "user.info.profile")
 CAPTION_LIMIT = 4000        # the TikTok app's caption limit (unofficial, corroborated)
 LENGTH_RANGE = (12, 25)     # seconds, the playbook's range (guide.html)
-JP_EVENING = (19, 23)       # hours of the day in Japan when TikTok is busiest there
-JST = timezone(timedelta(hours=9))
-TARGET_SHARE = 30.0         # % of viewers from Japan that says the language beats the geo
+TARGET_SHARE = 30.0         # % of viewers from the target region that says the language beats the account's region
 SHARE_SAMPLE = 5            # clips with a typed-in share before the test says anything
 ACCOUNT_KEY = "tiktok:account"
 MAX_HISTORY = 400
@@ -187,6 +194,87 @@ def default_texts(brief) -> dict:
 
 def full_caption(item) -> str:
     return "\n\n".join(p for p in ((item.caption or "").strip(), (item.tags or "").strip()) if p)
+
+
+def _cfg(cfg: Optional[dict]) -> dict:
+    if cfg is not None:
+        return cfg
+    from app.services.settings import load_settings
+    return load_settings()
+
+
+def caption_langs(cfg: Optional[dict] = None) -> list[str]:
+    """The caption languages the page offers, the default first: the target region's, then the languages of
+    Settings, then English."""
+    cfg = _cfg(cfg)
+    region = tiktok_regions.of(cfg)
+    out: list[str] = []
+    for code in ([region.lang] if region else []) + languages.configured(cfg) + ["en"]:
+        if code not in out:
+            out.append(code)
+    return out
+
+
+def known_lang(lang, cfg: Optional[dict] = None) -> Optional[str]:
+    """A caption language ('PT_BR' → 'pt-br'): a code of languages.NAMES or one the page offers; None otherwise."""
+    code = languages.normalize_code(lang)
+    return code if code and (code in languages.NAMES or code in caption_langs(cfg)) else None
+
+
+def tag_hint(lang: str) -> str:
+    return TAG_HINTS.get(lang) or TAG_HINTS["en"]
+
+
+# Letters tell scripts apart, not languages. text_overlay.detect_script knows kana/kanji, Cyrillic and Latin; the
+# scripts it doesn't (Hangul, Thai…) are told here, and kana apart from Chinese characters (kanji with kana is
+# Japanese, so kana comes first). SCRIPTS: what each language is written in; a language that isn't there can't be
+# checked by its letters.
+_SCRIPT_RE = (("kana", re.compile(r"[\u3040-\u30ff]")),
+              ("hangul", re.compile(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af]")),
+              ("han", re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")),
+              ("thai", re.compile(r"[\u0e00-\u0e7f]")),
+              ("arabic", re.compile(r"[\u0600-\u06ff]")),
+              ("hebrew", re.compile(r"[\u0590-\u05ff]")),
+              ("devanagari", re.compile(r"[\u0900-\u097f]")),
+              ("greek", re.compile(r"[\u0370-\u03ff]")))
+SCRIPTS = {"ja": ("kana", "han"), "zh": ("han",), "zh-hans": ("han",), "zh-hant": ("han",), "ko": ("hangul",),
+           "th": ("thai",), "ar": ("arabic",), "he": ("hebrew",), "hi": ("devanagari",), "el": ("greek",),
+           **{c: ("cyr",) for c in ("ru", "uk", "bg", "kk")},
+           **{c: ("lat",) for c in ("en", "de", "fr", "es", "pt", "pt-br", "it", "pl", "tr", "nl", "sv", "cs", "fi",
+                                    "da", "no", "hu", "ro", "id", "vi")}}
+SCRIPT_NAMES = {"kana": "kana", "hangul": "Hangul", "han": "Chinese characters", "thai": "Thai letters",
+                "arabic": "Arabic letters", "hebrew": "Hebrew letters", "devanagari": "Devanagari",
+                "greek": "Greek letters", "cyr": "Cyrillic", "lat": "Latin letters"}
+
+
+def script(text: str) -> Optional[str]:
+    """The script a text is written in: kana, Hangul, Chinese characters, Thai… win over Latin ("Steam" in a
+    Japanese line is still Japanese); else Cyrillic or Latin, whichever has more letters; None without letters."""
+    from app.services.text_overlay import detect_script
+    for name, rx in _SCRIPT_RE:
+        if rx.search(text or ""):
+            return name
+    return detect_script(text or "")
+
+
+def text_fit(text: str, lang: str, langs=()) -> tuple[str, str]:
+    """How a text fits `lang` by its letters, among the languages a caption could be in (`langs`): ("ok", "") —
+    in its script, and no other of `langs` writes that one; ("unsure", why) — in its script, but so is another of
+    `langs` (German and English are both Latin), or `lang`'s script isn't known; ("off", what it reads as)."""
+    mine = SCRIPTS.get(lang)
+    if not mine:
+        return "unsure", f"Can’t check {languages.name(lang)} by its letters. Check it yourself."
+    seen = script(text)
+    if seen is None:
+        return "off", "No letters in it"
+    if seen not in mine:
+        users = {c for c in langs if seen in SCRIPTS.get(c, ())} or {c for c, s in SCRIPTS.items() if seen in s}
+        return "off", f"Reads as {languages.name(users.pop())}" if len(users) == 1 else f"In {SCRIPT_NAMES[seen]}"
+    other = next((c for c in langs if c != lang and seen in SCRIPTS.get(c, ())), None)
+    if other:
+        return "unsure", f"{SCRIPT_NAMES[seen].capitalize()}: {languages.name(lang)} or {languages.name(other)}? " \
+                         f"Check it yourself."
+    return "ok", ""
 
 
 def _translate_lines(lines: list[str], target: str) -> list[str]:
@@ -376,13 +464,13 @@ def _translate_caption(item, lang: str, notes: list) -> None:
         notes.append(f"Caption not translated: {exc}")
 
 
-def _frame_lines_in(brief, lang: str, notes: list) -> Optional[list[str]]:
-    """The Short's frame text translated into `lang`; None when it already is (or has none)."""
+def _frame_lines_in(brief, lang: str, langs: list, notes: list) -> Optional[list[str]]:
+    """The Short's frame text translated into `lang`; None when it surely already is (or has none)."""
     if brief is None or not _rel(brief.media_path):
         return None
     texts = [o.get("text") or "" for o in brief_spec(brief)["overlays"]]
     joined = "\n".join(texts)
-    if not joined.strip() or repost.detect_lang(joined) == lang:
+    if not joined.strip() or text_fit(joined, lang, langs)[0] == "ok":
         return None
     try:
         return _translate_lines(texts, lang)
@@ -396,19 +484,21 @@ def active_item_for(session: Session, brief_id: int):
                         .order_by(TikTokItem.id.desc())).first()
 
 
-def create_from_brief(session: Session, brief, lang: str) -> tuple[TikTokItem, list[str]]:
+def create_from_brief(session: Session, brief, lang: str, cfg: Optional[dict] = None) -> tuple[TikTokItem, list[str]]:
     """A Short into the pipeline: caption and frame text translated, TikTok version
-    prepared. A Short already in the pipeline returns its item."""
+    prepared. A Short already in the pipeline returns its item. An unknown `lang` is
+    the page's default (caption_langs)."""
     existing = active_item_for(session, brief.id)
     if existing is not None:
         return existing, []
-    lang = lang if lang in LANGS else "ja"
+    cfg = _cfg(cfg)
+    lang = known_lang(lang, cfg) or caption_langs(cfg)[0]
     texts = default_texts(brief)
     item = TikTokItem(brief_id=brief.id, source="short", lang=lang, caption=texts["caption"], tags=texts["tags"])
     notes: list[str] = []
     if texts["lang"] != lang:
         _translate_caption(item, lang, notes)
-    overlays = _frame_lines_in(brief, lang, notes)
+    overlays = _frame_lines_in(brief, lang, caption_langs(cfg), notes)
     try:
         prepare_video(session, item, brief, overlays=overlays)
     except (PipelineError, video_edit.EditError) as exc:
@@ -419,11 +509,13 @@ def create_from_brief(session: Session, brief, lang: str) -> tuple[TikTokItem, l
     return item, notes
 
 
-def create_from_upload(session: Session, rel: str, project_id: Optional[int], lang: str) -> TikTokItem:
+def create_from_upload(session: Session, rel: str, project_id: Optional[int], lang: str,
+                       cfg: Optional[dict] = None) -> TikTokItem:
     """A dropped video (already uploaded to media/) into the pipeline, on a new Brief."""
     from app.services import shorts_upload
     rel = shorts_upload.uploaded_rel(rel)
-    lang = lang if lang in LANGS else "ja"
+    cfg = _cfg(cfg)
+    lang = known_lang(lang, cfg) or caption_langs(cfg)[0]
     stem = os.path.splitext(re.sub(r"^short_[0-9a-f]{12}_", "", rel))[0].replace("_", " ").strip()
     project = session.get(Project, project_id) if project_id else None
     brief = Brief(user_id=1, type=BriefTypeEnum.video, vertical_916=True, media_path=rel,
@@ -431,7 +523,7 @@ def create_from_upload(session: Session, rel: str, project_id: Optional[int], la
     session.add(brief)
     session.commit()
     session.refresh(brief)
-    item = TikTokItem(brief_id=brief.id, source="upload", lang=lang, caption="", tags=TAG_HINTS[lang])
+    item = TikTokItem(brief_id=brief.id, source="upload", lang=lang, caption="", tags=tag_hint(lang))
     try:
         prepare_video(session, item, brief)
     except (PipelineError, video_edit.EditError) as exc:
@@ -443,20 +535,23 @@ def create_from_upload(session: Session, rel: str, project_id: Optional[int], la
     return item
 
 
-def set_lang(session: Session, item, lang: str) -> list[str]:
+def set_lang(session: Session, item, lang: str, cfg: Optional[dict] = None) -> list[str]:
     """Switch the clip to another language: caption, hashtags and frame text."""
-    if lang not in LANGS:
+    cfg = _cfg(cfg)
+    code = known_lang(lang, cfg)
+    if code is None:
         raise PipelineError("bad_lang", f"unknown language: {lang}")
+    lang = code
     post = session.get(Post, item.post_id) if item.post_id else None
     notes: list[str] = []
-    if item.source == "upload" and item.tags == TAG_HINTS.get(item.lang):
-        item.tags = TAG_HINTS[lang]  # the starter hashtags: the other language's set
+    if item.source == "upload" and item.tags == tag_hint(item.lang):
+        item.tags = tag_hint(lang)  # the starter hashtags: the other language's set
     item.lang = lang
     _translate_caption(item, lang, notes)
     if not _locked(item, post):
         spec = item_spec(item)
         texts = "\n".join(o.get("text") or "" for o in (spec or {}).get("overlays") or [])
-        if texts.strip() and repost.detect_lang(texts) != lang:
+        if texts.strip() and text_fit(texts, lang, caption_langs(cfg))[0] != "ok":
             try:
                 translate_screen_text(session, item, post)
             except Exception as exc:
@@ -484,7 +579,8 @@ def _touch(session: Session, item) -> None:
 
 
 def update(session: Session, item, data: dict) -> None:
-    """Edits from the card: caption, tags, ticks, the Japan share, a file from ✂ Edit."""
+    """Edits from the card: caption, tags, ticks, the share of viewers from the target region (`region_share`;
+    `jp_share`, its old name, from a page loaded before), a file from ✂ Edit."""
     post = session.get(Post, item.post_id) if item.post_id else None
     if "caption" in data:
         item.caption = str(data.get("caption") or "")[:CAPTION_LIMIT]
@@ -496,8 +592,9 @@ def update(session: Session, item, data: dict) -> None:
             if key in CHECK_KEYS:
                 ticks[key] = bool(on)
         item.checks_json = json.dumps({k: True for k, v in ticks.items() if v})
-    if "jp_share" in data:
-        raw = data.get("jp_share")
+    share_key = next((k for k in ("region_share", "jp_share") if k in data), None)
+    if share_key:
+        raw = data.get(share_key)
         if raw in (None, ""):
             item.jp_share = None
         else:
@@ -750,8 +847,9 @@ def adopt_factory_posts(session: Session, cfg: dict) -> int:
             mine = own.get("text_en") or own.get("text_ru") or ""
         caption = clean_caption(mine) or texts["caption"]
         media = _rel(publish_payload_for(session, post.id).get("media_rel")) or _rel(brief.media_vertical_path)
+        # the destination's language when there is one: letters alone take a German caption for English
         item = TikTokItem(brief_id=brief.id, post_id=post.id, source="factory",
-                          lang=repost.detect_lang(caption) or texts["lang"], caption=caption,
+                          lang=dest["lang"] if dest else repost.detect_lang(caption) or texts["lang"], caption=caption,
                           tags=clean_tags(own.get("tags_json") or "") or texts["tags"], video_rel=media,
                           open_id=connection(cfg)["open_id"] or None)
         session.add(item)
@@ -845,7 +943,8 @@ def sync(session: Session, cfg: Optional[dict] = None, force: bool = False, in_w
 
 # ── the checklist ────────────────────────────────────────────────────────────
 
-# key, stage, label ({lang} = the clip's language), filled in automatically
+# key, stage, label ({lang} = the clip's language; {lo}, {hi}, {at}, {short} = the target region's), filled in
+# automatically
 CHECKS = [
     ("screen_text", "prep", "On-screen text in {lang}", True),
     ("no_music", "prep", "No music baked in", True),
@@ -855,11 +954,12 @@ CHECKS = [
     ("sound", "app", "Sound picked in the app", False),
     ("caption_pasted", "app", "Caption pasted", False),
     ("cover", "app", "Cover frame shows the hook text", False),
-    ("posted_time", "app", "Posted 19:00–23:00 Japan time", True),
+    ("posted_time", "app", "Posted {lo}:00–{hi}:00 {at}", True),
     ("replies", "after", "Answered the first comments within an hour", False),
-    ("geo", "after", "Japan share typed in, after 2–3 days", True),
+    ("geo", "after", "{short} share typed in, after 2–3 days", True),
 ]
 CHECK_KEYS = {c[0] for c in CHECKS}
+GEO_ELSEWHERE = "Top viewer country checked, after 2–3 days"   # a clip not in the target region's language
 HINTS = {
     "screen_text": "The text in the frame is the hook, and the strongest language signal TikTok reads.",
     "no_music": "Add the sound in the TikTok app. The API can’t attach native sounds, and a baked-in track "
@@ -867,13 +967,17 @@ HINTS = {
     "length": "The playbook aims for 12–25 s. Longer is fine when it holds the viewer.",
     "caption": "Links in TikTok captions aren’t clickable. Name the game and say it’s on Steam.",
     "tags": "For example: {hint}",
-    "sound": "A track trending in Japan (Creative Center, region Japan), or keep the game audio. "
-             "The app’s own trends list shows your region, not Japan.",
+    "sound": "A track trending in {place} (Creative Center, region {name}), or keep the game audio. "
+             "The app’s own trends list shows your region, not {place}.",
     "caption_pasted": "Drafts arrive without a caption: copy it here and paste it in the app.",
     "cover": "Pick a frame where the on-screen text reads at a glance.",
-    "posted_time": "TikTok tests a clip on its first viewers within hours, so post when Japan is awake.",
+    "posted_time": "TikTok tests a clip on its first viewers within hours, so post when {place} is awake.",
     "replies": "Early replies keep the clip in the test pool longer.",
     "geo": "TikTok Studio → the video → Viewers → Locations. The API doesn’t give countries.",
+}
+NO_REGION_HINTS = {  # no target region picked yet: no country to name
+    "sound": "A track trending in the target region (Creative Center), or keep the game audio. "
+             "The app’s own trends list shows your region.",
 }
 
 
@@ -889,34 +993,55 @@ def _hashtags(tags: str) -> list[str]:
     return re.findall(r"#[^\s#,]+", tags or "")
 
 
-def checks(item, post, info: dict, spec: Optional[dict]) -> list[dict]:
+def _tag_example(lang: str) -> str:
+    """The hashtag hint: the language's starter set; the English one, plus one in a script of its own if it has one."""
+    if lang in TAG_HINTS or SCRIPTS.get(lang, ("lat",)) == ("lat",):
+        return tag_hint(lang)
+    return f"{tag_hint(lang)}, plus one in {languages.name(lang)}"
+
+
+_FIT_STATE = {"ok": "ok", "unsure": "todo", "off": "warn"}
+
+
+def checks(item, post, info: dict, spec: Optional[dict], region=None, langs=()) -> list[dict]:
     """Every checklist row: state ok | warn | todo | na, a note, an optional fix action.
-    A tick from the card turns any row that isn't ok into ok (checked by hand)."""
-    name = LANG_NAMES.get(item.lang, item.lang)
+    A tick from the card turns any row that isn't ok into ok (checked by hand). `region` is
+    the target region (None: not picked yet, so no posting-time row); `langs` the languages a
+    caption could be in (caption_langs): letters that two of them share can't tell them apart,
+    so the language rows say "check it yourself" there instead of warning."""
+    name = languages.name(item.lang)
+    langs = list(langs) + [item.lang]
     ticks = _ticks(item)
     st = stage(item, post)
     live = st == "live"
+    fmt = {"lang": name, "hint": _tag_example(item.lang)}
+    if region is not None:
+        fmt.update(lo=region.evening[0], hi=region.evening[1], at=region.at, short=region.short,
+                   place=region.place, name=region.name)
     rows = []
     for key, where, label, auto in CHECKS:
-        if key == "posted_time" and item.lang != "ja":
+        if key == "posted_time" and region is None:
             continue
-        row = {"key": key, "stage": where, "label": label.format(lang=name), "auto": auto,
-               "hint": HINTS[key].format(hint=TAG_HINTS.get(item.lang, "")), "state": "todo", "note": "",
+        if key == "geo" and (region is None or item.lang != region.lang):
+            label = GEO_ELSEWHERE
+        hint = (NO_REGION_HINTS.get(key) if region is None else None) or HINTS[key]
+        row = {"key": key, "stage": where, "label": label.format(**fmt), "auto": auto,
+               "hint": hint.format(**fmt), "state": "todo", "note": "",
                "action": None, "ticked": bool(ticks.get(key))}
-        if key == "geo" and item.lang != "ja":
-            row["label"] = "Top viewer country checked, after 2–3 days"
         if key == "screen_text":
             if spec is None:
                 row["note"] = "Can’t see the text of this file. Check it yourself."
             else:
                 texts = "\n".join(o.get("text") or "" for o in spec.get("overlays") or [])
+                fit, why = text_fit(texts, item.lang, langs) if texts.strip() else ("", "")
                 if not texts.strip():
                     row.update(state="warn", note="No text in the frame. Add a hook line with ✂ Edit.")
-                elif repost.detect_lang(texts) != item.lang:
-                    row.update(state="warn", note=f"The frame says: “{texts.splitlines()[0][:60]}”",
-                               action="screen_text")
-                else:
+                elif fit == "ok":
                     row.update(state="ok", note=texts.splitlines()[0][:60])
+                else:
+                    said = f"The frame says: “{texts.splitlines()[0][:60]}”"
+                    row.update(state=_FIT_STATE[fit], note=f"{said}. {why}" if fit == "unsure" else said,
+                               action="screen_text")
         elif key == "no_music":
             if spec is None:
                 row["note"] = "A file made elsewhere: make sure it has no music in it."
@@ -938,28 +1063,23 @@ def checks(item, post, info: dict, spec: Optional[dict]) -> list[dict]:
                 row.update(state="warn", note="Empty")
             elif _LINK.search(text):
                 row.update(state="warn", note="Has a link")
-            elif repost.detect_lang(text) != item.lang:
-                row.update(state="warn", note=f"Reads as {LANG_NAMES.get(repost.detect_lang(text) or '', 'something else')}")
             else:
-                row["state"] = "ok"
+                fit, why = text_fit(text, item.lang, langs)
+                row.update(state=_FIT_STATE[fit], note=why)
         elif key == "tags":
             tags = _hashtags(item.tags)
-            native = [t for t in tags if repost.detect_lang(t.lstrip("#")) in (item.lang, None)]
+            mine = SCRIPTS.get(item.lang)
             if not 3 <= len(tags) <= 5:
                 row.update(state="warn", note=f"{len(tags)} hashtags")
-            elif item.lang == "ja" and not any(repost.detect_lang(t.lstrip("#")) == "ja" for t in tags):
-                row.update(state="warn", note="None in Japanese")
-            elif not native:
-                row.update(state="warn", note=f"None in {name}")
+            elif mine and not any(script(t.lstrip("#")) in mine for t in tags):
+                row.update(state="warn", note=f"None in {name}")   # #Steam is one in Latin letters
             else:
                 row.update(state="ok", note=f"{len(tags)} hashtags")
         elif key == "posted_time":
             when = post.published_at if (live and post is not None) else None
             if when is not None:
-                jst = when.replace(tzinfo=timezone.utc).astimezone(JST)
-                lo, hi = JP_EVENING
-                row.update(state="ok" if lo <= jst.hour < hi else "warn",
-                           note=f"{'≈' if not item.video_id else ''}{jst:%H:%M} in Japan")
+                row.update(state="ok" if region.in_evening(when) else "warn",
+                           note=f"{'≈' if not item.video_id else ''}{region.local(when):%H:%M} {region.at}")
         elif key == "geo":
             if item.jp_share is not None:
                 row.update(state="ok", note=f"{item.jp_share:g}%")
@@ -1005,8 +1125,10 @@ def _yt_views(session: Session, brief_ids: list[int]) -> dict:
     return out
 
 
-def item_state(session: Session, item, yt_views: Optional[dict] = None, projects: Optional[dict] = None) -> dict:
+def item_state(session: Session, item, yt_views: Optional[dict] = None, projects: Optional[dict] = None,
+               cfg: Optional[dict] = None) -> dict:
     from app.services.publications import engagement, fmt_when
+    cfg = _cfg(cfg)
     post = session.get(Post, item.post_id) if item.post_id else None
     brief = session.get(Brief, item.brief_id)
     rel = _rel(item.video_rel) if not item.render_id else None
@@ -1042,6 +1164,7 @@ def item_state(session: Session, item, yt_views: Optional[dict] = None, projects
     yt = (yt_views if yt_views is not None else _yt_views(session, [item.brief_id])).get(item.brief_id)
     return {
         "id": item.id, "brief_id": item.brief_id, "source": item.source, "lang": item.lang,
+        "lang_name": languages.name(item.lang),
         "title": (brief.title if brief else "") or "", "project": projects.get(getattr(brief, "project_id", None), ""),
         "caption": item.caption or "", "tags": item.tags or "", "full_caption": full_caption(item),
         "caption_limit": CAPTION_LIMIT,
@@ -1060,8 +1183,8 @@ def item_state(session: Session, item, yt_views: Optional[dict] = None, projects
         "status_checked": fmt_when(item.status_checked_at) if item.status_checked_at else "",
         "video_id": item.video_id or "", "metrics": metrics, "history": points,
         "views_24h": _views_at(points, 24), "views_1h": _views_at(points, 1),
-        "jp_share": item.jp_share, "yt_views": yt,
-        "checks": checks(item, post, info, spec),
+        "region_share": item.jp_share, "yt_views": yt,
+        "checks": checks(item, post, info, spec, tiktok_regions.of(cfg), caption_langs(cfg)),
     }
 
 
@@ -1087,10 +1210,13 @@ def candidates(session: Session, limit: int = 24) -> list[dict]:
     return rows[:limit]
 
 
-def summary(states: list[dict], follower: dict) -> dict:
+def summary(states: list[dict], follower: dict, region=None) -> dict:
+    """The tiles over the list. The share of viewers from the target region counts the live clips in its
+    language (the others' typed-in share is their top country's); none until a region is picked."""
     live = [s for s in states if s["stage"] == "live"]
     views = [s["metrics"]["views"] for s in live if s.get("metrics") and isinstance(s["metrics"].get("views"), int)]
-    shares = [s["jp_share"] for s in live if s.get("jp_share") is not None and s["lang"] == "ja"]
+    shares = [s["region_share"] for s in live
+              if region is not None and s.get("region_share") is not None and s["lang"] == region.lang]
     first = next((s["post"]["published_iso"] for s in sorted(live, key=lambda s: s["post"]["published_iso"])
                   if s["post"]["published_iso"]), "")
     vals, days = follower.get("values") or [], follower.get("days") or []
@@ -1104,8 +1230,8 @@ def summary(states: list[dict], follower: dict) -> dict:
         "ready": sum(s["stage"] in ("ready", "rendering") for s in states),
         "views_total": sum(views) if views else None,
         "views_median": int(statistics.median(views)) if views else None,
-        "jp_avg": round(sum(shares) / len(shares), 1) if shares else None, "jp_n": len(shares),
-        "jp_needed": SHARE_SAMPLE, "target_share": TARGET_SHARE,
+        "share_avg": round(sum(shares) / len(shares), 1) if shares else None, "share_n": len(shares),
+        "share_needed": SHARE_SAMPLE, "target_share": TARGET_SHARE,
         "followers_gained": gained,
     }
 
@@ -1120,14 +1246,14 @@ def state(session: Session, cfg: dict) -> dict:
             _sync_upload_brief(session, item)
     projects = {p.id: p.name for p in session.exec(select(Project)).all()}
     yt = _yt_views(session, [i.brief_id for i in items])
-    states = [item_state(session, i, yt, projects) for i in items]
+    states = [item_state(session, i, yt, projects, cfg) for i in items]
     acct = account(session, cfg)
     follower = follower_series(session)
     if acct.get("follower_count") is not None and not follower["values"]:
         follower = {"days": [datetime.utcnow().date().isoformat()], "values": [acct["follower_count"]]}
     return {
         "connection": connection(cfg), "account": acct, "followers": follower,
-        "items": states, "summary": summary(states, follower),
+        "items": states, "summary": summary(states, follower, tiktok_regions.of(cfg)),
     }
 
 
@@ -1135,10 +1261,12 @@ def page_context(session: Session, cfg: dict) -> dict:
     projects = [{"id": p.id, "name": p.name} for p in session.exec(select(Project).order_by(Project.sort_order,
                                                                                             Project.id)).all()
                 if (p.status or "") != "archived"]
+    region = tiktok_regions.of(cfg)
     return {
         **state(session, cfg),
         "candidates": candidates(session),
         "projects": projects,
-        "langs": [{"key": k, "name": LANG_NAMES[k]} for k in LANGS],
-        "jp_evening": list(JP_EVENING),
+        "langs": [{"key": c, "name": languages.name(c), "tags": tag_hint(c)} for c in caption_langs(cfg)],
+        "region": region.view() if region else None,   # None: not picked yet
+        "regions": [{"code": code, "name": name} for code, name in tiktok_regions.choices() if code],
     }

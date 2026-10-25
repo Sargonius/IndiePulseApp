@@ -1,5 +1,6 @@
 """/tiktok pipeline: TikTok version of a Short, sending, going live, numbers, checklist."""
 import json
+import re
 from datetime import datetime, timedelta
 
 import pytest
@@ -7,13 +8,14 @@ from sqlmodel import select
 
 from app.models.models import Brief, Job, Post, PostStatusEnum, TikTokItem
 from app.services import tiktok_pipeline as tp
-from app.services import video_edit
+from app.services import tiktok_regions, video_edit
 
 CONNECTED = {"tiktok_client_key": "k", "tiktok_client_secret": "s", "tiktok_refresh_token": "r",
              "tiktok_access_token": "a", "tiktok_token_expires_at": 9_999_999_999,
              "tiktok_scope": "user.info.basic,video.upload,video.list,user.info.stats,user.info.profile",
              "tiktok_open_id": "acct1"}
 VID = str((1_760_000_000 << 32) + 12345)   # a video id posted at unix 1760000000 (2025-10-09 08:53 UTC)
+JP, US, DE = (tiktok_regions.get(c) for c in ("JP", "US", "DE"))
 
 
 @pytest.fixture(autouse=True)
@@ -55,11 +57,12 @@ def scheduled(monkeypatch):
 def no_translate(monkeypatch):
     calls = []
 
-    def fake(fields, target):
+    def fake(fields, target):   # another language: the caption marked, the hashtags as they were
         calls.append((dict(fields), target))
-        tag = {"ja": "#インディーゲーム #ゲーム開発 #Steam", "en": "#indiegame", "ru": "#инди"}[target]
-        return {"title": "", "desc": {"ja": "護衛ミッション", "en": "Escort mission", "ru": "Конвой"}[target]
-                if fields.get("desc") else "", "tags": tag if fields.get("tags") else "", "provider": "test"}
+        tag = {"ja": "#インディーゲーム #ゲーム開発 #Steam", "en": "#indiegame", "ru": "#инди"}.get(target, fields.get("tags"))
+        desc = {"ja": "護衛ミッション", "en": "Escort mission", "ru": "Конвой"}.get(target, f"[{target}] Escort mission")
+        return {"title": "", "desc": desc if fields.get("desc") else "", "tags": tag if fields.get("tags") else "",
+                "provider": "test"}
     monkeypatch.setattr(tp.repost, "translate", fake)
     return calls
 
@@ -317,8 +320,13 @@ def test_factory_drafts_after_the_connect_are_adopted(session, short):
 
 # ── checklist ────────────────────────────────────────────────────────────────
 
-def _rows(item, post=None, spec=None, info=None):
-    return {r["key"]: r for r in tp.checks(item, post, info or {"duration": 18, "has_audio": True}, spec)}
+def _rows(item, post=None, spec=None, info=None, region=None, langs=()):
+    return {r["key"]: r for r in tp.checks(item, post, info or {"duration": 18, "has_audio": True}, spec, region,
+                                           langs)}
+
+
+def _live(item, when):
+    return Post(user_id=1, brief_id=item.brief_id, platform="tiktok", status=PostStatusEnum.done, published_at=when)
 
 
 def test_checks_read_the_clip(session, short):
@@ -334,28 +342,126 @@ def test_checks_read_the_clip(session, short):
 
 def test_a_tick_turns_a_check_green_and_post_time_is_judged_in_japan(session, short):
     item = _item(session, short(spec={}), checks_json=json.dumps({"sound": True, "length": True}))
-    post = Post(user_id=1, brief_id=item.brief_id, platform="tiktok", status=PostStatusEnum.done,
-                published_at=datetime(2026, 10, 11, 12, 30))   # 21:30 in Japan
-    rows = _rows(item, post, info={"duration": 40})
+    post = _live(item, datetime(2026, 10, 11, 12, 30))   # 21:30 in Japan
+    rows = _rows(item, post, info={"duration": 40}, region=JP)
     assert rows["sound"]["state"] == "ok" and rows["length"]["state"] == "ok"
-    assert rows["posted_time"]["state"] == "ok" and "21:30" in rows["posted_time"]["note"]
+    assert rows["posted_time"]["state"] == "ok" and rows["posted_time"]["note"] == "≈21:30 in Japan"
+    assert rows["posted_time"]["label"] == "Posted 19:00–23:00 in Japan"
+    assert rows["geo"]["label"] == "Japan share typed in, after 2–3 days" and "region Japan" in rows["sound"]["hint"]
     post.published_at = datetime(2026, 10, 11, 1, 0)             # 10:00 in Japan
-    assert _rows(item, post)["posted_time"]["state"] == "warn"
+    assert _rows(item, post, region=JP)["posted_time"]["state"] == "warn"
+
+
+def test_a_us_clip_is_judged_in_us_eastern_time_summer_and_winter(session, short):
+    item = _item(session, short(spec={}), lang="en", caption="Escort mission", tags="#indiegame #gamedev #Steam",
+                 video_id=VID)
+    post = _live(item, datetime(2026, 7, 15, 23, 30))    # 19:30 EDT (UTC−4): the evening
+    row = _rows(item, post, region=US)["posted_time"]
+    assert (row["state"], row["note"], row["label"]) == ("ok", "19:30 US Eastern time",
+                                                         "Posted 19:00–23:00 US Eastern time")
+    post.published_at = datetime(2027, 1, 15, 23, 30)    # the same UTC hour is 18:30 EST (UTC−5): too early
+    row = _rows(item, post, region=US)["posted_time"]
+    assert (row["state"], row["note"]) == ("warn", "18:30 US Eastern time")
+    assert _rows(item, post, region=US)["geo"]["label"] == "US share typed in, after 2–3 days"
+    # a clip in another language than the region's: its top country
+    assert _rows(item, post, region=JP)["geo"]["label"] == tp.GEO_ELSEWHERE
+
+
+def test_without_a_region_the_checklist_names_no_country(session, short):
+    for lang in ("ja", "en"):
+        item = _item(session, short(spec={}), lang=lang)
+        rows = _rows(item, _live(item, datetime(2026, 10, 11, 12, 30)))
+        assert "posted_time" not in rows and rows["geo"]["label"] == tp.GEO_ELSEWHERE
+        assert "target region" in rows["sound"]["hint"]
+        assert not re.search(r"\bJapan\b", json.dumps(list(rows.values()), ensure_ascii=False))
+
+
+def test_letters_two_languages_share_are_a_check_it_yourself_not_a_warning(session, short):
+    langs = ["de", "ru", "en"]   # Germany's language first, then the languages of Settings
+    item = _item(session, short(spec={}), lang="de", caption="Eskortiere den Konvoi", tags="#indiegame #gamedev #Steam")
+    rows = _rows(item, spec={"overlays": [{"text": "Escort the convoy"}], "music": None}, region=DE, langs=langs)
+    assert rows["caption"]["state"] == "todo" and "German or English" in rows["caption"]["note"]
+    assert "Reads as" not in rows["caption"]["note"]
+    assert rows["screen_text"]["state"] == "todo" and rows["screen_text"]["action"] == "screen_text"
+    assert rows["tags"]["state"] == "ok"
+    assert _rows(item, region=DE, langs=["de", "ru"])["caption"]["state"] == "ok"   # no other Latin language
+    item.caption = "Сопроводи конвой"
+    row = _rows(item, region=DE, langs=langs)["caption"]
+    assert (row["state"], row["note"]) == ("warn", "Reads as Russian")
+
+
+def test_a_language_with_letters_of_its_own_needs_a_hashtag_in_them(session, short):
+    langs = ["ko", "ru", "en"]
+    item = _item(session, short(spec={}), lang="ko", caption="호송 임무 · Steam", tags="#indiegame #gamedev #Steam")
+    rows = _rows(item, langs=langs)
+    assert rows["caption"]["state"] == "ok"                       # Hangul wins over the Latin “Steam”
+    assert (rows["tags"]["state"], rows["tags"]["note"]) == ("warn", "None in Korean")
+    item.tags = "#인디게임 #gamedev #Steam"
+    assert _rows(item, langs=langs)["tags"]["state"] == "ok"
+    # Taiwan: kana reads as Japanese; Chinese characters alone could be either, with Japanese in play
+    tw = _item(session, short(spec={}), lang="zh-hant", caption="護衛ミッション", tags="#獨立遊戲 #遊戲開發 #Steam")
+    assert _rows(tw, langs=["zh-hant", "ja", "en"])["caption"]["note"] == "Reads as Japanese"
+    tw.caption = "護衛任務"
+    assert _rows(tw, langs=["zh-hant", "ja", "en"])["caption"]["state"] == "todo"
+    assert _rows(tw, langs=["zh-hant", "en"])["caption"]["state"] == "ok"
+
+
+def test_every_language_of_settings_has_its_script():
+    from app.services import languages
+    assert sorted(set(languages.NAMES) - set(tp.SCRIPTS)) == []
+    assert tp.script("インディーゲーム Steam") == "kana" and tp.script("個人開発") == "han"
+    assert tp.script("인디게임 Steam") == "hangul" and tp.script("Сопроводи Steam") == "cyr"
+    assert tp.script("Steam") == "lat" and tp.script("2026 🔥") is None
+    assert tp.tag_hint("de") == tp.TAG_HINTS["en"] and tp.tag_hint("ko").startswith("#인디게임")
+
+
+def test_caption_languages_put_the_region_first_and_never_japan_on_their_own(set_settings):
+    from app.services.settings import load_settings
+    set_settings(languages=["ru", "en"])
+    assert tp.caption_langs(load_settings()) == ["ru", "en"]
+    set_settings(tiktok_region="JP")
+    assert tp.caption_langs(load_settings()) == ["ja", "ru", "en"]
+    set_settings(tiktok_region="US", languages=["en", "de"])
+    assert tp.caption_langs(load_settings()) == ["en", "de"]
+    assert tp.known_lang("PT_BR") == "pt-br" and tp.known_lang("th") == "th" and tp.known_lang("xx") is None
+
+
+def test_new_clips_take_the_region_language(session, short, renders, no_translate, set_settings, isolated):
+    set_settings(languages=["ru", "en"], tiktok_region="DE")
+    item, _ = tp.create_from_brief(session, short(spec={}), "")
+    assert item.lang == "de" and item.caption == "[de] Escort mission"
+    set_settings(tiktok_region="")
+    item, _ = tp.create_from_brief(session, short(spec={}), "nonsense")
+    assert item.lang == "ru"                                       # not Japanese: the first language of Settings
+    (isolated / "short_0123456789ab_clip.mp4").write_bytes(b"vertical")
+    up = tp.create_from_upload(session, "short_0123456789ab_clip.mp4", None, "th")
+    assert up.lang == "th" and up.tags == tp.TAG_HINTS["en"]       # no Thai set: the English one
+    tp.set_lang(session, up, "ko")
+    assert up.lang == "ko" and up.tags == tp.TAG_HINTS["ko"]       # the starter set follows the language
+    with pytest.raises(tp.PipelineError):
+        tp.set_lang(session, up, "xx")
 
 
 def test_update_validates_the_share(session, short):
     item = _item(session, short(spec={}))
-    tp.update(session, item, {"jp_share": "41.25", "checks": {"cover": True, "bogus": True}})
+    tp.update(session, item, {"region_share": "41.25", "checks": {"cover": True, "bogus": True}})
     assert item.jp_share == 41.2 and json.loads(item.checks_json) == {"cover": True}
     with pytest.raises(tp.PipelineError):
-        tp.update(session, item, {"jp_share": "lots"})
+        tp.update(session, item, {"region_share": "lots"})
+    tp.update(session, item, {"jp_share": 12})                     # its old name, from a page loaded before
+    assert item.jp_share == 12.0
 
 
 def test_summary_waits_for_enough_shares():
-    live = [{"stage": "live", "lang": "ja", "jp_share": s, "metrics": {"views": v},
-             "post": {"published_iso": "2026-10-11T12:00:00Z"}} for s, v in ((40, 100), (35, 300))]
-    s = tp.summary(live, {"days": ["2026-10-10", "2026-10-12"], "values": [5, 9]})
-    assert s["jp_avg"] == 37.5 and s["jp_n"] == 2 and s["views_median"] == 200 and s["followers_gained"] == 4
+    live = [{"stage": "live", "lang": lang, "region_share": s, "metrics": {"views": v},
+             "post": {"published_iso": "2026-10-11T12:00:00Z"}} for lang, s, v in (("ja", 40, 100), ("ja", 35, 300),
+                                                                                    ("en", 90, 200))]
+    followers = {"days": ["2026-10-10", "2026-10-12"], "values": [5, 9]}
+    s = tp.summary(live, followers, JP)
+    assert s["share_avg"] == 37.5 and s["share_n"] == 2 and s["views_median"] == 200 and s["followers_gained"] == 4
+    assert tp.summary(live, followers, US)["share_avg"] == 90.0    # the US: the English clip's share
+    s = tp.summary(live, followers)                                # no region: no share to sum up
+    assert s["share_avg"] is None and s["share_n"] == 0
 
 
 # ── publisher, audience, page ────────────────────────────────────────────────
@@ -392,3 +498,33 @@ def test_page_and_state_render(client, session, short, set_settings):
     assert r.status_code == 200 and "TT_CTX" in r.text
     j = client.get("/api/tiktok/state").json()
     assert j["connection"]["views"] and any(i["stage"] == "ready" for i in j["items"])
+
+
+def _side(client) -> str:
+    """The side panel of /tiktok after its region select (the select lists every country)."""
+    page = client.get("/tiktok").text
+    return page.split('<aside class="tt-side">', 1)[1].split("</aside>", 1)[0]
+
+
+def test_the_page_names_no_country_until_a_region_is_picked(client, session, short, set_settings):
+    from app.services.settings import load_settings
+    set_settings(**CONNECTED, languages=["ru", "en"])
+    _item(session, short(spec={}))
+    ctx = tp.page_context(session, load_settings())
+    assert ctx["region"] is None and [x["key"] for x in ctx["langs"]] == ["ru", "en"]
+    assert ctx["summary"]["share_avg"] is None and len(ctx["regions"]) == len(tiktok_regions.REGIONS)
+    side = _side(client)
+    assert '<option value="" selected>' in side
+    assert "Japan" not in side.split("</select>", 1)[1] and "the target region" in side
+    # picked on the page
+    assert client.post("/api/tiktok/settings", json={"region": "jp"}).status_code == 200
+    assert load_settings()["tiktok_region"] == "JP"
+    ctx = tp.page_context(session, load_settings())
+    assert ctx["region"]["clock"] == "Time in Japan" and ctx["langs"][0]["key"] == "ja"
+    side = _side(client)
+    assert '<option value="JP" selected>' in side and "Does a Japanese caption bring viewers from Japan" in side
+    assert "Type the share of viewers from Japan" in side
+    assert client.post("/api/tiktok/settings", json={"region": "XX"}).status_code == 400
+    assert load_settings()["tiktok_region"] == "JP"
+    client.post("/api/tiktok/settings", json={"region": ""})
+    assert load_settings()["tiktok_region"] == ""

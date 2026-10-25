@@ -129,6 +129,8 @@ DEFAULTS: Dict[str, Any] = {
     # also ask for video.list + user.info.stats + user.info.profile (views, followers,
     # @handle). Off by default: a scope the app hasn't added breaks TikTok's consent page.
     "tiktok_want_stats": False,
+    # the country the 🎵 TikTok test aims at (app/services/tiktok_regions.py); "" = not chosen yet
+    "tiktok_region": "",
     # Instagram Reels (Graph API; reuses the fb app). ig_user_id = IG business
     # account id; ig_access_token = the linked Facebook Page's access token.
     "ig_user_id": "",

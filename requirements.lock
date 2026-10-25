@@ -61,6 +61,7 @@ starlette==0.47.2
 truststore==0.10.5
 typing-extensions==4.14.1
 typing-inspection==0.4.1
+tzdata==2026.5
 update-checker==0.18.0
 uritemplate==4.2.0
 urllib3==2.5.0
