@@ -9,4 +9,4 @@ tools/build_release.py read and rewrite it as text.
   then puts main on the next patch's -dev ("2.0.1-dev");
 - order: 2.0.0-dev < 2.0.0-rc.1 < 2.0.0 < 2.0.1-dev (app/services/updates.py, parse_version).
 """
-__version__ = "2.0.1-dev"
+__version__ = "2.0.1"
