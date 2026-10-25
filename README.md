@@ -90,6 +90,8 @@ it, and a test makes every key of `DEFAULTS` in `app/services/settings.py` belon
 ## Running it
 
 Optional: copy `lib\.env.example` (`.env.example` in a checkout) to `.env` in the data folder (host/port, DB path).
+IndiePulse listens on `127.0.0.1:8870` (`APP_PORT`); the OAuth redirect URIs you register with Google / X / TikTok /
+VK use that port, so change it before connecting accounts, not after.
 
 There are no console windows: IndiePulse lives in the tray. The icon runs two processes —
 the web server and the Huey worker (the one that actually publishes; scheduled posts don't

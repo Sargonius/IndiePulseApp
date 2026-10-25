@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.jobs import tasks
+from app.routers.api import youtube as yt_api
 from app.services import tokens
 from app.services import youtube_setup as ys
 from app.services.settings import load_settings
@@ -73,7 +74,8 @@ def test_checklist_with_a_dead_token(client, set_settings, monkeypatch):
     assert "YouTube isn’t working" in html and "invalid_grant" in html
     for page in ("auth/audience", "auth/clients", "apis/library/youtube.googleapis.com"):
         assert f"https://console.cloud.google.com/{page}?project=123456789012" in html
-    assert "http://127.0.0.1:8000/api/accounts/callback/youtube" in html  # redirect URI to copy
+    assert yt_api._YT_REDIRECT_URI in html  # redirect URI to copy
+    assert yt_api._YT_REDIRECT_URI.endswith("/api/accounts/callback/youtube")
     assert 'href="/api/accounts/connect/youtube/go"' in html
     assert "Publish app" in html and "&lt;b&gt;Chan&lt;/b&gt;" in html
     assert "invalid_grant" in load_settings()["yt_auth_error"]  # the live check recorded it
