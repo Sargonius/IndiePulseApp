@@ -25,3 +25,6 @@ pydub~=0.25.1
 # desktop shell (tray icon, process supervision)
 pystray~=0.19.5
 psutil~=7.2.2
+# time zones for zoneinfo (the target region's clock on 🎵 TikTok): Windows has no tz database of its own. Newer
+# data is never a break (it only follows the countries' rule changes), so no upper bound
+tzdata>=2026.5

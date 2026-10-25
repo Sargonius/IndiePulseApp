@@ -1,5 +1,6 @@
 {#- Settings → TikTok, its hand-written part (inside partials/settings_section.html): the app's keys + Connect
-    TikTok (/api/settings/save), then the export folder, a form made from the schema. -#}
+    TikTok (/api/settings/save), then the export folder and the 🎵 TikTok test's target region, forms made from the
+    schema (the region only while the TikTok pipeline module is on). -#}
 <div class="info-box" style="margin-bottom:12px;">
 	Works in <b>draft (inbox)</b> mode: videos go straight to your TikTok inbox,
 	then you add sound/caption in the app and publish. No TikTok audit needed for this.
@@ -32,3 +33,7 @@
 {% if tiktok_token_hint %}<div class="muted" style="font-size:12px;">Access token: {{ tiktok_token_hint }} (refreshes automatically)</div>{% endif %}
 <h4 class="ai-sub">Without a token</h4>
 {% with form = forms.tiktok_opts %}{% include "partials/settings_form.html" %}{% endwith %}
+{% if forms.tiktok_target.fields %}
+<h4 class="ai-sub">The 🎵 TikTok test</h4>
+{% with form = forms.tiktok_target %}{% include "partials/settings_form.html" %}{% endwith %}
+{% endif %}

@@ -78,6 +78,8 @@ def test_fields_are_well_formed():
     ("tg_chat_id_ru", "-1001234567890", "-1001234567890"),
     ("tg_chat_id_ru", "@mychannel", "@mychannel"),
     ("discord_guild_id", "", ""),             # empty: cleared
+    ("tiktok_region", "JP", "JP"),
+    ("tiktok_region", "", ""),                # not chosen (yet): never Japan by default
 ])
 def test_a_field_cleans_what_it_gets(key, raw, expected):
     assert schema.parse_field(schema.FIELDS[key], raw) == (expected, "")
@@ -90,6 +92,7 @@ def test_a_field_cleans_what_it_gets(key, raw, expected):
     ("tg_chat_id_ru", "t.me/mychannel"),
     ("update_repo", "nope"),
     ("ig_user_id", "my account"),
+    ("tiktok_region", "Mars"),
 ])
 def test_a_field_refuses_what_it_cannot_take(key, raw):
     value, error = schema.parse_field(schema.FIELDS[key], raw)

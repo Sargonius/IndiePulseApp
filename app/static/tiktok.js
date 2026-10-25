@@ -1,12 +1,15 @@
 // /tiktok — the TikTok pipeline page. Data: window.TT_CTX (app/services/tiktok_pipeline.py
 // page_context), refreshed from /api/tiktok/state?sync=1. Item cards update in place:
-// the caption fields and the video are never redrawn under the cursor.
+// the caption fields and the video are never redrawn under the cursor. The target region
+// (S.region, null until one is picked: app/services/tiktok_regions.py) drives the clock,
+// the share tile and the default caption language; picking another one reloads the page.
 (function () {
 	'use strict';
 	let S = window.TT_CTX || {};
+	const R = S.region || null;
 	const cards = new Map();   // item id → {el, item, sigVid, sigFlow}
 	const dirty = new Map();   // item id → timer of an unsaved caption edit
-	const LANG_LABEL = { ja: 'JA', en: 'EN', ru: 'RU' };
+	const langLabel = code => String(code || '').toUpperCase();
 	const STAGE_LABEL = { rendering: 'Rendering', ready: 'Ready', sending: 'Uploading', inbox: 'In TikTok drafts',
 		live: 'Live', render_failed: 'Render failed', send_failed: 'Not sent' };
 	const GROUPS = [['prep', 'Before sending'], ['app', 'In the TikTok app'], ['after', 'After posting']];
@@ -41,34 +44,58 @@
 		if (!r.ok) throw new Error((j && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || ('HTTP ' + r.status));
 		return j;
 	}
-	const lang = () => { try { return localStorage.getItem('tt_lang') || 'ja'; } catch (e) { return 'ja'; } };
+	// the caption language of the next clip: the last one picked for this region, else the page's first (the region's)
+	const LANG_KEY = 'tt_lang_' + (R ? R.code : 'none');
+	const lang = () => {
+		const first = ((S.langs || [])[0] || {}).key || 'en';
+		try {
+			const last = localStorage.getItem(LANG_KEY);
+			return (S.langs || []).some(l => l.key === last) ? last : first;
+		} catch (e) { return first; }
+	};
 
-	// ── Japan clock ───────────────────────────────────────────────────────────
-	function jstParts(d) {
-		const h = (d.getUTCHours() + 9) % 24;
-		return { h, m: d.getUTCMinutes() };
+	// ── the target region's clock (Intl does the zone and its summer time) ─────
+	function zoneParts(d, tz) {  // the wall time in `tz` at the instant `d`
+		const p = {};
+		new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric',
+			day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+			.formatToParts(d).forEach(x => { p[x.type] = +x.value; });
+		return { y: p.year, mo: p.month, d: p.day, h: p.hour % 24, m: p.minute, s: p.second };
 	}
-	function localAtJst(hour) {  // today's hour:00 in Japan, in this browser's local time
-		const d = new Date();
-		const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour - 9, 0));
-		return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	function zoneOffset(t, tz) {  // ms the zone's wall clock is ahead of UTC at the instant t
+		const p = zoneParts(new Date(t), tz);
+		return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.m, p.s) - Math.floor(t / 1000) * 1000;
 	}
+	function zoneInstant(tz, p, hour, dayShift) {  // the instant of hour:00 on that day (+dayShift) in the zone
+		const wall = Date.UTC(p.y, p.mo - 1, p.d + (dayShift || 0), hour, 0);
+		let t = wall - zoneOffset(wall, tz);
+		t = wall - zoneOffset(t, tz);  // again with the offset at that hour: summer time may start that day
+		return t;
+	}
+	const hhmm = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	function renderClock() {
-		const [lo, hi] = S.jp_evening || [19, 23];
-		const now = new Date();
-		const { h, m } = jstParts(now);
-		const prime = h >= lo && h < hi;
+		const box = $('#tt_clock');
+		if (!R) {
+			box.innerHTML = `<span class="tt-lbl">Target region</span>
+				<span>Pick the country your clips aim at (above): this card then shows its time and the best hours to post there.</span>`;
+			return;
+		}
+		const [lo, hi] = R.evening || [19, 23];
+		const now = Date.now();
+		const p = zoneParts(new Date(now), R.tz);
+		const prime = p.h >= lo && p.h < hi;
 		let next = '';
 		if (!prime) {
-			let mins = ((lo - h + 24) % 24) * 60 - m;
-			if (mins <= 0) mins += 24 * 60;
-			next = `Japan’s evening starts in ${Math.floor(mins / 60)} h ${mins % 60} min.`;
+			let start = zoneInstant(R.tz, p, lo, 0);
+			if (start <= now) start = zoneInstant(R.tz, p, lo, 1);
+			const mins = Math.max(1, Math.ceil((start - now) / 60000));
+			next = `The evening there starts in ${Math.floor(mins / 60)} h ${mins % 60} min.`;
 		}
-		$('#tt_clock').innerHTML =
-			`<span class="tt-lbl">Time in Japan</span>` +
-			`<span class="tt-jst">${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}</span>` +
-			(prime ? `<span class="tt-prime">✓ Evening in Japan: a good time to post</span>` : `<span>${esc(next)}</span>`) +
-			`<span class="muted tt-small">Best: ${lo}:00–${hi}:00 in Japan = ${localAtJst(lo)}–${localAtJst(hi)} your time.</span>`;
+		box.innerHTML =
+			`<span class="tt-lbl">${esc(R.clock)}</span>` +
+			`<span class="tt-jst">${String(p.h).padStart(2, '0')}:${String(p.m).padStart(2, '0')}</span>` +
+			(prime ? `<span class="tt-prime">✓ Evening there: a good time to post</span>` : `<span>${esc(next)}</span>`) +
+			`<span class="muted tt-small">Best: ${lo}:00–${hi}:00 ${esc(R.at)} = ${hhmm(zoneInstant(R.tz, p, lo, 0))}–${hhmm(zoneInstant(R.tz, p, hi, 0))} your time.</span>`;
 	}
 
 	// ── account, connection, summary ─────────────────────────────────────────
@@ -132,17 +159,19 @@
 		tiles.push(`<div class="tt-tile"><span class="tt-k">Views</span><span class="tt-v">${fmtNum(s.views_total)}</span>
 			<span class="tt-s">${s.views_median != null ? 'median ' + fmtNum(s.views_median) + ' per clip' : (S.connection && S.connection.views ? 'none yet' : 'needs the video.list scope')}</span></div>`);
 		let verdict = '', cls = '';
-		if (s.jp_n >= s.jp_needed) {
-			const good = s.jp_avg >= s.target_share;
+		if (!R) {
+			verdict = 'Pick a target region first';
+		} else if (s.share_n >= s.share_needed) {
+			const good = s.share_avg >= s.target_share;
 			cls = good ? 'good' : 'bad';
-			verdict = good ? 'Japanese pulls Japan: keep going' : `Under ${s.target_share}%: the region wins`;
-		} else if (s.jp_n >= 3) {
-			verdict = `Early: ${s.jp_n} of ${s.jp_needed} clips`;
+			verdict = good ? `${R.lang_word} pulls ${R.place}: keep going` : `Under ${s.target_share}%: the account’s region wins`;
+		} else if (s.share_n >= 3) {
+			verdict = `Early: ${s.share_n} of ${s.share_needed} clips`;
 		} else {
-			verdict = `Type it in for ${s.jp_needed} clips (TikTok Studio)`;
+			verdict = `Type it in for ${s.share_needed} clips in ${R.lang_word} (TikTok Studio)`;
 		}
-		tiles.push(`<div class="tt-tile"><span class="tt-k">Japan share of viewers</span><span class="tt-v">${s.jp_avg != null ? s.jp_avg + '%' : '—'}</span>
-			<span class="tt-verdict ${cls}">${esc(verdict)}</span><span class="tt-s">target ≥ ${s.target_share}% · ${s.jp_n || 0} clip${s.jp_n === 1 ? '' : 's'} typed in</span></div>`);
+		tiles.push(`<div class="tt-tile"><span class="tt-k">${R ? esc(R.short) + ' share of viewers' : 'Target region share'}</span><span class="tt-v">${s.share_avg != null ? s.share_avg + '%' : '—'}</span>
+			<span class="tt-verdict ${cls}">${esc(verdict)}</span><span class="tt-s">target ≥ ${s.target_share}% · ${s.share_n || 0} clip${s.share_n === 1 ? '' : 's'} typed in</span></div>`);
 		const fc = a.follower_count != null ? a.follower_count : (f.values && f.values.length ? f.values[f.values.length - 1] : null);
 		tiles.push(`<div class="tt-tile"><span class="tt-k">Followers</span><span class="tt-v">${fmtNum(fc)}</span>
 			<span class="tt-s">${s.followers_gained != null ? (s.followers_gained >= 0 ? '+' : '') + fmtNum(s.followers_gained) + ' since the first clip' : (S.connection && S.connection.followers ? 'read every 2 hours' : 'needs user.info.stats')}</span>
@@ -238,11 +267,14 @@
 	}
 
 	function captionHtml(it) {
-		const langs = (S.langs || []).map(l => `<button type="button" data-lang="${l.key}" class="${l.key === it.lang ? 'on' : ''}" title="${esc(l.name)}: translates the caption and the frame text">${LANG_LABEL[l.key] || l.key}</button>`).join('');
+		const list = (S.langs || []).slice();
+		if (!list.some(l => l.key === it.lang)) list.push({ key: it.lang, name: it.lang_name || langLabel(it.lang) });  // from another region
+		const langs = list.map(l => `<button type="button" data-lang="${esc(l.key)}" class="${l.key === it.lang ? 'on' : ''}" title="${esc(l.name)}: translates the caption and the frame text">${esc(langLabel(l.key))}</button>`).join('');
+		const tagsHint = (list.find(l => l.key === it.lang) || {}).tags || '#indiegame #gamedev #Steam';
 		return `<div class="tt-row" style="display:flex;align-items:center;gap:8px;"><span class="tt-lbl">Caption</span><span class="tt-langs">${langs}</span><span class="muted tt-small tt-capmsg"></span></div>
 			<textarea class="tt-cap" maxlength="${it.caption_limit || 4000}" placeholder="The hook in words, then the game’s name and “on Steam”.">${esc(it.caption)}</textarea>
 			<span class="tt-lbl">Hashtags</span>
-			<input type="text" class="tt-tags" value="${esc(it.tags)}" placeholder="#インディーゲーム #個人開発">
+			<input type="text" class="tt-tags" value="${esc(it.tags)}" placeholder="${esc(tagsHint)}">
 			<div class="tt-capfoot"><span class="tt-capcount"></span><span class="tt-sp"></span>
 				<button type="button" class="btn btn-sm" data-act="copy">📋 Copy caption</button></div>`;
 	}
@@ -258,7 +290,7 @@
 			return `<details data-group="${g}" ${isOpen ? 'open' : ''}><summary>${title}<span class="tt-count">${done}/${counted}</span></summary>` +
 				rows.map(c => {
 					const ic = { ok: '✓', warn: '⚠', todo: '○', na: '–' }[c.state] || '○';
-					const fix = c.action === 'screen_text' ? `<button type="button" class="btn btn-sm" data-act="screen_text">Translate to ${LANG_LABEL[it.lang] || it.lang}</button>`
+					const fix = c.action === 'screen_text' ? `<button type="button" class="btn btn-sm" data-act="screen_text">Translate to ${esc(langLabel(it.lang))}</button>`
 						: c.action === 'drop_music' ? `<button type="button" class="btn btn-sm" data-act="drop_music">Render without music</button>` : '';
 					const tick = (!c.auto || (c.state !== 'ok' && c.state !== 'na') || c.ticked)
 						? `<input type="checkbox" data-tick="${c.key}" ${c.ticked ? 'checked' : ''} title="${c.auto ? 'Checked it myself' : 'Done'}">` : '';
@@ -340,8 +372,8 @@
 					${nums}${err(m.error && m.error !== 'None' ? 'Last read failed: ' + m.error : '')}
 					${viewsChart(it.history)}
 					${extra.length ? `<span class="muted tt-small">${esc(extra.join(' · '))}</span>` : ''}
-					<div class="tt-row"><label class="tt-inline">Viewers from ${it.lang === 'ja' ? 'Japan' : 'the top country'}
-						<input type="number" class="tt-share" min="0" max="100" step="0.1" value="${it.jp_share != null ? it.jp_share : ''}"> %</label>
+					<div class="tt-row"><label class="tt-inline">Viewers from ${R && it.lang === R.lang ? esc(R.place) : 'the top country'}
+						<input type="number" class="tt-share" min="0" max="100" step="0.1" value="${it.region_share != null ? it.region_share : ''}"> %</label>
 						<span class="muted tt-small">TikTok Studio → the video → Viewers → Locations</span></div></div>`;
 			}
 		}
@@ -435,6 +467,16 @@
 		paint(c, res.item, false);
 		return res.item;
 	}
+	async function saveCaption(c) {
+		clearTimeout(dirty.get(c.item.id));
+		try {
+			await save(c, { caption: c.el.querySelector('.tt-cap').value, tags: c.el.querySelector('.tt-tags').value });
+		} catch (err) { toast('Caption not saved: ' + err.message, true); }
+		dirty.delete(c.item.id);
+	}
+	async function flushEdits() {  // before the page reloads: the caption edits still waiting for their save
+		await Promise.all([...dirty.keys()].map(id => cards.get(id)).filter(Boolean).map(saveCaption));
+	}
 
 	async function action(c, name, body, btn) {
 		const label = btn && btn.textContent;
@@ -479,18 +521,13 @@
 			if (!e.target.matches('.tt-cap, .tt-tags')) return;
 			countCaption(c);
 			clearTimeout(dirty.get(c.item.id));
-			dirty.set(c.item.id, setTimeout(async () => {
-				try {
-					await save(c, { caption: el.querySelector('.tt-cap').value, tags: el.querySelector('.tt-tags').value });
-				} catch (err) { toast('Caption not saved: ' + err.message, true); }
-				dirty.delete(c.item.id);
-			}, 700));
+			dirty.set(c.item.id, setTimeout(() => saveCaption(c), 700));
 		});
 		el.addEventListener('change', async e => {
 			const t = e.target;
 			try {
 				if (t.matches('[data-tick]')) await save(c, { checks: { [t.dataset.tick]: t.checked } });
-				else if (t.matches('.tt-share')) await save(c, { jp_share: t.value === '' ? null : +t.value });
+				else if (t.matches('.tt-share')) await save(c, { region_share: t.value === '' ? null : +t.value });
 			} catch (err) { toast(err.message, true); }
 		});
 		el.addEventListener('click', async e => {
@@ -629,8 +666,21 @@
 	// ── boot ─────────────────────────────────────────────────────────────────
 	function boot() {
 		const sel = $('#tt_lang');
-		sel.innerHTML = (S.langs || []).map(l => `<option value="${l.key}" ${l.key === lang() ? 'selected' : ''}>${esc(l.name)}</option>`).join('');
-		sel.addEventListener('change', () => { try { localStorage.setItem('tt_lang', sel.value); } catch (e) { /* */ } });
+		sel.innerHTML = (S.langs || []).map(l => `<option value="${esc(l.key)}" ${l.key === lang() ? 'selected' : ''}>${esc(l.name)}</option>`).join('');
+		sel.addEventListener('change', () => { try { localStorage.setItem(LANG_KEY, sel.value); } catch (e) { /* */ } });
+		const region = $('#tt_region');
+		region.addEventListener('change', async () => {
+			region.disabled = true;
+			try {
+				await flushEdits();
+				await api('POST', '/api/tiktok/settings', { region: region.value });
+				location.reload();
+			} catch (err) {
+				toast(err.message, true);
+				region.value = R ? R.code : '';
+				region.disabled = false;
+			}
+		});
 		const proj = $('#tt_project');
 		(S.projects || []).forEach(p => { const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; proj.appendChild(o); });
 		try { const last = localStorage.getItem('tt_project'); if (last) proj.value = last; } catch (e) { /* */ }

@@ -175,12 +175,13 @@ def tiktok_pipeline_state(sync: int = 0, force: int = 0, session: Session = Depe
 
 @router.post("/tiktok/items")
 def tiktok_pipeline_add(data: Optional[dict] = Body(None), session: Session = Depends(get_session)):
-    """{brief_id, lang} adds a Short; {rel, project_id, lang} a video dropped on the page."""
+    """{brief_id, lang} adds a Short; {rel, project_id, lang} a video dropped on the page. Without a `lang`: the
+    page's first caption language (the target region's)."""
     from app.models.models import Brief
     from app.services import tiktok_pipeline as tp
     from app.services import video_edit as ve
     data = data or {}
-    lang = str(data.get("lang") or "ja")
+    lang = str(data.get("lang") or "")
     try:
         if data.get("brief_id"):
             brief = session.get(Brief, int(data["brief_id"]))
@@ -199,7 +200,7 @@ def tiktok_pipeline_add(data: Optional[dict] = Body(None), session: Session = De
 
 @router.patch("/tiktok/items/{item_id}")
 def tiktok_pipeline_update(item_id: int, data: Optional[dict] = Body(None), session: Session = Depends(get_session)):
-    """Caption, hashtags, checklist ticks, the Japan share, a file from ✂ Edit."""
+    """Caption, hashtags, checklist ticks, the target region's share, a file from ✂ Edit."""
     from app.services import tiktok_pipeline as tp
     item = _item(session, item_id)
     try:
@@ -252,9 +253,16 @@ def tiktok_pipeline_action(item_id: int, action: str, data: Optional[dict] = Bod
 
 @router.post("/tiktok/settings")
 def tiktok_pipeline_settings(data: Optional[dict] = Body(None)):
-    """{want_stats}: ask for video.list + user.info.stats + user.info.profile on the next connect."""
+    """{want_stats}: ask for video.list + user.info.stats + user.info.profile on the next connect.
+    {region}: the test's target region, a code of app/services/tiktok_regions.py ("" = none picked)."""
+    from app.services import tiktok_pipeline as tp
+    from app.services import tiktok_regions
     data = data or {}
+    if "region" in data:
+        code = str(data.get("region") or "").strip().upper()
+        if code and tiktok_regions.get(code) is None:
+            raise HTTPException(status_code=400, detail=f"Unknown region: {code}")
+        save_settings({"tiktok_region": code})
     if "want_stats" in data:
         save_settings({"tiktok_want_stats": bool(data.get("want_stats"))})
-    from app.services import tiktok_pipeline as tp
     return tp.connection(load_settings())
