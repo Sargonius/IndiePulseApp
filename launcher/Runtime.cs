@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -11,10 +12,11 @@ using System.Threading;
 namespace IndiePulse
 {
     // What IndiePulse runs on, prepared the way app/desktop/deps.py would: uv, Python 3.12 from uv, the venv,
-    // requirements.lock in it. Nothing system-wide: Python goes into runtime\python (or ClubKit's folder on its drive)
-    // without the python3.12.exe shim in the profile (--no-bin) and without a registry entry (--no-registry).
+    // requirements.lock in it. Nothing system-wide: Python goes into runtime\python (or the drive settings' folder,
+    // DriveSettings.cs) without the python3.12.exe shim in the profile (--no-bin) and without a registry entry
+    // (--no-registry).
     //
-    // uv: ClubKit's own copy when it is on the drive, else a pinned release downloaded from GitHub and checked
+    // uv: the one the drive settings name when it is there, else a pinned release downloaded from GitHub and checked
     // against its SHA-256 below (not bundled: the first run downloads Python and the packages anyway, so a bundled uv
     // would only make every zip and every update 15 MB bigger).
     sealed class Runtime
@@ -34,7 +36,6 @@ namespace IndiePulse
             this.home = home;
         }
 
-        string KitUv { get { return Path.Combine(home.Kit, "tools", "uv", "uv.exe"); } }
         string OwnUv { get { return Path.Combine(home.Runtime, "uv", "uv.exe"); } }
 
         // uv's cache: runtime\cache - unless that is deep in the folders. A package without a wheel (huey) is built
@@ -55,7 +56,8 @@ namespace IndiePulse
         {
             get
             {
-                if (File.Exists(KitUv)) return KitUv;
+                string drive = home.Drive.Uv;
+                if (drive != null && File.Exists(drive)) return drive;
                 return File.Exists(OwnUv) ? OwnUv : "";
             }
         }
@@ -251,10 +253,11 @@ namespace IndiePulse
         }
 
         // The short cache in %TEMP% (Cache), once a step that may have used it is done: the venv has what it needs
-        // (a copy or a hard link of each file), and nothing of a portable copy stays behind on the computer
+        // (a copy or a hard link of each file), and nothing of a portable copy stays behind on the computer. Not with
+        // a uv cache of the drive settings: ApplyUvEnv doesn't use this one then.
         void DropTempCache(StepContext ctx)
         {
-            if (home.KitPresent || Home.Inside(Cache, home.Runtime) || !Directory.Exists(Cache)) return;
+            if (home.Drive.UvCacheDir != null || Home.Inside(Cache, home.Runtime) || !Directory.Exists(Cache)) return;
             try { Files.DeleteTree(Cache); }
             catch (IOException ex) { ctx.Log.Write("the temporary cache stays", ex); }
         }
@@ -305,20 +308,16 @@ namespace IndiePulse
         // ── running tools ────────────────────────────────────────────────────
         void ApplyUvEnv(IDictionary<string, string> env, bool systemCerts)
         {
-            if (home.KitPresent)
-            {
-                // ClubKit's own folders on the drive, unless its scripts already said where (deps.uv_env())
-                SetDefault(env, "UV_CACHE_DIR", Path.Combine(home.Kit, "data", "uv", "cache"));
-                SetDefault(env, "UV_PYTHON_INSTALL_DIR", Path.Combine(home.Kit, "data", "uv", "python"));
-                SetDefault(env, "UV_PYTHON_PREFERENCE", "only-managed");
-            }
-            else
-            {
-                // everything in runtime\: a portable copy leaves nothing in the profile, an uninstall takes it all
-                env["UV_CACHE_DIR"] = Cache;
-                env["UV_PYTHON_INSTALL_DIR"] = Path.Combine(home.Runtime, "python");
-                env["UV_PYTHON_PREFERENCE"] = "only-managed";
-            }
+            // the folders the drive settings name, unless the environment already says where; else everything in
+            // runtime\, whatever it says: a portable copy leaves nothing in the profile, an uninstall takes it all
+            // (deps.uv_env())
+            DriveSettings drive = home.Drive;
+            if (drive.UvCacheDir != null) SetDefault(env, "UV_CACHE_DIR", drive.UvCacheDir);
+            else env["UV_CACHE_DIR"] = Cache;
+            if (drive.UvPythonDir != null) SetDefault(env, "UV_PYTHON_INSTALL_DIR", drive.UvPythonDir);
+            else env["UV_PYTHON_INSTALL_DIR"] = Path.Combine(home.Runtime, "python");
+            if (drive.UvCacheDir == null && drive.UvPythonDir == null) env["UV_PYTHON_PREFERENCE"] = "only-managed";
+            else SetDefault(env, "UV_PYTHON_PREFERENCE", "only-managed");
             env["NO_COLOR"] = "1";
             env["UV_NO_PROGRESS"] = "1";
             if (systemCerts)
@@ -328,6 +327,15 @@ namespace IndiePulse
                 env["UV_SYSTEM_CERTS"] = "1";
                 env["UV_NATIVE_TLS"] = "1";
             }
+        }
+
+        // ApplyUvEnv on this process's own environment (--paths)
+        public IDictionary<string, string> UvEnvironment()
+        {
+            var env = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (DictionaryEntry e in Environment.GetEnvironmentVariables()) env[(string)e.Key] = (string)e.Value;
+            ApplyUvEnv(env, false);
+            return env;
         }
 
         static void SetDefault(IDictionary<string, string> env, string key, string value)

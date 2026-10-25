@@ -179,7 +179,9 @@ namespace IndiePulse
         static int Setup(Home home, Home installed, Options o, Log log)
         {
             bool update = installed != null && !Home.SamePath(installed.Dir, home.Dir);
-            bool carried = home.KitPresent || Drives.Removable(home.Dir);
+            bool carried = home.Drive.Portable || Drives.Removable(home.Dir);
+            // uv and the folder for Python from the drive settings: no download of either
+            bool driveUv = home.Drive.Uv != null && File.Exists(home.Drive.Uv) && home.Drive.UvPythonDir != null;
             var form = new SetupForm(log, "IndiePulse Setup", "Set up IndiePulse", "Version " + home.Version + " · " + Tagline);
             bool ok = false;
             Action finished = delegate
@@ -213,7 +215,7 @@ namespace IndiePulse
                     "for a USB drive.";
                 form.ShowChoice("How would you like to use IndiePulse?", installTitle, installText,
                     "Portable — run from this folder", portableText, carried && !update,
-                    (home.KitPresent ? "ClubKit is on this drive: its Python and uv are used. " :
+                    (driveUv ? "uv and Python come from this drive, as " + DriveSettings.FileName + " says. " :
                         "The first start downloads Python and the packages IndiePulse needs (about 70 MB): a few " +
                         "minutes. ") + "Nothing else is installed on the computer.", go);
             }
@@ -360,11 +362,12 @@ namespace IndiePulse
             {
                 Pair("home", Json(home.Dir)), Pair("root", Json(home.Root)), Pair("release", home.Release ? "true" : "false"),
                 Pair("runtime", Json(home.Runtime)), Pair("venv", Json(home.Venv)), Pair("data", Json(home.Data)),
-                Pair("kit", Json(home.Kit)), Pair("portable", home.Portable ? "true" : "false"),
+                Pair("drive_settings", DriveJson(home.Drive)), Pair("portable", home.Portable ? "true" : "false"),
                 Pair("installed_here", Installer.IsInstalledAt(home) ? "true" : "false"),
                 Pair("key", Json(home.Key)), Pair("version", Json(home.Version)),
                 Pair("requirements_hash", Json(stamp)), Pair("venv_alive", home.VenvAlive() ? "true" : "false"),
-                Pair("uv", Json(rt.Uv)), Pair("uv_cache", Json(rt.Cache)), Pair("plan", "[" + string.Join(", ", plan) + "]"),
+                Pair("uv", Json(rt.Uv)), Pair("uv_cache", Json(rt.Cache)), Pair("uv_env", UvEnv(rt)),
+                Pair("plan", "[" + string.Join(", ", plan) + "]"),
                 Pair("install_dir", Json(Folders.InstallDir)), Pair("desktop", Json(Folders.Desktop)),
                 Pair("start_menu", Json(Folders.StartMenuPrograms)), Pair("removable", Drives.Removable(home.Dir) ? "true" : "false"),
             };
@@ -373,6 +376,32 @@ namespace IndiePulse
         }
 
         static string Pair(string key, string value) { return Json(key) + ": " + value; }
+
+        // The ini found (null: none) and what it says, full paths (null: not set)
+        static string DriveJson(DriveSettings d)
+        {
+            return "{" + string.Join(", ", new[]
+            {
+                Pair("file", JsonOrNull(d.Ini)), Pair("portable", d.Portable ? "true" : "false"),
+                Pair("uv", JsonOrNull(d.Uv)), Pair("uv_cache_dir", JsonOrNull(d.UvCacheDir)),
+                Pair("uv_python_dir", JsonOrNull(d.UvPythonDir)), Pair("trusted_pcs", JsonOrNull(d.TrustedPcs)),
+            }) + "}";
+        }
+
+        // Where uv would keep its cache and Pythons, in this environment
+        static string UvEnv(Runtime rt)
+        {
+            IDictionary<string, string> env = rt.UvEnvironment();
+            var pairs = new List<string>();
+            foreach (string key in new[] { "UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_PREFERENCE" })
+            {
+                string value;
+                pairs.Add(Pair(key, env.TryGetValue(key, out value) ? Json(value) : "null"));
+            }
+            return "{" + string.Join(", ", pairs) + "}";
+        }
+
+        static string JsonOrNull(string s) { return s == null ? "null" : Json(s); }
 
         static string Json(string s)
         {

@@ -20,9 +20,9 @@ def no_steam_env(monkeypatch):
     monkeypatch.setattr(config, "STEAM_APP_ID", "")
 
 
-def test_clubkits_steam_app_id_is_not_indiepulses(monkeypatch):
-    """ClubKit puts STEAM_APP_ID in the Windows user environment for another game's Steam builds; IndiePulse read it
-    and its store-news export opened that game. Only its own INDIEPULSE_STEAM_APP_ID counts now."""
+def test_another_tools_steam_app_id_is_not_indiepulses(monkeypatch):
+    """Other tools put a plain STEAM_APP_ID in the Windows user environment (for another game's Steam builds);
+    IndiePulse read it and its store-news export opened that game. Only its own INDIEPULSE_STEAM_APP_ID counts now."""
     import importlib
     from app.core import config
     from app.services import steam_links

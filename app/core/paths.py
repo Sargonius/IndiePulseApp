@@ -15,7 +15,8 @@ can be replaced by an update without touching the data, and the data can live el
 
 - INDIEPULSE_DATA set: there (tests, a second instance);
 - a copy that has been running from its own folder (its DB or settings are there): that folder, nothing moves;
-- portable (portable.txt next to IndiePulse.exe, or ClubKit on the drive): data\\ next to IndiePulse.exe;
+- portable (portable.txt next to IndiePulse.exe, or `portable = yes` in the drive settings, DRIVE): data\\ next to
+  IndiePulse.exe;
 - installed: %LOCALAPPDATA%\\IndiePulse.
 
 Also: paths saved on one computer, read on another. The drive IndiePulse is on goes from computer to computer and
@@ -26,10 +27,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from app.core import drive_settings
+
 ROOT = Path(__file__).resolve().parents[2]
 # lib\ of a release (a checkout that happens to be called lib has its .git)
 HOME = ROOT.parent if ROOT.name.lower() == "lib" and not (ROOT / ".git").exists() else ROOT
 RUNTIME = HOME / "runtime"
+# IndiePulse.portable.ini next to IndiePulse.exe or in the root of its drive: portable, its uv and uv's folders, the
+# trusted computers (app/core/drive_settings.py)
+DRIVE = drive_settings.load(HOME)
 TEMPLATES_DIR = str(ROOT / "app" / "templates")
 
 
@@ -44,7 +50,7 @@ def _data_dir() -> Path:
 		return Path(env).resolve()
 	if (ROOT / "indiepulse.db").exists() or (ROOT / ".settings.json").exists():
 		return ROOT
-	if (HOME / "portable.txt").exists() or (Path(HOME.anchor) / "ClubKit").is_dir():
+	if (HOME / "portable.txt").exists() or DRIVE.portable:
 		return HOME / "data"
 	local = os.getenv("LOCALAPPDATA")
 	return Path(local) / "IndiePulse" if local else HOME / "data"
