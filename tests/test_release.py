@@ -105,7 +105,9 @@ def test_zip_has_what_runs_and_nothing_else(repo, tmp_path, exe):
     assert m["sha256"] == hashlib.sha256(data).hexdigest() and m["size"] == len(data)
     assert m["notes"] == "Calendar is faster\n\n- and the Shorts board is fixed"
     assert m["published_at"] == "2026-10-24T12:00:00Z"
-    assert m["sha256"] in (out / "notes.md").read_text(encoding="utf-8")
+    page = (out / "notes.md").read_text(encoding="utf-8")
+    assert m["sha256"] in page
+    assert "[Code signing policy](https://github.com/me/IndiePulse#code-signing-policy)" in page  # SignPath's rule
 
 
 @needs_git

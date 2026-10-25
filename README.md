@@ -4,6 +4,7 @@ Local-first Windows app to write, schedule and cross-post news posts and short v
 (Telegram, Discord, VK, X, YouTube, Facebook, Instagram Reels, Reddit, TikTok, Bluesky).
 Free and open source (MIT); donations welcome: [paypal.me/sargoniusgames](https://paypal.me/sargoniusgames).
 Questions, bugs, ideas: the [IndiePulse Discord](https://discord.gg/uYHm3aU2W4).
+[Code signing policy](#code-signing-policy) · [Privacy policy](#privacy-policy)
 
 ## Install / update
 
@@ -304,6 +305,44 @@ the 💬 link at the bottom of every page. A bug report goes faster with what yo
 IndiePulse is free (MIT license, see `LICENSE`). If it saves you time, you can support it with a donation:
 [paypal.me/sargoniusgames](https://paypal.me/sargoniusgames) — also the ❤ link at the bottom of every page and the
 Sponsor button on GitHub.
+
+
+## Code signing policy
+
+Free code signing for the Windows builds is provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/). *(Applied for; until it is granted, `IndiePulse.exe` is unsigned and
+Windows SmartScreen asks once — More info → Run anyway.)*
+
+**What is signed:** `IndiePulse.exe` in the release zip, and only that: built from this repository by GitHub Actions
+(`.github/workflows/release.yml`) from the commit a `v*` release tag points to. Nothing built anywhere else, and no
+third-party program, is signed under this policy. The rest of the zip is IndiePulse's own Python source. What the first
+start downloads comes from its official sources: uv (its GitHub release, checked against a SHA-256 pinned in the
+launcher), Python (uv's own builds, which uv checks) and the packages (PyPI, at the versions pinned in
+`requirements.lock`).
+
+**Team roles:**
+
+- Committers and reviewers: [Evgeny Nesterovskiy (@Sargonius)](https://github.com/Sargonius)
+- Approvers: [Evgeny Nesterovskiy (@Sargonius)](https://github.com/Sargonius)
+
+A change from anyone else is reviewed before it is merged, and every signing request is approved by hand.
+
+
+## Privacy policy
+
+This program will not transfer any information to other networked systems unless specifically requested by the user
+or the person installing or operating it.
+
+What that means in practice: IndiePulse runs on your computer and sends nothing to its developers — no analytics,
+telemetry or crash reports. Your posts, settings, keys and tokens stay in its data folder. It connects only to:
+
+- the services you connect or use in it (Telegram, Discord, VK, X, YouTube, Facebook, Instagram, Reddit, TikTok,
+  Bluesky, Steam and the like), with your own accounts and keys, to do what you ask;
+- the AI and translation providers whose keys you enter (OpenAI, Anthropic, DeepL, Google Translate);
+- GitHub, to check for updates (⚙️ Settings → Updates → *Don't check* turns that off) and to download one;
+- at the first start, the sources above for uv, Python and the packages.
+
+Each of those services has its own privacy policy, which applies to what you send it.
 
 
 ## Facebook API setup (Page posting)

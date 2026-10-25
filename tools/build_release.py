@@ -144,7 +144,10 @@ def build(tag: str, out: Path, *, repo: str, notes: str, exe: Path, root: Path =
 		"published_at": published_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
 	}
 	(out / "latest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-	(out / "notes.md").write_text(f"{notes}\n\nSHA-256 of {name}: `{sha}`\n", encoding="utf-8")
+	# SignPath Foundation wants the code signing policy named on the download page too
+	(out / "notes.md").write_text(f"{notes}\n\nSHA-256 of {name}: `{sha}`\n\n"
+								  f"[Code signing policy](https://github.com/{repo}#code-signing-policy) · "
+								  f"[Privacy policy](https://github.com/{repo}#privacy-policy)\n", encoding="utf-8")
 	return manifest
 
 
