@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 namespace IndiePulse
 {
     // One IndiePulse folder and what follows from it. The answers are the same as the Python side's
-    // (app/core/paths.py: HOME, ROOT, RUNTIME, DATA; app/desktop/deps.py: the venv, its stamp) - a change
+    // (app/core/paths.py: HOME, ROOT, RUNTIME, DATA, DRIVE; app/desktop/deps.py: the venv, its stamp) - a change
     // there is a change here, and tests/test_launcher.py compares the two.
     sealed class Home
     {
@@ -25,8 +25,9 @@ namespace IndiePulse
         public readonly string Runtime;
         // the venv: runtime\venv of a release (lib\ is replaced whole by an update), .venv of a checkout
         public readonly string Venv;
-        // ClubKit, the owner's kit in the root of the drive: its uv, its Pythons, its trusted computers
-        public readonly string Kit;
+        // IndiePulse.portable.ini next to the exe or in the root of its drive: portable, the uv to use and uv's
+        // folders (DriveSettings.cs)
+        public readonly DriveSettings Drive;
 
         // The layout as the folder has it (lib\app\ there: a release)
         public Home(string dir) : this(dir, File.Exists(Path.Combine(Normalize(dir), "lib", "app", "__init__.py"))) { }
@@ -39,7 +40,7 @@ namespace IndiePulse
             Root = Release ? Path.Combine(Dir, "lib") : Dir;
             Runtime = Path.Combine(Dir, "runtime");
             Venv = Release ? Path.Combine(Runtime, "venv") : Path.Combine(Root, ".venv");
-            Kit = Path.Combine(Path.GetPathRoot(Dir), "ClubKit");
+            Drive = DriveSettings.For(Dir);
         }
 
         public static Home OfThisExe()
@@ -49,11 +50,10 @@ namespace IndiePulse
 
         public string Exe { get { return Path.Combine(Dir, ExeName); } }
         public bool HasCode { get { return File.Exists(Path.Combine(Root, "app", "__init__.py")); } }
-        public bool KitPresent { get { return Directory.Exists(Kit); } }
         public string PortableMarker { get { return Path.Combine(Dir, "portable.txt"); } }
 
-        // Portable: portable.txt (the setup's choice) or ClubKit on the drive - data\ next to the exe
-        public bool Portable { get { return File.Exists(PortableMarker) || KitPresent; } }
+        // Portable: portable.txt (the setup's choice) or `portable = yes` in the drive settings - data\ next to the exe
+        public bool Portable { get { return File.Exists(PortableMarker) || Drive.Portable; } }
 
         // DATA, the same rules as paths._data_dir()
         public string Data

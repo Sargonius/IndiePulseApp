@@ -12,7 +12,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Callable
 
-from app.desktop import HOME, KIT, PORTABLE_MARKER, ROOT
+from app.desktop import DRIVE, HOME, PORTABLE_MARKER, ROOT
 from app.desktop.apply_update import instance_key
 
 _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -211,15 +211,14 @@ def _machine_id() -> str:
 
 
 def trusted_pc() -> bool:
-	"""IndiePulse may leave things on this computer — shortcuts, the autostart entry. With ClubKit on the drive: only
-	when its list of trusted computers has this one; its lines are «NAME|MachineGuid», checked by the GUID as ClubKit
-	does (a club computer may well have the home one's name). Without ClubKit: an installed copy or a checkout may, a
+	"""IndiePulse may leave things on this computer — shortcuts, the autostart entry. With trusted_pcs in the drive
+	settings (IndiePulse.portable.ini): only when that list has this one; its lines are «NAME|MachineGuid», checked by
+	the GUID (a club computer may well have the home one's name). Without: an installed copy or a checkout may, a
 	portable one (portable.txt: its setup promised to write nothing to the computer) may not."""
-	if not KIT.is_dir():
+	if not DRIVE.trusted_pcs:
 		return not PORTABLE_MARKER.exists()
-	listed = KIT / "data" / "trusted-pcs.txt"
 	try:
-		lines = listed.read_text(encoding="utf-8-sig").splitlines()
+		lines = DRIVE.trusted_pcs.read_text(encoding="utf-8-sig").splitlines()
 	except OSError:
 		return False
 	me = _machine_id().lower()

@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from app.core.paths import ROOT, RUNTIME, is_release_layout
-from app.desktop import KIT
+from app.desktop import DRIVE
 
 # A release keeps its venv in runtime\ (lib\, the code, is replaced whole by an update); a checkout has its .venv
 VENV = RUNTIME / "venv" if is_release_layout() else ROOT / ".venv"
@@ -64,10 +64,10 @@ def _repair_python(log_path: Path) -> bool:
 
 
 def uv() -> str | None:
-	"""The uv IndiePulse.exe uses: ClubKit's own copy on the drive, else the one it put in runtime\\ — else uv from PATH
-	(a checkout). No Python needs to be installed on the computer with any of them."""
-	for candidate in (KIT / "tools" / "uv" / "uv.exe", RUNTIME / "uv" / "uv.exe"):
-		if candidate.is_file():
+	"""The uv IndiePulse.exe uses: the one the drive settings name (`uv`), else the one it put in runtime\\ — else uv
+	from PATH (a checkout). No Python needs to be installed on the computer with any of them."""
+	for candidate in (DRIVE.uv, RUNTIME / "uv" / "uv.exe"):
+		if candidate and candidate.is_file():
 			return str(candidate)
 	return shutil.which("uv")
 
@@ -88,8 +88,9 @@ def uv_cache() -> Path:
 
 def _drop_temp_cache() -> None:
 	"""uv_cache()'s short one in %TEMP%, once a step that may have used it is done: the venv has what it needs (a copy
-	or a hard link of each file), and nothing of a portable copy stays on the computer."""
-	if KIT.is_dir() or not RUNTIME.is_dir():
+	or a hard link of each file), and nothing of a portable copy stays on the computer. Not with a uv cache of the drive
+	settings: uv_env() doesn't use this one then."""
+	if DRIVE.uv_cache_dir or not RUNTIME.is_dir():
 		return
 	cache = uv_cache()
 	if RUNTIME not in cache.parents:
@@ -97,18 +98,23 @@ def _drop_temp_cache() -> None:
 
 
 def uv_env() -> dict[str, str]:
-	"""Where uv keeps its cache and Pythons. ClubKit: on the drive (not in the profile of a computer it will leave), and
-	only those — a venv made on one computer then runs on the next, if the drive has the same letter there; the same
-	three as ClubKit's Get-UvEnvironment. Else, when IndiePulse.exe has made a runtime\\: in it, so a portable copy
-	leaves nothing in the profile and an uninstall takes it all. The same as IndiePulse.exe's (launcher/Runtime.cs)."""
+	"""Where uv keeps its cache and Pythons. The folders the drive settings name (uv_cache_dir, uv_python_dir), unless
+	the environment already says where: on the drive, not in the profile of a computer it will leave — a venv made on
+	one computer then runs on the next, if the drive has the same letter there. Else, when IndiePulse.exe has made a
+	runtime\\: in it, whatever the environment says, so a portable copy leaves nothing in the profile and an uninstall
+	takes it all. The same as IndiePulse.exe's (launcher/Runtime.cs)."""
 	env = dict(os.environ)
-	if KIT.is_dir():
-		env.setdefault("UV_CACHE_DIR", str(KIT / "data" / "uv" / "cache"))
-		env.setdefault("UV_PYTHON_INSTALL_DIR", str(KIT / "data" / "uv" / "python"))
-		env.setdefault("UV_PYTHON_PREFERENCE", "only-managed")
+	if DRIVE.uv_cache_dir:
+		env.setdefault("UV_CACHE_DIR", str(DRIVE.uv_cache_dir))
 	elif RUNTIME.is_dir():
 		env["UV_CACHE_DIR"] = str(uv_cache())
+	if DRIVE.uv_python_dir:
+		env.setdefault("UV_PYTHON_INSTALL_DIR", str(DRIVE.uv_python_dir))
+	elif RUNTIME.is_dir():
 		env["UV_PYTHON_INSTALL_DIR"] = str(RUNTIME / "python")
+	if DRIVE.uv_cache_dir or DRIVE.uv_python_dir:
+		env.setdefault("UV_PYTHON_PREFERENCE", "only-managed")
+	elif RUNTIME.is_dir():
 		env["UV_PYTHON_PREFERENCE"] = "only-managed"
 	return env
 
@@ -156,8 +162,8 @@ def install_requirements(log_path: Path) -> bool:
 
 def ensure_venv(log_path: Path) -> bool:
 	"""A venv that runs here: made anew when there is none or it came from another computer. With uv it is made on
-	uv's Python (ClubKit's on the drive, or the runtime's; installed the first time), otherwise on the Python running
-	this."""
+	uv's Python (in the drive settings' uv_python_dir, or the runtime's; installed the first time), otherwise on the
+	Python running this."""
 	if venv_alive():
 		return True
 	home = _venv_home()

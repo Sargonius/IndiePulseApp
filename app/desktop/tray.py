@@ -17,7 +17,7 @@ import threading
 import time
 
 from app.core.paths import enter_data_dir
-from app.desktop import DATA, KIT, ROOT, is_release_layout
+from app.desktop import DATA, DRIVE, ROOT, is_release_layout
 
 enter_data_dir()
 
@@ -36,6 +36,13 @@ ICO_PATH = ROOT / "app" / "static" / "indiepulse.ico"
 # The shortcuts the tray made itself, and for which command (winapi.refresh_shortcuts); in the venv: a new computer's
 # new venv makes them again
 _SHORTCUTS_MARKER = deps.VENV / "indiepulse-shortcuts"
+
+
+def _first_run_shortcuts(trusted: bool) -> bool:
+	"""The first run on a computer makes shortcuts, like an installed program: on a computer of the drive settings'
+	trusted_pcs, or for a checkout. A release's own Install made them already, and its Portable promised to leave
+	nothing."""
+	return not _SHORTCUTS_MARKER.exists() and trusted and (DRIVE.trusted_pcs is not None or not is_release_layout())
 
 
 def _local_host() -> str:
@@ -188,9 +195,7 @@ def run(background: bool) -> None:
 		threading.Thread(target=youtube_watch, name="youtube-reminder", daemon=True).start()
 		updater.start()
 		_refresh_traces(trusted)
-		# First run on a computer: shortcuts, like an installed program — on a trusted computer of ClubKit's, or for a
-		# checkout. A release's own Install made them already, and its Portable promised to leave nothing.
-		if not _SHORTCUTS_MARKER.exists() and trusted and (KIT.is_dir() or not is_release_layout()):
+		if _first_run_shortcuts(trusted):
 			make_shortcuts()
 
 	logger.info(f"IndiePulse tray starting ({url}, background={background})")
@@ -207,6 +212,10 @@ def main(argv: list[str] | None = None) -> None:
 	logger.remove()  # pythonw has no stdout
 	logger.add(DATA / "logs" / "launcher.log", rotation="2 MB", retention=3, encoding="utf-8",
 			   format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level:<7} | {message}")
+	if DRIVE.file:
+		logger.info(f"drive settings: {DRIVE.file}")
+	for problem in DRIVE.problems:
+		logger.warning(f"{DRIVE.file}: {problem}")
 	try:
 		run(args.background)
 	except Exception as exc:

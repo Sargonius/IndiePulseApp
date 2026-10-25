@@ -18,7 +18,8 @@ Free and open source (MIT); donations welcome: [paypal.me/sargoniusgames](https:
    - **Portable — run from this folder** — writes nothing to the computer: no shortcuts, no registry entries, no
      autostart (the tray menu doesn't offer them). Everything — the app, its Python, your data — stays in the
      `IndiePulse` folder (`data\` next to the exe; the choice is remembered by a `portable.txt` there), so the folder
-     can live on a USB drive and be moved as a whole. Preselected when the folder is on a removable or USB drive.
+     can live on a USB drive and be moved as a whole. Preselected when the folder is on a removable or USB drive, or
+     the drive's `IndiePulse.portable.ini` says `portable = yes` (*From a drive, on several computers* below).
 4. The same window then gets IndiePulse ready, step by step with a progress bar: [uv](https://docs.astral.sh/uv/)
    (a pinned release from GitHub, checked against its SHA-256), Python 3.12 from uv, a Python environment and the
    packages of `requirements.lock` — about 70 MB to download, 250–300 MB on disk, a few minutes, nothing installed
@@ -43,7 +44,7 @@ the folder.
 **Command line** (what the shortcuts, the autostart entry and scripts use): `IndiePulse.exe --background` starts
 without opening the window (*Start at Windows sign-in*); `--install` / `--portable` set it up without asking;
 `--uninstall --quiet [--delete-data]` removes it without questions; `--paths <file>` writes what it found (folders,
-the state of its Python) as JSON.
+the drive settings, the state of its Python) as JSON.
 
 **Updates.** IndiePulse looks at the releases 30 seconds after it starts and then every 6 hours. When there is a newer
 version, every page shows *IndiePulse vX is available — What's new · Install*, and the tray shows a balloon and an
@@ -97,7 +98,7 @@ There are no console windows: IndiePulse lives in the tray. The icon runs two pr
 the web server and the Huey worker (the one that actually publishes; scheduled posts don't
 go out without it) — and its colour shows their state: green ok, amber starting/restarting,
 red broken (hover or open the menu for details). Tray menu: open IndiePulse, restart, logs folder,
-check for updates, start with Windows, create shortcuts (installed copies, and trusted computers of ClubKit),
+check for updates, start with Windows, create shortcuts (installed copies, and a drive's trusted computers, see below),
 **Quit** (stops both — the worker finishes the task in progress first — and closes the window).
 
 - Starting `IndiePulse.exe` again while it runs brings up its window.
@@ -110,17 +111,44 @@ check for updates, start with Windows, create shortcuts (installed copies, and t
   `.prev.log` of the previous run), `logs/app.log` (the app itself).
 - Dev: `python -m app.serve` / `python -m app.worker` still run standalone in a console.
 
-**From the drive on different computers (ClubKit).** With ClubKit in the root of IndiePulse's drive, IndiePulse is
-portable there and takes ClubKit's uv, and keeps the Pythons and uv's cache in `ClubKit\data\uv` — on the drive, not in
-the profile of a computer it will leave. A Python environment made on another computer (its Python in another user's
-profile, or on the drive under another letter) is recognised by `pyvenv.cfg` and made again; with uv's cache on the
-drive that takes seconds, and on any computer where the drive gets the same letter it just works. Shortcuts and the
-"Start at Windows sign-in" item exist only on a trusted computer (`ClubKit\data\trusted-pcs.txt`) — a club computer
-gets nothing left behind. Paths saved where the drive had another letter (`E:\Music` in the settings, music of
-presets and clips) are found under this one. Scheduled posts go out only while IndiePulse runs: one that is more than
-2 hours late (the drive was unplugged) isn't published on the next start but marked `missed_schedule` — Retry
-publishes it. Dependencies: `requirements.txt` says what the app needs, `requirements.lock` the exact tested versions
-(what gets installed; regenerate it after editing `requirements.txt`, see its header).
+**From a drive, on several computers.** A portable copy keeps its data in `data\` next to `IndiePulse.exe`, so the
+whole folder can be carried on a USB or external drive. An optional **`IndiePulse.portable.ini`** tells IndiePulse
+more about that drive; it is looked for next to `IndiePulse.exe`, then in the root of its drive (the first one found
+counts). Lines of `key = value`, keys in any case, a line starting with `#` or `;` is a comment, UTF-8 with or without
+a BOM; an unknown key is left out (and noted in `logs\launcher.log`). Every key is optional:
+
+- `portable = yes` (or `no`): the copy is portable, as with `portable.txt`, and the setup preselects Portable.
+- `uv = <uv.exe>`: the [uv](https://docs.astral.sh/uv/) to use instead of downloading one into `runtime\uv`.
+- `uv_cache_dir = <folder>`, `uv_python_dir = <folder>`: where uv keeps its cache and its Pythons, instead of
+  `runtime\` (`UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` already in the environment win) — on the drive, not in the
+  profile of a computer it will leave.
+- `trusted_pcs = <file>`: the computers that may get shortcuts and the "Start at Windows sign-in" item, one
+  `NAME|MachineGuid` line each (the `MachineGuid` of `HKLM\SOFTWARE\Microsoft\Cryptography` is what counts, as a club
+  computer may have the name of the one at home). With it, any other computer gets nothing left behind, and a listed
+  one gets its shortcuts on the first run; without it, installed copies and checkouts may have them, portable ones
+  not.
+
+A path that starts with `\` is from the root of the drive the ini is on, whatever letter that drive has today; any
+other relative path is from the ini's folder; `X:\…` is as written; `%VARIABLES%` are expanded. For example, with
+uv and a few tools of your own in `Tools\` on the drive, `IndiePulse.portable.ini` in the drive's root:
+
+```ini
+# IndiePulse, carried on this drive
+portable = yes
+uv = \Tools\uv\uv.exe
+uv_cache_dir = \Tools\uv\cache
+uv_python_dir = \Tools\uv\python
+trusted_pcs = \Tools\trusted-pcs.txt
+```
+
+A Python environment made on another computer (its Python in another user's profile, or on the drive under another
+letter) is recognised by `pyvenv.cfg` and made again; with uv's cache on the drive that takes seconds, and on any
+computer where the drive gets the same letter it just works. Paths saved where the drive had another letter
+(`E:\Music` in the settings, music of presets and clips) are found under this one. Scheduled posts go out only while
+IndiePulse runs: one that is more than 2 hours late (the drive was unplugged) isn't published on the next start but
+marked `missed_schedule` — Retry publishes it. Dependencies: `requirements.txt` says what the app needs,
+`requirements.lock` the exact tested versions (what gets installed; regenerate it after editing `requirements.txt`,
+see its header).
 
 ## Modules
 
