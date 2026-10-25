@@ -71,8 +71,33 @@ namespace IndiePulse
         }
 
         public string Logs { get { return Path.Combine(Data, "logs"); } }
-        // the app window's own browser profile (app/desktop/window.py)
+        // the app window's own browser profile (app/desktop/window.py): browser\ is Edge's, another browser's is
+        // browser-<its exe> next to it (browser-chrome)
         public string BrowserProfile { get { return Path.Combine(Data, "browser"); } }
+
+        // A browser's command line with --user-data-dir= one of the window's profiles, whichever browser (one left from
+        // before the default browser changed too): window.is_profile()
+        public bool UsesBrowserProfile(string commandLine)
+        {
+            if (string.IsNullOrEmpty(commandLine)) return false;
+            // "--user-data-dir=C:\a b\browser" and --user-data-dir="C:\a b\browser" alike
+            string cmd = commandLine.Replace("\"", "");
+            string needle = "--user-data-dir=" + BrowserProfile;
+            int at = cmd.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+            while (at >= 0)
+            {
+                int end = at + needle.Length;
+                if (end == cmd.Length || char.IsWhiteSpace(cmd[end])) return true;
+                if (cmd[end] == '-')
+                {
+                    int stop = end + 1;
+                    while (stop < cmd.Length && !char.IsWhiteSpace(cmd[stop]) && cmd[stop] != '\\' && cmd[stop] != '/') stop++;
+                    if (stop > end + 1 && (stop == cmd.Length || char.IsWhiteSpace(cmd[stop]))) return true;
+                }
+                at = cmd.IndexOf(needle, end, StringComparison.OrdinalIgnoreCase);
+            }
+            return false;
+        }
 
         public string Version
         {
