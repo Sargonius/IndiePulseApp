@@ -3,6 +3,7 @@
 Local-first Windows app to write, schedule and cross-post news posts and short videos
 (Telegram, Discord, VK, X, YouTube, Facebook, Instagram Reels, Reddit, TikTok, Bluesky).
 Free and open source (MIT); donations welcome: [paypal.me/sargoniusgames](https://paypal.me/sargoniusgames).
+Questions, bugs, ideas: the [IndiePulse Discord](https://discord.gg/uYHm3aU2W4).
 
 ## Install / update
 
@@ -295,7 +296,11 @@ sources or `.github`. Installed copies see it at their next check (Install / upd
 A broken release: release a fixed, higher version. Installs that took the broken one went back by themselves only if
 it didn't start; the others update to the fix at their next check.
 
-## Support and license
+## Feedback, support and license
+Found a bug, stuck, or missing something? Tell us on the [IndiePulse Discord](https://discord.gg/uYHm3aU2W4) — also
+the 💬 link at the bottom of every page. A bug report goes faster with what you did, what happened, and
+`logs\launcher.log` / `logs\server.log` from the data folder (tray icon → Open logs folder).
+
 IndiePulse is free (MIT license, see `LICENSE`). If it saves you time, you can support it with a donation:
 [paypal.me/sargoniusgames](https://paypal.me/sargoniusgames) — also the ❤ link at the bottom of every page and the
 Sponsor button on GitHub.
