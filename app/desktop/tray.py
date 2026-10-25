@@ -121,6 +121,7 @@ def run(background: bool) -> None:
 		icon.update_menu()
 
 	def make_shortcuts() -> None:
+		"""The menu's: this copy's shortcuts, whatever the ones there started."""
 		try:
 			winapi.create_shortcuts(ensure_ico(ICO_PATH))
 			_SHORTCUTS_MARKER.write_text(winapi.shortcuts_stamp(), encoding="utf-8")
@@ -128,6 +129,23 @@ def run(background: bool) -> None:
 		except Exception:
 			logger.exception("shortcut creation failed")
 			notify("Couldn’t create shortcuts (logs\\launcher.log).")
+
+	def first_run_shortcuts() -> None:
+		"""The first run's: not over shortcuts that start another IndiePulse that is there (a second copy on the drive,
+		a test one) — those stay, and this copy's own are a click in the menu."""
+		try:
+			free, taken = winapi.free_shortcut_paths(winapi.shortcut_paths())
+			if free:
+				winapi.create_shortcuts(ensure_ico(ICO_PATH), free)
+			_SHORTCUTS_MARKER.write_text(winapi.shortcuts_stamp(), encoding="utf-8")
+			for path, target in taken.items():
+				logger.info(f"shortcut left as it is, it starts another IndiePulse: {path} → {target}")
+			if taken:
+				notify("Shortcuts of another IndiePulse left as they are. This one’s own: “Create shortcuts” in this menu.")
+			elif free:
+				notify("IndiePulse shortcuts created on the desktop and in the Start menu.")
+		except Exception:
+			logger.exception("shortcut creation failed")
 
 	def quit_app() -> None:
 		window.close_windows()
@@ -196,7 +214,7 @@ def run(background: bool) -> None:
 		updater.start()
 		_refresh_traces(trusted)
 		if _first_run_shortcuts(trusted):
-			make_shortcuts()
+			first_run_shortcuts()
 
 	logger.info(f"IndiePulse tray starting ({url}, background={background})")
 	icon.run(setup=setup)

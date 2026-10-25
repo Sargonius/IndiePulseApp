@@ -252,6 +252,39 @@ def create_shortcuts(icon_path: Path, paths: list[Path] | None = None) -> list[P
 	return paths
 
 
+def shortcut_targets(paths: list[Path]) -> dict[Path, str]:
+	"""The program each shortcut of `paths` that is there starts ("" when it starts none)."""
+	there = [p for p in paths if p.exists()]
+	if not there:
+		return {}
+	q = lambda s: str(s).replace("'", "''")  # noqa: E731  (PowerShell single-quote escape)
+	script = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8\n$sh = New-Object -ComObject WScript.Shell\n" +
+			  "".join(f"'>' + $sh.CreateShortcut('{q(p)}').TargetPath\n" for p in there))
+	out = subprocess.check_output(["powershell", "-NoProfile", "-Command", script], creationflags=CREATE_NO_WINDOW,
+								  text=True, encoding="utf-8")
+	targets = [line[1:].strip() for line in out.splitlines() if line.startswith(">")]
+	return dict(zip(there, targets))
+
+
+def _inside(path: str, folder: Path) -> bool:
+	p, f = (os.path.normcase(os.path.abspath(str(x))).rstrip("\\/") for x in (path, folder))
+	return p == f or p.startswith(f + "\\")
+
+
+def _starts_another_copy(target: str) -> bool:
+	"""A shortcut's program that isn't this copy's (its IndiePulse.exe, or its venv's pythonw of before) and is there:
+	another IndiePulse folder on the drive (a second copy, a test one) — not one gone, or under another day's drive
+	letter."""
+	return bool(target) and not (_inside(target, HOME) or _inside(target, ROOT)) and Path(target).exists()
+
+
+def free_shortcut_paths(paths: list[Path]) -> tuple[list[Path], dict[Path, str]]:
+	"""`paths` split into those this copy may make or overwrite and those that start another copy ({path: its
+	program}), which a run of its own doesn't take over."""
+	taken = {p: t for p, t in shortcut_targets(paths).items() if _starts_another_copy(t)}
+	return [p for p in paths if p not in taken], taken
+
+
 def shortcuts_stamp() -> str:
 	"""What the tray's shortcut marker keeps: the command its shortcuts were made for."""
 	return _command_line()
@@ -259,14 +292,15 @@ def shortcuts_stamp() -> str:
 
 def refresh_shortcuts(marker: Path, icon_path: Path) -> list[Path]:
 	"""Shortcuts the tray made for an older way of starting (the marker says which) are made again, those that are
-	still there: after IndiePulse.pyw gave way to IndiePulse.exe, or the exe got built in a checkout."""
+	still there and don't start another copy now: after IndiePulse.pyw gave way to IndiePulse.exe, or the exe got
+	built in a checkout."""
 	try:
 		made_for = marker.read_text(encoding="utf-8").strip()
 	except OSError:
 		return []
 	if made_for == shortcuts_stamp():
 		return []
-	there = [p for p in shortcut_paths() if p.exists()]
+	there = free_shortcut_paths([p for p in shortcut_paths() if p.exists()])[0]
 	if there:
 		create_shortcuts(icon_path, there)
 	marker.write_text(shortcuts_stamp(), encoding="utf-8")

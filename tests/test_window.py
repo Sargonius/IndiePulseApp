@@ -136,9 +136,35 @@ def test_what_an_older_indiepulse_left_starts_the_exe_now(monkeypatch, tmp_path)
     marker = tmp_path / "indiepulse-shortcuts"
     assert winapi.refresh_shortcuts(marker, tmp_path / "x.ico") == []  # no marker: the tray never made any
     marker.write_text("", encoding="utf-8")  # an older tray's marker: empty
+    monkeypatch.setattr(winapi, "shortcut_targets", lambda paths: {p: str(tmp_path / "IndiePulse.pyw") for p in paths})
     assert winapi.refresh_shortcuts(marker, tmp_path / "x.ico") == [desktop] and made == [[desktop]]
     assert marker.read_text(encoding="utf-8") == winapi.shortcuts_stamp()
     assert winapi.refresh_shortcuts(marker, tmp_path / "x.ico") == []
+
+
+def test_shortcuts_of_another_copy_stay(tmp_path, monkeypatch):
+    """A second copy on the drive (a test one) doesn't take over the shortcuts of the one that is there: a run of its
+    own leaves them; one whose program is gone (or under another day's drive letter), or this copy's, it may make."""
+    home = tmp_path / "IndiePulse"
+    other = tmp_path / "IndiePulse-test"  # its name starts like this copy's: a folder, not a string prefix
+    for d in (home, other):
+        d.mkdir()
+        (d / "IndiePulse.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(winapi, "HOME", home)
+    monkeypatch.setattr(winapi, "ROOT", home)
+    desktop, start, music = (tmp_path / n for n in ("desktop.lnk", "start.lnk", "music.lnk"))
+    for p in (desktop, start):
+        p.write_bytes(b"lnk")
+    targets = {desktop: str(other / "IndiePulse.exe"), start: str(home / "IndiePulse.exe")}
+    monkeypatch.setattr(winapi, "shortcut_targets", lambda paths: {p: targets[p] for p in paths if p in targets})
+
+    free, taken = winapi.free_shortcut_paths([desktop, start, music])
+    assert free == [start, music] and taken == {desktop: str(other / "IndiePulse.exe")}
+
+    targets[desktop] = r"Q:\Gone\IndiePulse\IndiePulse.exe"  # that copy is gone (or the drive had another letter)
+    assert winapi.free_shortcut_paths([desktop])[0] == [desktop]
+    targets[desktop] = str(home / ".venv" / "Scripts" / "pythonw.exe")  # this copy's, the old way: its own
+    assert winapi.free_shortcut_paths([desktop])[0] == [desktop]
 
 
 def test_the_uninstall_entry_follows_the_version(monkeypatch):
